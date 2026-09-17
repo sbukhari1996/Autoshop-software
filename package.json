@@ -1,0 +1,19 @@
+{
+  "name": "collision-shop-local",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace apps/api",
+    "dev:web": "npm run dev --workspace apps/frontend",
+    "dev": "npm-run-all -p dev:api dev:web",
+    "build": "npm run build --workspace apps/api && npm run build --workspace apps/frontend",
+    "db:generate": "npm run db:generate --workspace apps/api",
+    "db:migrate": "npm run db:migrate --workspace apps/api"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.3.1"
+  }
+}
