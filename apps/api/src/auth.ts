@@ -72,6 +72,18 @@ export async function readAuthToken(token: string): Promise<TokenPayload | null>
   return token.split('.').length === 3 ? readExternalToken(token) : readToken(token);
 }
 
+export async function readNeonSession(token: string): Promise<{ id: string; email: string; name: string } | null> {
+  const authUrl = process.env.NEON_AUTH_URL?.replace(/\/$/, '');
+  if (!authUrl) return null;
+  try {
+    const response = await fetch(`${authUrl}/get-session`, { headers: { Authorization: `Bearer ${token}`, Cookie: `better-auth.session_token=${token}` } });
+    const body = await response.json().catch(() => null) as { user?: { id?: string; email?: string; name?: string }; session?: { user?: { id?: string; email?: string; name?: string } } } | null;
+    const user = body?.user || body?.session?.user;
+    if (!response.ok || !user?.id || !user.email) return null;
+    return { id: String(user.id), email: user.email.toLowerCase(), name: user.name || user.email.split('@')[0] };
+  } catch { return null; }
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.header('authorization');
   const payload = header?.startsWith('Bearer ') ? await readAuthToken(header.slice(7)) : null;

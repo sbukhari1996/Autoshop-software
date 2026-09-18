@@ -217,6 +217,7 @@ type FinanceData = { entries: FinanceEntry[]; recurring: RecurringExpense[]; sum
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 const NEON_AUTH_URL = import.meta.env.VITE_NEON_AUTH_URL || "";
+const REPAIROS_LOGO_URL = "https://raw.githubusercontent.com/ChanMeng666/automotive-repair-management-system/main/app/static/images/RepairOS-logo.svg";
 const DEFAULT_ORGANIZATION = "Mastercraft Auto Repair & Collision";
 const navItems: Array<{ label: View; icon: string }> = [
   { label: "Dashboard", icon: "grid" },
@@ -276,6 +277,29 @@ async function fetchJson<T>(
   return result;
 }
 
+async function neonRequest(path: string, options: RequestInit = {}) {
+  const response = await fetch(`${NEON_AUTH_URL.replace(/\/$/, "")}${path}`, { ...options, credentials: "include", headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(body?.message || body?.error || `Neon Auth request failed (HTTP ${response.status})`);
+  return body as any;
+}
+
+async function finishNeonSession(sessionData: any) {
+  const findToken = (value: any): string | null => {
+    if (!value || typeof value !== "object") return null;
+    for (const key of ["token", "accessToken", "access_token", "sessionToken", "session_token"]) if (typeof value[key] === "string") return value[key];
+    for (const nested of Object.values(value)) { const token = findToken(nested); if (token) return token; }
+    return null;
+  };
+  const token = findToken(sessionData);
+  const user = sessionData?.user || sessionData?.data?.user || sessionData?.session?.user;
+  if (!token) throw new Error("Neon Auth did not return a session token.");
+  const response = await fetch(`${API_URL}/auth/neon-callback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, user }) });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.token) throw new Error(body.error || "Unable to connect Neon Auth to this workspace");
+  return body.token as string;
+}
+
 type Session = {
   user: { id: string; name: string; email: string; role: string };
   organizations: Array<{ id: string; name: string; slug: string; role: string }>;
@@ -288,7 +312,7 @@ function PublicLanding({ onGetStarted }: { onGetStarted: () => void }) {
     <div className="landing-shell">
       <header className="landing-nav">
         <div className="brand landing-brand">
-          <div className="brand-mark"><Icon name="wrench" /></div>
+          <img className="brand-logo" src={REPAIROS_LOGO_URL} alt="RepairOS" />
           <div><strong>Repair<span>OS</span></strong><small>by Mastercraft</small></div>
         </div>
         <button className="landing-signin" onClick={onGetStarted}>Sign in</button>
@@ -328,16 +352,47 @@ function AuthScreen({
   const [form, setForm] = React.useState({ name: "", email: "", password: "" });
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(false);
-  const [notice, setNotice] = React.useState("");
+  const [notice, setNotice] = React.useState(() => sessionStorage.getItem("repairos_auth_notice") || "");
+  React.useEffect(() => { sessionStorage.removeItem("repairos_auth_notice"); }, []);
   const openNeonAuth = () => {
-    if (NEON_AUTH_URL) window.location.href = NEON_AUTH_URL;
+    if (NEON_AUTH_URL) {
+      setLoading(true); setError("");
+      void neonRequest("/sign-in/social", { method: "POST", body: JSON.stringify({ provider: "google", callbackURL: window.location.origin }) })
+        .then((result) => { const redirectUrl = result?.url || result?.redirect || result?.data?.url || result?.data?.redirect; if (!redirectUrl) throw new Error("Neon Auth did not return a Google sign-in URL."); window.location.href = redirectUrl; })
+        .catch((authError) => setError(authError instanceof Error ? authError.message : "Unable to start Google sign-in"))
+        .finally(() => setLoading(false));
+    }
     else setNotice("Google sign-in is not configured for this local workspace.");
+  };
+  const requestPasswordReset = async () => {
+    if (!form.email) { setNotice("Enter your email address first, then choose Forgot password."); return; }
+    if (!NEON_AUTH_URL) { setNotice("Please contact your shop administrator to reset your password."); return; }
+    setLoading(true); setError(""); setNotice("");
+    try { await neonRequest("/forget-password/email", { method: "POST", body: JSON.stringify({ email: form.email }) }); setNotice("If that email is registered, Neon Auth sent password reset instructions."); }
+    catch (resetError) { setError(resetError instanceof Error ? resetError.message : "Unable to request password reset"); }
+    finally { setLoading(false); }
   };
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setLoading(true);
     setError("");
     try {
+      if (NEON_AUTH_URL) {
+        if (mode === "login") {
+          try {
+            const localResult = await fetchJson<{ token: string }>("/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: form.email, password: form.password }) });
+            localStorage.setItem("repairos_token", localResult.token); onAuthenticated(localResult.token); return;
+          } catch { }
+        }
+        try {
+          const neonResult = await neonRequest(mode === "login" ? "/sign-in/email" : "/sign-up/email", { method: "POST", body: JSON.stringify(mode === "login" ? { email: form.email, password: form.password } : { email: form.email, password: form.password, name: form.name }) });
+          const neonToken = neonResult?.token || neonResult?.session?.token || neonResult?.data?.token || neonResult?.data?.session?.token;
+          const result = await finishNeonSession(neonToken ? { ...neonResult, token: neonToken } : neonResult);
+          localStorage.setItem("repairos_token", result); onAuthenticated(result); return;
+        } catch (neonError) {
+          throw neonError;
+        }
+      }
       const result = await fetchJson<{ token: string }>(`/auth/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -359,9 +414,7 @@ function AuthScreen({
     <div className="auth-shell">
       <form className="auth-card" onSubmit={submit}>
         <div className="brand auth-brand">
-          <div className="brand-mark">
-            <Icon name="wrench" />
-          </div>
+          <img className="brand-logo auth-logo" src={REPAIROS_LOGO_URL} alt="RepairOS" />
           <div>
             <strong>
               Repair<span>OS</span>
@@ -426,7 +479,7 @@ function AuthScreen({
                   ? "Sign in"
                   : "Create account"}
             </button>
-        {mode === "login" && <button type="button" className="forgot-button" onClick={() => { setNotice(NEON_AUTH_URL ? "Continue with Google to reset your password through Neon Auth." : "Please contact your shop administrator to reset your password."); }}>Forgot password?</button>}
+        {mode === "login" && <button type="button" className="forgot-button" onClick={() => void requestPasswordReset()}>Forgot password?</button>}
         <button type="button" className="auth-back" onClick={onBack}>Back to overview</button>
       </form>
     </div>
@@ -447,7 +500,7 @@ function OrganizationSetup({ session, onSelected }: { session: Session; onSelect
     try { const result = await fetchJson<{ token: string }>("/auth/organizations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); localStorage.setItem("repairos_token", result.token); onSelected(result.token); }
     catch (createError) { setError(createError instanceof Error ? createError.message : "Unable to create organization"); } finally { setLoading(false); }
   }
-  return <div className="auth-shell setup-shell"><div className="setup-card"><div className="auth-brand brand"><div className="brand-mark"><Icon name="wrench" /></div><div><strong>Repair<span>OS</span></strong><small>Workspace setup</small></div></div><p className="eyebrow">Welcome, {session.user.name}</p><h1>Choose your workspace</h1><p className="subheading">Select an existing organization or create the shop workspace you will manage.</p>{error && <div className="error-banner">{error}</div>}{session.organizations.length > 0 && <div className="organization-list">{session.organizations.map((organization) => <button key={organization.id} className="organization-option" onClick={() => void chooseOrganization(organization.id)} disabled={loading}><span className="shop-dot" /><span><strong>{organization.name}</strong><small>{organization.role}</small></span><Icon name="arrow" /></button>)}</div>}<form onSubmit={createOrganization} className="organization-create"><label>New organization name<input required value={name} onChange={(event) => setName(event.target.value)} /></label><button className="orange-button auth-submit" disabled={loading}>{loading ? "Setting up..." : "Create workspace"}</button></form></div></div>;
+  return <div className="auth-shell setup-shell"><div className="setup-card"><div className="auth-brand brand"><img className="brand-logo auth-logo" src={REPAIROS_LOGO_URL} alt="RepairOS" /><div><strong>Repair<span>OS</span></strong><small>Workspace setup</small></div></div><p className="eyebrow">Welcome, {session.user.name}</p><h1>Choose your workspace</h1><p className="subheading">Select an existing organization or create the shop workspace you will manage.</p>{error && <div className="error-banner">{error}</div>}{session.organizations.length > 0 && <div className="organization-list">{session.organizations.map((organization) => <button key={organization.id} className="organization-option" onClick={() => void chooseOrganization(organization.id)} disabled={loading}><span className="shop-dot" /><span><strong>{organization.name}</strong><small>{organization.role}</small></span><Icon name="arrow" /></button>)}</div>}<form onSubmit={createOrganization} className="organization-create"><label>New organization name<input required value={name} onChange={(event) => setName(event.target.value)} /></label><button className="orange-button auth-submit" disabled={loading}>{loading ? "Setting up..." : "Create workspace"}</button></form></div></div>;
 }
 
 function App() {
@@ -457,6 +510,7 @@ function App() {
   const [entry, setEntry] = React.useState<"landing" | "auth">("landing");
   const [session, setSession] = React.useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = React.useState(Boolean(token));
+  const [neonLoading, setNeonLoading] = React.useState(false);
   const [view, setView] = React.useState<View>("Dashboard");
   const [search, setSearch] = React.useState("");
   const [dashboard, setDashboard] = React.useState<DashboardData | null>(null);
@@ -475,8 +529,19 @@ function App() {
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [notificationsOpen, setNotificationsOpen] = React.useState(false);
+  const [profileOpen, setProfileOpen] = React.useState(false);
   const [dismissedNotifications, setDismissedNotifications] = React.useState<string[]>([]);
   const notificationStorageKey = `repairos_dismissed_notifications_${session?.activeOrganization?.id || "default"}`;
+  React.useEffect(() => {
+    const verifier = new URLSearchParams(window.location.search).get("neon_auth_session_verifier");
+    if (!verifier || neonLoading || token) return;
+    setNeonLoading(true);
+    void neonRequest("/get-session")
+      .then((sessionData) => finishNeonSession(sessionData))
+      .then((nextToken) => { localStorage.setItem("repairos_token", nextToken); window.history.replaceState({}, document.title, window.location.pathname); setToken(nextToken); })
+      .catch((callbackError) => { sessionStorage.setItem("repairos_auth_notice", callbackError instanceof Error ? callbackError.message : "Neon Auth sign-in could not be completed."); window.history.replaceState({}, document.title, window.location.pathname); setEntry("auth"); })
+      .finally(() => setNeonLoading(false));
+  }, [token, neonLoading]);
   React.useEffect(() => {
     try { setDismissedNotifications(JSON.parse(localStorage.getItem(notificationStorageKey) || "[]")); }
     catch { setDismissedNotifications([]); }
@@ -487,6 +552,13 @@ function App() {
       localStorage.setItem(notificationStorageKey, JSON.stringify(next));
       return next;
     });
+  };
+  const logout = () => {
+    localStorage.removeItem("repairos_token");
+    setToken(null);
+    setSession(null);
+    setProfileOpen(false);
+    setEntry("auth");
   };
   React.useEffect(() => {
     if (!token) {
@@ -602,9 +674,7 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">
-            <Icon name="wrench" />
-          </div>
+          <img className="brand-logo" src={REPAIROS_LOGO_URL} alt="RepairOS" />
           <div>
             <strong>
               Repair<span>OS</span>
@@ -649,14 +719,15 @@ function App() {
               {!dashboard?.upcomingSchedule?.some((inspection) => !dismissedNotifications.includes(`inspection:${inspection.id}`)) && !claims.some((claim) => ["new", "in_review"].includes(claim.claimStatus) && !dismissedNotifications.includes(`claim:${claim.id}`)) && !jobs.some((job) => ["ready", "completed"].includes(job.status) && !dismissedNotifications.includes(`job:${job.id}`)) && <p className="notification-empty">You are all caught up.</p>}
             </div>
           </div>}
-          <div className="user-card">
+          <button type="button" className="user-card" onClick={() => setProfileOpen((open) => !open)} aria-label="Open profile menu" aria-expanded={profileOpen}>
             <div className="avatar">SB</div>
             <div>
               <strong>{session.user.name || "Shop admin"}</strong>
               <small>{session.activeRole || "Administrator"}</small>
             </div>
             <span className="more">...</span>
-          </div>
+          </button>
+          {profileOpen && <div className="profile-menu sidebar-profile-menu"><strong>{session.user.name || "Shop admin"}</strong><small>{session.user.email}</small><button type="button" onClick={logout}>Log out</button></div>}
         </div>
       </aside>
       <main className="main-panel">
@@ -684,7 +755,8 @@ function App() {
               <Icon name="bell" />
               <i />
             </button>
-            <div className="top-avatar">SB</div>
+            <button className="top-avatar profile-trigger" onClick={() => setProfileOpen((open) => !open)} aria-label="Open profile menu" aria-expanded={profileOpen}>SB</button>
+            {profileOpen && <div className="profile-menu top-profile-menu"><strong>{session.user.name || "Shop admin"}</strong><small>{session.user.email}</small><button type="button" onClick={logout}>Log out</button></div>}
           </div>
         </header>
         <div className="page-content">
@@ -754,7 +826,7 @@ function App() {
           {view === "Estimates" && (
             <><EstimateBuilder jobs={jobs} request={fetchJson} onSaved={loadData} /><EstimateRegister estimates={estimates} request={fetchJson} onChanged={loadData} onNavigate={navigate} /></>
           )}
-          {view === "Documents" && <DocumentView documents={documents} />}
+          {view === "Documents" && <DocumentView documents={documents} jobs={jobs} claims={claims} onUploaded={loadData} />}
           {view === "Invoices" && <InvoiceView invoices={invoices} customers={customers} jobs={jobs} claims={claims} request={fetchJson} apiUrl={API_URL} onChanged={loadData} />}
           {view === "Bookkeeping" && <BookkeepingView data={finance} jobs={jobs} claims={claims} request={fetchJson} onChanged={() => void loadData()} />}
           {view === "Reports" && (
@@ -1205,7 +1277,7 @@ function ClaimRecordsPanel({ claim, selectedJobId }: { claim: Claim; selectedJob
   const [target, setTarget] = React.useState(selectedJobId || "claim");
   const [documentType, setDocumentType] = React.useState<typeof documentTypes[number]>("other");
   const [description, setDescription] = React.useState("");
-  const [file, setFile] = React.useState<File | null>(null);
+  const [files, setFiles] = React.useState<File[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -1659,18 +1731,18 @@ function DocumentView({
     ...(documents?.jobDocuments || []),
   ];
   const [context, setContext] = React.useState("");
-  const [file, setFile] = React.useState<File | null>(null);
+  const [files, setFiles] = React.useState<File[]>([]);
   const [message, setMessage] = React.useState("");
   async function upload(event: React.FormEvent) {
     event.preventDefault();
-    if (!file || !context) return;
+    if (!files.length || !context) return;
     const body = new FormData();
-    body.append("file", file);
+    files.forEach((file) => body.append("file", file));
     if (context.startsWith("job:")) body.append("jobId", context.slice(4));
     else body.append("claimId", context.slice(6));
     try {
       await fetchJson("/documents/upload", { method: "POST", body });
-      setFile(null);
+      setFiles([]);
       setContext("");
       setMessage(
         "Uploaded and persisted by the API in its local uploads directory.",
@@ -1687,7 +1759,7 @@ function DocumentView({
       <div className="surface upload-panel">
         <SurfaceHeading
           title="Upload document"
-          subtitle="Attach a file to one job or claim"
+          subtitle="Attach one or more files to a job or claim"
         />
         <form className="upload-form" onSubmit={upload}>
           <select
@@ -1695,7 +1767,7 @@ function DocumentView({
             value={context}
             onChange={(event) => setContext(event.target.value)}
           >
-            <option value="">Select job or claim</option>
+            <option value="">Select a job or claim</option>
             <optgroup label="Jobs">
               {jobs.map((job) => (
                 <option value={`job:${job.id}`} key={job.id}>
@@ -1716,12 +1788,14 @@ function DocumentView({
           <input
             required
             type="file"
-            onChange={(event) => setFile(event.target.files?.[0] || null)}
+            multiple
+            onChange={(event) => setFiles(Array.from(event.target.files || []))}
           />
-          <button className="orange-button" disabled={!file || !context}>
-            <Icon name="plus" /> Upload
+          <button className="orange-button" disabled={!files.length || !context}>
+            <Icon name="plus" /> Upload {files.length ? `(${files.length})` : ""}
           </button>
         </form>
+        {files.length > 0 && <small className="upload-note selected-files">Selected: {files.map((file) => file.name).join(", ")}</small>}
         {message && <small className="upload-note">{message}</small>}
         <small className="upload-note">
           Files are stored as local server files, so they require the API's

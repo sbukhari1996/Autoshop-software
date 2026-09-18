@@ -311,6 +311,78 @@ model FinanceEntry {
   @@map("finance_entries")
 }
 
+model Employee {
+  id          String          @id @default(cuid())
+  name        String
+  phone       String?
+  email       String?
+  role        String?
+  weeklyRate  Float           @default(0)
+  startDate   DateTime        @default(now())
+  active      Boolean         @default(true)
+  notes       String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  payments    PayrollPayment[]
+
+  @@map("employees")
+}
+
+model PayrollPayment {
+  id              String   @id @default(cuid())
+  employeeId      String
+  amount          Float
+  paymentDate     DateTime @default(now())
+  paymentMethod   String?
+  notes           String?
+  sourceReference String?  @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  employee        Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId])
+  @@map("payroll_payments")
+}
+
+model RentalTenant {
+  id            String          @id @default(cuid())
+  name          String
+  phone         String?
+  email         String?
+  space         String          @default("mechanical")
+  shift         String          @default("day")
+  rentAmount    Float           @default(0)
+  rentFrequency String          @default("daily")
+  startDate     DateTime        @default(now())
+  active        Boolean         @default(true)
+  notes         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  payments      RentalPayment[]
+
+  @@index([active, startDate])
+  @@map("rental_tenants")
+}
+
+model RentalPayment {
+  id              String       @id @default(cuid())
+  tenantId        String
+  type            String       @default("rent")
+  amount          Float
+  paymentDate     DateTime     @default(now())
+  paymentMethod   String?
+  notes           String?
+  sourceReference String?      @unique
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  tenant          RentalTenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, paymentDate])
+  @@map("rental_payments")
+}
+
 model BankAccount {
   id              String   @id @default("default")
   name            String   @default("Primary bank")

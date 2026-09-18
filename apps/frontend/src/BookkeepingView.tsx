@@ -41,6 +41,11 @@ type BankBalance = {
   expenses: number;
   currentBalance: number;
 };
+type RollingSummary = { months: number; income: number; expenses: number; net: number };
+type Employee = { id: string; name: string; phone: string | null; email: string | null; role: string | null; weeklyRate: number; startDate: string; active: boolean; payments: PayrollPayment[]; expectedToDate?: number; paidToDate?: number; balanceDue?: number };
+type PayrollPayment = { id: string; amount: number; paymentDate: string; paymentMethod: string | null; notes: string | null };
+type RentalTenant = { id: string; name: string; phone: string | null; email: string | null; space: string; shift: string; rentAmount: number; rentFrequency: string; startDate: string; active: boolean; payments: RentalPayment[]; expectedRentToDate?: number; rentCollected?: number; sharedExpensesCollected?: number; totalCollected?: number; netCollected?: number };
+type RentalPayment = { id: string; type: "rent" | "shared_expense"; amount: number; paymentDate: string; paymentMethod: string | null; notes: string | null };
 type FinanceData = {
   entries: FinanceEntry[];
   recurring: RecurringExpense[];
@@ -108,11 +113,23 @@ export function BookkeepingView({
   onChanged: () => void;
 }) {
   const [period, setPeriod] = React.useState("month");
+  const [rollingSummary, setRollingSummary] = React.useState<RollingSummary | null>(null);
   const [summary, setSummary] = React.useState<FinanceSummary | null>(
     data?.summary || null,
   );
   const [bankBalance, setBankBalance] = React.useState<BankBalance | null>(null);
   const [startingBalance, setStartingBalance] = React.useState("");
+  const [activeTab, setActiveTab] = React.useState<"ledger" | "payroll" | "rentals">("ledger");
+  const [employees, setEmployees] = React.useState<Employee[]>([]);
+  const [employeeOpen, setEmployeeOpen] = React.useState(false);
+  const [paymentEmployee, setPaymentEmployee] = React.useState<Employee | null>(null);
+  const [employeeForm, setEmployeeForm] = React.useState({ name: "", role: "", phone: "", weeklyRate: "", startDate: new Date().toISOString().slice(0, 10) });
+  const [paymentForm, setPaymentForm] = React.useState({ amount: "", paymentDate: new Date().toISOString().slice(0, 10), paymentMethod: "cash", notes: "" });
+  const [rentals, setRentals] = React.useState<RentalTenant[]>([]);
+  const [rentalOpen, setRentalOpen] = React.useState(false);
+  const [paymentRental, setPaymentRental] = React.useState<RentalTenant | null>(null);
+  const [rentalForm, setRentalForm] = React.useState({ name: "", phone: "", email: "", shift: "day", rentAmount: "", rentFrequency: "daily", startDate: new Date().toISOString().slice(0, 10) });
+  const [rentalPaymentForm, setRentalPaymentForm] = React.useState({ type: "rent", amount: "", paymentDate: new Date().toISOString().slice(0, 10), paymentMethod: "cash", notes: "" });
   const [forecastIncome, setForecastIncome] = React.useState({
     current: 0,
     prior: 0,
@@ -137,9 +154,22 @@ export function BookkeepingView({
       .catch(() => undefined);
   }, [request]);
   React.useEffect(() => {
-    void request<FinanceSummary>(`/finance/summary?period=${period}`)
-      .then(setSummary)
-      .catch(() => undefined);
+    void request<Employee[]>("/finance/payroll").then(setEmployees).catch(() => undefined);
+  }, [request, data]);
+  React.useEffect(() => {
+    void request<RentalTenant[]>("/finance/rentals/summary").then(setRentals).catch(() => undefined);
+  }, [request, data]);
+  React.useEffect(() => {
+    if (period.endsWith("m")) {
+      void request<RollingSummary>(`/finance/range?months=${period.slice(0, -1)}`)
+        .then(setRollingSummary)
+        .catch(() => undefined);
+    } else {
+      setRollingSummary(null);
+      void request<FinanceSummary>(`/finance/summary?period=${period}`)
+        .then(setSummary)
+        .catch(() => undefined);
+    }
   }, [period, request]);
   React.useEffect(() => {
     const now = new Date();
@@ -202,6 +232,22 @@ export function BookkeepingView({
       setSaving(false);
     }
   }
+  async function saveEmployee(event: React.FormEvent) {
+    event.preventDefault(); setSaving(true); setError("");
+    try { await request("/finance/employees", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...employeeForm, weeklyRate: Number(employeeForm.weeklyRate), role: employeeForm.role || undefined, phone: employeeForm.phone || undefined }) }); setEmployeeOpen(false); setEmployeeForm({ name: "", role: "", phone: "", weeklyRate: "", startDate: new Date().toISOString().slice(0, 10) }); const payroll = await request<Employee[]>("/finance/payroll"); setEmployees(payroll); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to save employee"); } finally { setSaving(false); }
+  }
+  async function savePayment(event: React.FormEvent) {
+    event.preventDefault(); if (!paymentEmployee) return; setSaving(true); setError("");
+    try { await request(`/finance/employees/${paymentEmployee.id}/payments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...paymentForm, amount: Number(paymentForm.amount) }) }); setPaymentEmployee(null); setPaymentForm({ amount: "", paymentDate: new Date().toISOString().slice(0, 10), paymentMethod: "cash", notes: "" }); const payroll = await request<Employee[]>("/finance/payroll"); setEmployees(payroll); onChanged(); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to record payroll payment"); } finally { setSaving(false); }
+  }
+  async function saveRental(event: React.FormEvent) {
+    event.preventDefault(); setSaving(true); setError("");
+    try { await request("/finance/rentals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...rentalForm, rentAmount: Number(rentalForm.rentAmount), phone: rentalForm.phone || undefined, email: rentalForm.email || undefined }) }); setRentalOpen(false); setRentalForm({ name: "", phone: "", email: "", shift: "day", rentAmount: "", rentFrequency: "daily", startDate: new Date().toISOString().slice(0, 10) }); setRentals(await request<RentalTenant[]>("/finance/rentals/summary")); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to save rental tenant"); } finally { setSaving(false); }
+  }
+  async function saveRentalPayment(event: React.FormEvent) {
+    event.preventDefault(); if (!paymentRental) return; setSaving(true); setError("");
+    try { await request(`/finance/rentals/${paymentRental.id}/payments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...rentalPaymentForm, amount: Number(rentalPaymentForm.amount) }) }); setPaymentRental(null); setRentals(await request<RentalTenant[]>("/finance/rentals/summary")); setRentalPaymentForm({ type: "rent", amount: "", paymentDate: new Date().toISOString().slice(0, 10), paymentMethod: "cash", notes: "" }); onChanged(); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to record rental payment"); } finally { setSaving(false); }
+  }
   async function saveRecurring(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
@@ -252,6 +298,16 @@ export function BookkeepingView({
     expenses: 0,
     net: 0,
   };
+  const selectedTotals = rollingSummary || totals;
+  const trendMonths = period.endsWith("m") ? Number(period.slice(0, -1)) : 12;
+  const trend = Array.from({ length: trendMonths }, (_, index) => {
+    const date = new Date();
+    date.setDate(1);
+    date.setMonth(date.getMonth() - trendMonths + index + 1);
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+    const monthEntries = entries.filter((entry) => entry.entryDate.startsWith(key));
+    return { label: date.toLocaleDateString(undefined, { month: "short" }), income: monthEntries.filter((entry) => entry.type === "income").reduce((sum, entry) => sum + entry.amount, 0), expenses: monthEntries.filter((entry) => entry.type === "expense").reduce((sum, entry) => sum + entry.amount, 0) };
+  });
   const annualRecurring = recurringItems
     .filter((item) => item.active)
     .reduce(
@@ -284,15 +340,31 @@ export function BookkeepingView({
             onChange={(event) => setPeriod(event.target.value)}
             aria-label="Summary period"
           >
-            <option value="week">This week</option>
             <option value="month">This month</option>
-            <option value="year">This year</option>
+            <option value="3m">Past 3 months</option>
+            <option value="6m">Past 6 months</option>
+            <option value="9m">Past 9 months</option>
+            <option value="12m">Past 12 months</option>
           </select>
           <button className="orange-button" onClick={() => setEntryOpen(true)}>
             New entry
           </button>
         </div>
       </section>
+      <div className="bookkeeping-tabs" role="tablist" aria-label="Bookkeeping views">
+        <button type="button" className={activeTab === "ledger" ? "active" : ""} onClick={() => setActiveTab("ledger")}>Ledger</button>
+        <button type="button" className={activeTab === "payroll" ? "active" : ""} onClick={() => setActiveTab("payroll")}>Employees &amp; payroll</button>
+        <button type="button" className={activeTab === "rentals" ? "active" : ""} onClick={() => setActiveTab("rentals")}>Shop rentals</button>
+      </div>
+      {activeTab === "rentals" ? <section className="payroll-workspace rental-workspace">
+        <div className="payroll-toolbar"><div><p className="eyebrow">Shared facility</p><h2>Shop rentals</h2><p className="subheading">Track daytime and nighttime mechanical renters, rent collected, and shared expenses.</p></div><button className="orange-button" onClick={() => setRentalOpen(true)}>Add renter</button></div>
+        <div className="payroll-summary"><div><span>Active renters</span><strong>{rentals.filter((renter) => renter.active).length}</strong><small>Day and night spaces</small></div><div><span>Rent collected</span><strong>{currency(rentals.reduce((total, renter) => total + (renter.rentCollected || 0), 0))}</strong><small>Recorded rental income</small></div><div><span>Shared expenses</span><strong>{currency(rentals.reduce((total, renter) => total + (renter.sharedExpensesCollected || 0), 0))}</strong><small>Contributions received</small></div></div>
+        <div className="employee-list">{rentals.map((renter) => <article className="employee-card rental-card" key={renter.id}><div className="employee-card-heading"><div><strong>{renter.name}</strong><small>{renter.shift} shift · {renter.space} · {renter.rentFrequency} rent</small></div><span className={renter.active ? "active-dot" : "inactive-dot"} /></div><div className="employee-metrics"><div><span>Rent target</span><strong>{currency(renter.rentAmount)}</strong></div><div><span>Expected</span><strong>{currency(renter.expectedRentToDate || 0)}</strong></div><div><span>Rent paid</span><strong className="finance-income">{currency(renter.rentCollected || 0)}</strong></div><div><span>Rent due</span><strong className={(renter.expectedRentToDate || 0) > (renter.rentCollected || 0) ? "payroll-due" : "finance-income"}>{currency(Math.max(0, (renter.expectedRentToDate || 0) - (renter.rentCollected || 0)))}</strong></div></div><div className="rental-card-footer"><span>Shared expenses: <b>{currency(renter.sharedExpensesCollected || 0)}</b></span><button className="orange-button" onClick={() => setPaymentRental(renter)}>Record payment</button></div></article>)}{!rentals.length && <div className="empty-state">No renters yet. Add the daytime or nighttime mechanical renter to begin tracking.</div>}</div>
+      </section> : activeTab === "payroll" ? <section className="payroll-workspace">
+        <div className="payroll-toolbar"><div><p className="eyebrow">People costs</p><h2>Employees &amp; payroll</h2><p className="subheading">Track weekly pay targets, partial payments, and what remains owed.</p></div><button className="orange-button" onClick={() => setEmployeeOpen(true)}>Add employee</button></div>
+        <div className="payroll-summary"><div><span>Employees</span><strong>{employees.filter((employee) => employee.active).length}</strong><small>Active team members</small></div><div><span>Paid to date</span><strong>{currency(employees.reduce((total, employee) => total + (employee.paidToDate || 0), 0))}</strong><small>Recorded payroll payments</small></div><div><span>Balance due</span><strong className="payroll-due">{currency(employees.reduce((total, employee) => total + Math.max(0, employee.balanceDue || 0), 0))}</strong><small>Against weekly targets</small></div></div>
+        <div className="employee-list">{employees.map((employee) => <article className="employee-card" key={employee.id}><div className="employee-card-heading"><div><strong>{employee.name}</strong><small>{employee.role || "Shop team member"} · Started {dateValue(employee.startDate)}</small></div><span className={employee.active ? "active-dot" : "inactive-dot"} /></div><div className="employee-metrics"><div><span>Weekly target</span><strong>{currency(employee.weeklyRate)}</strong></div><div><span>Expected</span><strong>{currency(employee.expectedToDate || 0)}</strong></div><div><span>Paid</span><strong className="finance-income">{currency(employee.paidToDate || 0)}</strong></div><div><span>Still owed</span><strong className={(employee.balanceDue || 0) > 0 ? "payroll-due" : "finance-income"}>{currency(Math.max(0, employee.balanceDue || 0))}</strong></div></div><div className="employee-card-actions"><button className="orange-button" onClick={() => setPaymentEmployee(employee)}>Record payment</button><span>{employee.payments.length} payment{employee.payments.length === 1 ? "" : "s"} recorded</span></div></article>)}{!employees.length && <div className="empty-state">No employees yet. Add your first team member to start tracking payroll.</div>}</div>
+      </section> : <>
       <section className="surface bank-balance-panel">
         <div>
           <p className="eyebrow">Cash position</p>
@@ -312,27 +384,27 @@ export function BookkeepingView({
       <section className="metric-grid finance-metrics">
         <Metric
           label="Income"
-          value={currency(totals.income)}
-          note={`Current ${period}`}
+          value={currency(selectedTotals.income)}
+          note={period.endsWith("m") ? `Past ${period.slice(0, -1)} months` : "Current month"}
           tone="green"
         />
         <Metric
           label="Job expenses"
-          value={currency(totals.jobExpenses)}
+          value={currency(period.endsWith("m") ? 0 : totals.jobExpenses)}
           note="Parts, labor, and job costs"
           tone="blue"
         />
         <Metric
           label="General expenses"
-          value={currency(totals.generalExpenses)}
+          value={currency(period.endsWith("m") ? selectedTotals.expenses : totals.generalExpenses)}
           note="Operating expenses"
           tone="orange"
         />
         <Metric
           label="Net"
-          value={currency(totals.net)}
-          note={`${currency(totals.expenses)} total expenses`}
-          tone={totals.net >= 0 ? "green" : "orange"}
+          value={currency(selectedTotals.net)}
+          note={`${currency(selectedTotals.expenses)} total expenses`}
+          tone={selectedTotals.net >= 0 ? "green" : "orange"}
         />
       </section>
       <div className="dashboard-grid finance-grid">
@@ -400,7 +472,7 @@ export function BookkeepingView({
           <div className="surface-heading">
             <div>
               <h2>Income vs expenses</h2>
-              <p>{period === "year" ? "Year to date" : `Current ${period}`}</p>
+              <p>{period.endsWith("m") ? `Month by month · past ${period.slice(0, -1)} months` : "Current month"}</p>
             </div>
           </div>
           <div className="bar-chart">
@@ -408,21 +480,21 @@ export function BookkeepingView({
               <div
                 className="bar income-bar"
                 style={{
-                  height: `${Math.max(8, (totals.income / maxBar) * 100)}%`,
+                  height: `${Math.max(8, (selectedTotals.income / maxBar) * 100)}%`,
                 }}
               />
               <span>Income</span>
-              <strong>{currency(totals.income)}</strong>
+                <strong>{currency(selectedTotals.income)}</strong>
             </div>
             <div className="bar-group">
               <div
                 className="bar expense-bar"
                 style={{
-                  height: `${Math.max(8, (totals.expenses / maxBar) * 100)}%`,
+                  height: `${Math.max(8, (selectedTotals.expenses / maxBar) * 100)}%`,
                 }}
               />
               <span>Expenses</span>
-              <strong>{currency(totals.expenses)}</strong>
+                <strong>{currency(selectedTotals.expenses)}</strong>
             </div>
           </div>
           <div className="chart-legend">
@@ -433,6 +505,10 @@ export function BookkeepingView({
               <i className="legend-expense" /> Expenses
             </span>
           </div>
+          {period.endsWith("m") && <div className="monthly-trend">
+            {trend.map((month) => <div className="monthly-trend-row" key={`${month.label}-${month.income}-${month.expenses}`}><strong>{month.label}</strong><span className="trend-income">{currency(month.income)}</span><span className="trend-expense">{currency(month.expenses)}</span><b className={month.income - month.expenses >= 0 ? "trend-positive" : "trend-negative"}>{currency(month.income - month.expenses)}</b></div>)}
+            <div className="monthly-trend-labels"><span>Month</span><span>Income</span><span>Expenses</span><span>Net</span></div>
+          </div>}
         </section>
       </div>
       <section className="surface recurring-panel">
@@ -543,6 +619,11 @@ export function BookkeepingView({
           </p>
         </div>
       </section>
+      </>}
+      {rentalOpen && <div className="modal-backdrop"><form className="modal finance-modal" onSubmit={saveRental}><div className="modal-heading"><div><p className="eyebrow">Mechanical space</p><h2>Add renter</h2></div><button type="button" className="close-button" onClick={() => setRentalOpen(false)}>×</button></div><label>Name<input required value={rentalForm.name} onChange={(event) => setRentalForm({ ...rentalForm, name: event.target.value })} /></label><label>Phone<input type="tel" value={rentalForm.phone} onChange={(event) => setRentalForm({ ...rentalForm, phone: event.target.value })} /></label><label>Email<input type="email" value={rentalForm.email} onChange={(event) => setRentalForm({ ...rentalForm, email: event.target.value })} /></label><label>Shift<select value={rentalForm.shift} onChange={(event) => setRentalForm({ ...rentalForm, shift: event.target.value })}><option value="day">Day</option><option value="night">Night</option></select></label><label>Rent amount<input required min="0" step="0.01" type="number" value={rentalForm.rentAmount} onChange={(event) => setRentalForm({ ...rentalForm, rentAmount: event.target.value })} /></label><label>Rent frequency<select value={rentalForm.rentFrequency} onChange={(event) => setRentalForm({ ...rentalForm, rentFrequency: event.target.value })}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label><label>Start date<input required type="date" value={rentalForm.startDate} onChange={(event) => setRentalForm({ ...rentalForm, startDate: event.target.value })} /></label><button className="orange-button submit-button" disabled={saving}>{saving ? "Saving..." : "Add renter"}</button></form></div>}
+      {paymentRental && <div className="modal-backdrop"><form className="modal finance-modal" onSubmit={saveRentalPayment}><div className="modal-heading"><div><p className="eyebrow">Rental payment</p><h2>Record payment</h2><small>{paymentRental.name} · {paymentRental.shift} shift</small></div><button type="button" className="close-button" onClick={() => setPaymentRental(null)}>×</button></div><label>Payment type<select value={rentalPaymentForm.type} onChange={(event) => setRentalPaymentForm({ ...rentalPaymentForm, type: event.target.value })}><option value="rent">Rent</option><option value="shared_expense">Shared expense contribution</option></select></label><label>Amount<input required min="0.01" step="0.01" type="number" value={rentalPaymentForm.amount} onChange={(event) => setRentalPaymentForm({ ...rentalPaymentForm, amount: event.target.value })} /></label><label>Payment date<input required type="date" value={rentalPaymentForm.paymentDate} onChange={(event) => setRentalPaymentForm({ ...rentalPaymentForm, paymentDate: event.target.value })} /></label><label>Payment method<select value={rentalPaymentForm.paymentMethod} onChange={(event) => setRentalPaymentForm({ ...rentalPaymentForm, paymentMethod: event.target.value })}>{paymentMethods.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Notes<textarea value={rentalPaymentForm.notes} onChange={(event) => setRentalPaymentForm({ ...rentalPaymentForm, notes: event.target.value })} /></label><button className="orange-button submit-button" disabled={saving}>{saving ? "Saving..." : "Record payment"}</button></form></div>}
+      {employeeOpen && <div className="modal-backdrop"><form className="modal finance-modal" onSubmit={saveEmployee}><div className="modal-heading"><div><p className="eyebrow">Team member</p><h2>Add employee</h2></div><button type="button" className="close-button" onClick={() => setEmployeeOpen(false)}>×</button></div><label>Name<input required value={employeeForm.name} onChange={(event) => setEmployeeForm({ ...employeeForm, name: event.target.value })} /></label><label>Role<input value={employeeForm.role} onChange={(event) => setEmployeeForm({ ...employeeForm, role: event.target.value })} placeholder="Technician, painter, office" /></label><label>Phone<input type="tel" value={employeeForm.phone} onChange={(event) => setEmployeeForm({ ...employeeForm, phone: event.target.value })} /></label><label>Weekly target<input required min="0" step="0.01" type="number" value={employeeForm.weeklyRate} onChange={(event) => setEmployeeForm({ ...employeeForm, weeklyRate: event.target.value })} /></label><label>Start date<input required type="date" value={employeeForm.startDate} onChange={(event) => setEmployeeForm({ ...employeeForm, startDate: event.target.value })} /></label><button className="orange-button submit-button" disabled={saving}>{saving ? "Saving..." : "Add employee"}</button></form></div>}
+      {paymentEmployee && <div className="modal-backdrop"><form className="modal finance-modal" onSubmit={savePayment}><div className="modal-heading"><div><p className="eyebrow">Payroll payment</p><h2>Pay {paymentEmployee.name}</h2></div><button type="button" className="close-button" onClick={() => setPaymentEmployee(null)}>×</button></div><div className="payroll-payment-callout"><span>Still owed</span><strong>{currency(Math.max(0, paymentEmployee.balanceDue || 0))}</strong></div><label>Amount paid<input required min="0.01" step="0.01" type="number" value={paymentForm.amount} onChange={(event) => setPaymentForm({ ...paymentForm, amount: event.target.value })} /></label><label>Payment date<input required type="date" value={paymentForm.paymentDate} onChange={(event) => setPaymentForm({ ...paymentForm, paymentDate: event.target.value })} /></label><label>Payment method<select value={paymentForm.paymentMethod} onChange={(event) => setPaymentForm({ ...paymentForm, paymentMethod: event.target.value })}>{paymentMethods.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Notes<textarea value={paymentForm.notes} onChange={(event) => setPaymentForm({ ...paymentForm, notes: event.target.value })} /></label><button className="orange-button submit-button" disabled={saving}>{saving ? "Saving..." : "Record payment"}</button></form></div>}
       {entryOpen && (
         <div className="modal-backdrop">
           <form className="modal finance-modal" onSubmit={saveEntry}>

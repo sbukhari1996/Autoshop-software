@@ -11,10 +11,6 @@ import { optionalText, requiredText } from '../validation.js';
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const statuses = ['new', 'inspection', 'authorized', 'in_progress', 'ready', 'completed', 'cancelled'] as const;
-const transitions: Record<string, readonly string[]> = {
-  new: ['inspection', 'cancelled'], inspection: ['authorized', 'cancelled'], authorized: ['in_progress', 'cancelled'],
-  in_progress: ['ready', 'cancelled'], ready: ['completed', 'in_progress'], completed: [], cancelled: [],
-};
 
 export function createOperationsRouter(prisma: PrismaClient) {
   const router = Router();
@@ -62,7 +58,6 @@ export function createOperationsRouter(prisma: PrismaClient) {
     const job = await ensureJob(prisma, routeParam(req, 'jobId'));
     const nextStatus = requiredText(req.body.status, 'status');
     if (!(statuses as readonly string[]).includes(nextStatus)) throw new ApiError(400, `Unsupported job status: ${nextStatus}`);
-    if (!transitions[job.status]?.includes(nextStatus)) throw new ApiError(400, `Cannot transition job from ${job.status} to ${nextStatus}`);
     const updated = await prisma.$transaction(async (tx) => {
       const saved = await tx.job.update({ where: { id: job.id }, data: { status: nextStatus } });
       await tx.jobStatusHistory.create({ data: { jobId: job.id, fromStatus: job.status, toStatus: nextStatus, note: optionalText(req.body.note, 'note') } });
@@ -99,8 +94,9 @@ export function createOperationsRouter(prisma: PrismaClient) {
     await sendStoredFile(res, document.filePath, document.fileName);
   }));
 
-  router.post('/documents/upload', upload.single('file'), asyncHandler(async (req, res) => {
-    if (!req.file || req.file.size === 0) throw new ApiError(400, 'a non-empty file is required');
+  router.post('/documents/upload', upload.array('file', 20), asyncHandler(async (req, res) => {
+    const files = (req.files as Express.Multer.File[] | undefined) || [];
+    if (!files.length || files.some((file) => file.size === 0)) throw new ApiError(400, 'at least one non-empty file is required');
     const claimId = optionalText(req.body.claimId, 'claimId');
     const jobId = optionalText(req.body.jobId, 'jobId');
     if ((claimId ? 1 : 0) + (jobId ? 1 : 0) !== 1) throw new ApiError(400, 'exactly one of claimId or jobId is required');
@@ -108,15 +104,19 @@ export function createOperationsRouter(prisma: PrismaClient) {
     if (jobId && !(await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } }))) throw new ApiError(404, 'Job not found');
     const documentType = requiredDocumentType(req.body.documentType);
     const description = optionalText(req.body.description, 'description');
-    const originalName = path.basename(req.file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'document';
-    const storedName = `${randomUUID()}-${originalName}`;
     await mkdir(uploadDirectory, { recursive: true });
-    await writeFile(path.join(uploadDirectory, storedName), req.file.buffer, { flag: 'wx' });
-    const filePath = path.relative(process.cwd(), path.join(uploadDirectory, storedName));
-    const document = claimId
-      ? await prisma.claimDocument.create({ data: { claimId, fileName: originalName, filePath, documentType, description } })
-      : await prisma.jobDocument.create({ data: { jobId: jobId!, fileName: originalName, filePath, documentType, description } });
-    res.status(201).json({ ...document, downloadUrl: `/api/documents/${document.id}/download` });
+    const documents = [];
+    for (const file of files) {
+      const originalName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'document';
+      const storedName = `${randomUUID()}-${originalName}`;
+      await writeFile(path.join(uploadDirectory, storedName), file.buffer, { flag: 'wx' });
+      const filePath = path.relative(process.cwd(), path.join(uploadDirectory, storedName));
+      const document = claimId
+        ? await prisma.claimDocument.create({ data: { claimId, fileName: originalName, filePath, documentType, description } })
+        : await prisma.jobDocument.create({ data: { jobId: jobId!, fileName: originalName, filePath, documentType, description } });
+      documents.push({ ...document, downloadUrl: `/api/documents/${document.id}/download` });
+    }
+    res.status(201).json({ documents });
   }));
 
   return router;

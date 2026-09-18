@@ -3,6 +3,7 @@ apps/*/node_modules
 apps/*/dist
 .env
 apps/api/.env
+apps/frontend/.env.local
 apps/api/uploads/
 .DS_Store
 npm-debug.log*

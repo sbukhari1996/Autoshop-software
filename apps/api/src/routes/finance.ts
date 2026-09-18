@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
-import { optionalText, requiredText } from '../validation.js';
+import { optionalBoolean, optionalDate, optionalText, requiredText } from '../validation.js';
 
 const entryTypes = ['income', 'expense'] as const;
 const frequencies = ['weekly', 'monthly', 'yearly'] as const;
@@ -9,6 +9,98 @@ const paymentMethods = ['cash', 'debit_card', 'credit_card', 'check', 'ach', 'ot
 
 export function createFinanceRouter(prisma: PrismaClient) {
   const router = Router();
+  router.get('/employees', asyncHandler(async (_req, res) => {
+    res.json(await prisma.employee.findMany({ orderBy: { name: 'asc' }, include: { payments: { orderBy: { paymentDate: 'desc' } } } }));
+  }));
+  router.post('/employees', asyncHandler(async (req, res) => {
+    const employee = await prisma.employee.create({ data: { name: requiredText(req.body.name, 'name'), phone: optionalText(req.body.phone, 'phone'), email: optionalText(req.body.email, 'email'), role: optionalText(req.body.role, 'role'), weeklyRate: req.body.weeklyRate === undefined ? undefined : nonNegativeWeeklyRate(req.body.weeklyRate), startDate: req.body.startDate ? date(req.body.startDate, 'startDate') : undefined, active: req.body.active === undefined ? undefined : Boolean(req.body.active), notes: optionalText(req.body.notes, 'notes') }, include: { payments: true } });
+    res.status(201).json(employee);
+  }));
+  router.patch('/employees/:id', asyncHandler(async (req, res) => {
+    const employee = await prisma.employee.update({ where: { id: requiredText(req.params.id, 'id') }, data: { name: req.body.name === undefined ? undefined : requiredText(req.body.name, 'name'), phone: req.body.phone === undefined ? undefined : optionalText(req.body.phone, 'phone'), email: req.body.email === undefined ? undefined : optionalText(req.body.email, 'email'), role: req.body.role === undefined ? undefined : optionalText(req.body.role, 'role'), weeklyRate: req.body.weeklyRate === undefined ? undefined : nonNegativeWeeklyRate(req.body.weeklyRate), startDate: req.body.startDate === undefined ? undefined : date(req.body.startDate, 'startDate'), active: req.body.active === undefined ? undefined : optionalBoolean(req.body.active, 'active'), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes') }, include: { payments: true } });
+    res.json(employee);
+  }));
+  router.delete('/employees/:id', asyncHandler(async (req, res) => { await prisma.employee.delete({ where: { id: requiredText(req.params.id, 'id') } }); res.status(204).send(); }));
+  router.get('/payroll', asyncHandler(async (_req, res) => {
+    const asOf = new Date();
+    const employees = await prisma.employee.findMany({ orderBy: { name: 'asc' }, include: { payments: { orderBy: { paymentDate: 'desc' } } } });
+    res.json(employees.map((employee) => {
+      const elapsedMilliseconds = Math.max(0, asOf.getTime() - employee.startDate.getTime());
+      const fullWeeks = Math.floor(elapsedMilliseconds / (7 * 24 * 60 * 60 * 1000));
+      const expectedToDate = employee.weeklyRate * fullWeeks;
+      const paidToDate = employee.payments.reduce((total, payment) => total + payment.amount, 0);
+      return { ...employee, expectedToDate, paidToDate, balanceDue: expectedToDate - paidToDate };
+    }));
+  }));
+  router.post('/employees/:employeeId/payments', asyncHandler(async (req, res) => {
+    const employeeId = requiredText(req.params.employeeId, 'employeeId');
+    const amount = positive(req.body.amount);
+    const paymentDate = req.body.paymentDate ? date(req.body.paymentDate, 'paymentDate') : new Date();
+    const payment = await prisma.$transaction(async (transaction) => {
+      const employee = await transaction.employee.findUnique({ where: { id: employeeId } });
+      if (!employee) throw new ApiError(404, 'Employee not found');
+      const createdPayment = await transaction.payrollPayment.create({ data: { employeeId, amount, paymentDate, paymentMethod: optionalText(req.body.paymentMethod, 'paymentMethod'), notes: optionalText(req.body.notes, 'notes') } });
+      await transaction.financeEntry.create({ data: { type: 'expense', amount, description: `Payroll payment - ${employee.name}`, category: 'Payroll & Wages', sourceReference: `payroll-payment:${createdPayment.id}`, notes: createdPayment.notes, paymentMethod: createdPayment.paymentMethod, entryDate: paymentDate } });
+      return createdPayment;
+    });
+    res.status(201).json(payment);
+  }));
+  router.delete('/payments/:id', asyncHandler(async (req, res) => {
+    const id = requiredText(req.params.id, 'id');
+    await prisma.$transaction(async (transaction) => {
+      await transaction.financeEntry.deleteMany({ where: { sourceReference: `payroll-payment:${id}` } });
+      await transaction.payrollPayment.delete({ where: { id } });
+    });
+    res.status(204).send();
+  }));
+  router.get('/rentals', asyncHandler(async (_req, res) => {
+    res.json(await prisma.rentalTenant.findMany({ orderBy: { name: 'asc' }, include: { payments: { orderBy: { paymentDate: 'desc' } } } }));
+  }));
+  router.get('/rentals/summary', asyncHandler(async (_req, res) => {
+    const asOf = new Date();
+    const tenants = await prisma.rentalTenant.findMany({ orderBy: { name: 'asc' }, include: { payments: true } });
+    res.json(tenants.map((tenant) => {
+      const expectedRentToDate = tenant.rentAmount * fullPeriodsElapsed(tenant.startDate, asOf, tenant.rentFrequency);
+      const rentCollected = tenant.payments.filter((payment) => payment.type === 'rent').reduce((total, payment) => total + payment.amount, 0);
+      const sharedExpensesCollected = tenant.payments.filter((payment) => payment.type === 'shared_expense').reduce((total, payment) => total + payment.amount, 0);
+      const totalCollected = rentCollected + sharedExpensesCollected;
+      return { ...tenant, expectedRentToDate, rentCollected, sharedExpensesCollected, totalCollected, netCollected: totalCollected - expectedRentToDate };
+    }));
+  }));
+  router.post('/rentals', asyncHandler(async (req, res) => {
+    const tenant = await prisma.rentalTenant.create({ data: rentalTenantData(req.body), include: { payments: true } });
+    res.status(201).json(tenant);
+  }));
+  router.patch('/rentals/:id', asyncHandler(async (req, res) => {
+    const tenant = await prisma.rentalTenant.update({ where: { id: requiredText(req.params.id, 'id') }, data: rentalTenantData(req.body, true), include: { payments: true } });
+    res.json(tenant);
+  }));
+  router.delete('/rentals/:id', asyncHandler(async (req, res) => {
+    await prisma.rentalTenant.delete({ where: { id: requiredText(req.params.id, 'id') } });
+    res.status(204).send();
+  }));
+  router.post('/rentals/:rentalId/payments', asyncHandler(async (req, res) => {
+    const tenantId = requiredText(req.params.rentalId, 'rentalId');
+    const amount = positive(req.body.amount);
+    const type = validate(req.body.type || 'rent', ['rent', 'shared_expense'] as const, 'type');
+    const paymentDate = req.body.paymentDate ? date(req.body.paymentDate, 'paymentDate') : new Date();
+    const payment = await prisma.$transaction(async (transaction) => {
+      const tenant = await transaction.rentalTenant.findUnique({ where: { id: tenantId } });
+      if (!tenant) throw new ApiError(404, 'Rental tenant not found');
+      const createdPayment = await transaction.rentalPayment.create({ data: { tenantId, type, amount, paymentDate, paymentMethod: optionalText(req.body.paymentMethod, 'paymentMethod'), notes: optionalText(req.body.notes, 'notes') } });
+      await transaction.financeEntry.create({ data: { type: 'income', amount, description: `${type === 'rent' ? 'Shop rent' : 'Shared expense'} - ${tenant.name}`, category: 'Rental Income', sourceReference: `rental-payment:${createdPayment.id}`, notes: createdPayment.notes, paymentMethod: createdPayment.paymentMethod, entryDate: paymentDate } });
+      return createdPayment;
+    });
+    res.status(201).json(payment);
+  }));
+  router.delete('/rental-payments/:id', asyncHandler(async (req, res) => {
+    const id = requiredText(req.params.id, 'id');
+    await prisma.$transaction(async (transaction) => {
+      await transaction.financeEntry.deleteMany({ where: { sourceReference: `rental-payment:${id}` } });
+      await transaction.rentalPayment.delete({ where: { id } });
+    });
+    res.status(204).send();
+  }));
   router.get('/entries', asyncHandler(async (req, res) => {
     const entries = await prisma.financeEntry.findMany({ orderBy: { entryDate: 'desc' }, include: { job: { select: { jobNumber: true } }, claim: { select: { claimNumber: true } } } });
     res.json(entries);
@@ -39,12 +131,51 @@ export function createFinanceRouter(prisma: PrismaClient) {
   }));
   router.get('/summary', asyncHandler(async (req, res) => { const period = String(req.query.period || 'month'); if (!['week', 'month', 'year'].includes(period)) throw new ApiError(400, 'period must be week, month, or year'); const anchor = req.query.date ? date(req.query.date, 'date') : new Date(); const from = startOf(anchor, period); const to = endOf(from, period); const [entries, jobs] = await Promise.all([prisma.financeEntry.findMany({ where: { entryDate: { gte: from, lte: to } } }), prisma.jobExpense.findMany({ where: { expenseDate: { gte: from, lte: to } } })]); const income = entries.filter((e) => e.type === 'income').reduce((s, e) => s + e.amount, 0); const general = entries.filter((e) => e.type === 'expense' && !e.jobId).reduce((s, e) => s + e.amount, 0); const syncedExpenseIds = new Set(entries.filter((e) => e.sourceReference?.startsWith('job-expense:')).map((e) => e.sourceReference!.slice('job-expense:'.length))); const jobExpenses = jobs.filter((e) => !syncedExpenseIds.has(e.id)).reduce((s, e) => s + e.amount, 0) + entries.filter((e) => e.type === 'expense' && Boolean(e.jobId)).reduce((s, e) => s + e.amount, 0); res.json({ period, from, to, income, generalExpenses: general, jobExpenses, expenses: general + jobExpenses, net: income - general - jobExpenses }); }));
   router.get('/forecast', asyncHandler(async (req, res) => { const year = Number(req.query.year || new Date().getFullYear()); if (!Number.isInteger(year) || year < 2000 || year > 2200) throw new ApiError(400, 'year must be valid'); const from = new Date(Date.UTC(year, 0, 1)); const to = new Date(Date.UTC(year + 1, 0, 1)); const priorFrom = new Date(Date.UTC(year - 1, 0, 1)); const [current, prior, recurring] = await Promise.all([prisma.financeEntry.findMany({ where: { entryDate: { gte: from, lt: to } } }), prisma.financeEntry.findMany({ where: { entryDate: { gte: priorFrom, lt: from } } }), prisma.recurringExpense.findMany({ where: { active: true, startDate: { lt: to }, OR: [{ endDate: null }, { endDate: { gte: from } }] } })]); const sum = (items: typeof current, type: string) => items.filter((item) => item.type === type).reduce((total, item) => total + item.amount, 0); const recurringAnnual = recurring.reduce((total, item) => total + item.amount * (item.frequency === 'weekly' ? 52 : item.frequency === 'yearly' ? 1 : 12), 0); res.json({ year, income: sum(current, 'income'), expenses: sum(current, 'expense'), priorYearIncome: sum(prior, 'income'), priorYearExpenses: sum(prior, 'expense'), recurringAnnual, projectedExpenses: sum(current, 'expense') + recurringAnnual, recurring }); }));
+  router.get('/range', asyncHandler(async (req, res) => {
+    const months = Math.min(12, Math.max(1, Number(req.query.months || 3)));
+    if (!Number.isInteger(months)) throw new ApiError(400, 'months must be a whole number from 1 to 12');
+    const anchor = req.query.date ? date(req.query.date, 'date') : new Date();
+    const from = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() - months + 1, 1));
+    const to = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 1));
+    const entries = await prisma.financeEntry.findMany({ where: { entryDate: { gte: from, lt: to } } });
+    const income = entries.filter((entry) => entry.type === 'income').reduce((total, entry) => total + entry.amount, 0);
+    const expenses = entries.filter((entry) => entry.type === 'expense').reduce((total, entry) => total + entry.amount, 0);
+    res.json({ months, from, to, income, expenses, net: income - expenses });
+  }));
   return router;
 }
 function date(value: unknown, field: string) { const result = new Date(String(value)); if (Number.isNaN(result.getTime())) throw new ApiError(400, `${field} must be a valid date`); return result; }
 function positive(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result <= 0) throw new ApiError(400, 'amount must be a positive number'); return result; }
 function nonNegative(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result < 0) throw new ApiError(400, 'startingBalance must be zero or greater'); return result; }
+function nonNegativeWeeklyRate(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result < 0) throw new ApiError(400, 'weeklyRate must be zero or greater'); return result; }
+function rentalTenantData(body: Record<string, unknown>, partial: true): Prisma.RentalTenantUpdateInput;
+function rentalTenantData(body: Record<string, unknown>, partial?: false): Prisma.RentalTenantCreateInput;
+function rentalTenantData(body: Record<string, unknown>, partial = false): Prisma.RentalTenantCreateInput | Prisma.RentalTenantUpdateInput {
+  return {
+    name: body.name === undefined && partial ? undefined : requiredText(body.name, 'name'),
+    phone: body.phone === undefined && partial ? undefined : optionalText(body.phone, 'phone'),
+    email: body.email === undefined && partial ? undefined : optionalText(body.email, 'email'),
+    space: body.space === undefined && partial ? undefined : (body.space === undefined ? 'mechanical' : requiredText(body.space, 'space')),
+    shift: body.shift === undefined && partial ? undefined : validate(body.shift === undefined ? 'day' : body.shift, ['day', 'night'] as const, 'shift'),
+    rentAmount: body.rentAmount === undefined && partial ? undefined : (body.rentAmount === undefined ? 0 : nonNegativeRent(body.rentAmount)),
+    rentFrequency: body.rentFrequency === undefined && partial ? undefined : validate(body.rentFrequency === undefined ? 'daily' : body.rentFrequency, ['daily', 'weekly', 'monthly'] as const, 'rentFrequency'),
+    startDate: body.startDate === undefined && partial ? undefined : (body.startDate ? date(body.startDate, 'startDate') : undefined),
+    active: body.active === undefined && partial ? undefined : (body.active === undefined ? true : optionalBoolean(body.active, 'active')),
+    notes: body.notes === undefined && partial ? undefined : optionalText(body.notes, 'notes')
+  };
+}
+function nonNegativeRent(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result < 0) throw new ApiError(400, 'rentAmount must be zero or greater'); return result; }
 function validate<T extends readonly string[]>(value: unknown, values: T, field: string) { const result = requiredText(value, field); if (!values.includes(result)) throw new ApiError(400, `${field} is invalid`); return result; }
+function fullPeriodsElapsed(startDate: Date, asOf: Date, frequency: string) {
+  if (asOf < startDate) return 0;
+  if (frequency === 'daily') return Math.floor((asOf.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+  if (frequency === 'weekly') return Math.floor((asOf.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000));
+  let periods = (asOf.getUTCFullYear() - startDate.getUTCFullYear()) * 12 + asOf.getUTCMonth() - startDate.getUTCMonth();
+  const anniversary = new Date(startDate);
+  anniversary.setUTCMonth(startDate.getUTCMonth() + periods);
+  if (anniversary > asOf) periods -= 1;
+  return Math.max(0, periods);
+}
 async function calculateBankBalance(prisma: PrismaClient, startingBalance: number) {
   const entries = await prisma.financeEntry.findMany({ select: { type: true, amount: true } });
   const income = entries.filter((entry) => entry.type === 'income').reduce((total, entry) => total + entry.amount, 0);
