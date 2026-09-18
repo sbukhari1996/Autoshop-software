@@ -14,6 +14,6 @@
     "db:migrate": "npm run db:migrate --workspace apps/api"
   },
   "devDependencies": {
-    "npm-run-all": "^4.3.1"
+    "npm-run-all": "^4.1.5"
   }
 }

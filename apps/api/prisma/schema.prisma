@@ -15,8 +15,37 @@ model User {
   role      String   @default("staff")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  memberships OrganizationMembership[]
 
   @@map("users")
+}
+
+model Organization {
+  id          String                   @id @default(cuid())
+  name        String
+  slug        String                   @unique
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  memberships OrganizationMembership[]
+
+  @@map("organizations")
+}
+
+model OrganizationMembership {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  role           String       @default("viewer")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId, role])
+  @@map("organization_memberships")
 }
 
 model Customer {
@@ -31,6 +60,8 @@ model Customer {
   vehicles    Vehicle[]
   claims      Claim[]
   jobs        Job[]
+  inspections Inspection[]
+  invoices    Invoice[]
 
   @@map("customers")
 }
@@ -41,8 +72,11 @@ model Vehicle {
   year         Int?
   make         String?
   model        String?
+  trim         String?
+  bodyClass    String?
   vin          String?
   licensePlate String?
+  licenseState String?
   color        String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -55,23 +89,76 @@ model Vehicle {
 }
 
 model Claim {
-  id               String   @id @default(cuid())
-  customerId       String
-  vehicleId        String?
-  claimNumber      String?
-  insuranceCompany String?
-  adjusterName     String?
-  adjusterPhone    String?
-  claimStatus      String   @default("new")
-  policeReportFile String?
-  notes            String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  customerId            String
+  vehicleId             String?
+  claimNumber           String?
+  customerName          String?
+  customerPhone         String?
+  customerInsurance     String?
+  customerPolicyNumber  String?
+  customerClaimNumber   String?
+  customerAddress       String?
+  driverLicense         String?
+  vehicleYear           Int?
+  vehicleMake           String?
+  vehicleModel          String?
+  vehicleVin            String?
+  vehicleTrim           String?
+  vehicleBodyClass      String?
+  vehicleColor          String?
+  vehicleLicensePlate   String?
+  vehiclePlateState     String?
+  atFaultDriverName     String?
+  atFaultDriverPhone    String?
+  atFaultDriverLicense  String?
+  atFaultDriverDlState  String?
+  atFaultPlate          String?
+  atFaultPlateState     String?
+  atFaultVehicleVin     String?
+  atFaultVehicleYear    Int?
+  atFaultVehicleMake    String?
+  atFaultVehicleModel   String?
+  atFaultVehicleTrim    String?
+  atFaultVehicleBodyClass String?
+  atFaultVehicleColor   String?
+  atFaultInsurance      String?
+  atFaultPolicyNumber   String?
+  atFaultClaimNumber    String?
+  atFaultInsurancePhone String?
+  incidentDate          DateTime?
+  policeReportNumber    String?
+  policeDepartment      String?
+  witnessName           String?
+  witnessPhone          String?
+  damagePhotos          Boolean  @default(false)
+  platePhotos           Boolean  @default(false)
+  atFaultDlPhotos       Boolean  @default(false)
+  insuranceCardPhotos   Boolean  @default(false)
+  policeReportFiled     Boolean  @default(false)
+  witnessStatement      Boolean  @default(false)
+  estimateAttached      Boolean  @default(false)
+  readyToSubmit         Boolean  @default(false)
+  photoFolderLink       String?
+  insuranceCompany      String?
+  adjusterName          String?
+  adjusterPhone         String?
+  adjusterEmail         String?
+  adjusterVisitAt       DateTime?
+  claimStatus           String   @default("new")
+  dateSubmitted         DateTime?
+  policeReportFile      String?
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   customer         Customer @relation(fields: [customerId], references: [id])
   vehicle          Vehicle? @relation(fields: [vehicleId], references: [id])
   jobs             Job[]
   documents        ClaimDocument[]
+  inspections      Inspection[]
+  invoices         Invoice[]
+  financeEntries   FinanceEntry[]
 
   @@map("claims")
 }
@@ -82,6 +169,8 @@ model Estimate {
   estimateNumber String?
   status        String   @default("draft")
   totalAmount   Float    @default(0)
+  taxRate       Float    @default(8.875)
+  damageSummary String?
   notes         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -95,10 +184,14 @@ model Estimate {
 model EstimateLineItem {
   id          String   @id @default(cuid())
   estimateId  String
+  section     String?
+  operation   String?
   description String
+  partNumber  String?
   quantity    Float    @default(1)
   unitPrice   Float    @default(0)
   laborHours  Float    @default(0)
+  paintHours  Float    @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -126,26 +219,39 @@ model Job {
   customer          Customer @relation(fields: [customerId], references: [id])
   vehicle           Vehicle? @relation(fields: [vehicleId], references: [id])
   claim             Claim?   @relation(fields: [claimId], references: [id])
-  estimate          Estimate[]
+  estimates         Estimate[]
   expenses          JobExpense[]
+  financeEntries    FinanceEntry[]
   inspections      Inspection[]
   documents        JobDocument[]
+  statusHistory     JobStatusHistory[]
+  authorizations    RepairAuthorization[]
+  invoices          Invoice[]
 
   @@map("jobs")
 }
 
 model Inspection {
   id            String   @id @default(cuid())
-  jobId         String
+  jobId         String?
+  customerId    String?
+  claimId       String?
   scheduledFor  DateTime?
   inspectorName String?
+  inspectorPhone String?
   insuranceRep  String?
   status        String   @default("scheduled")
   notes         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  job           Job      @relation(fields: [jobId], references: [id])
+  job           Job?      @relation(fields: [jobId], references: [id])
+  customer      Customer? @relation(fields: [customerId], references: [id])
+  claim         Claim?    @relation(fields: [claimId], references: [id])
+
+  @@index([jobId])
+  @@index([customerId])
+  @@index([claimId])
 
   @@map("inspections")
 }
@@ -160,10 +266,153 @@ model JobExpense {
   expenseDate DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-
   job         Job      @relation(fields: [jobId], references: [id])
 
   @@map("job_expenses")
+}
+
+model JobStatusHistory {
+  id         String   @id @default(cuid())
+  jobId      String
+  fromStatus String
+  toStatus   String
+  note       String?
+  createdAt  DateTime @default(now())
+
+  job        Job      @relation(fields: [jobId], references: [id])
+
+  @@index([jobId])
+  @@map("job_status_history")
+}
+
+model FinanceEntry {
+  id          String   @id @default(cuid())
+  type        String
+  description String
+  category    String?
+  amount      Float
+  paymentMethod String?
+  entryDate   DateTime @default(now())
+  jobId       String?
+  claimId     String?
+  documentId  String?
+  sourceReference String? @unique
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  job         Job?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  claim       Claim?   @relation(fields: [claimId], references: [id], onDelete: SetNull)
+
+  @@index([entryDate])
+  @@index([type])
+  @@index([jobId])
+  @@index([claimId])
+  @@map("finance_entries")
+}
+
+model BankAccount {
+  id              String   @id @default("default")
+  name            String   @default("Primary bank")
+  startingBalance Float    @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("bank_accounts")
+}
+
+model Invoice {
+  id          String   @id @default(cuid())
+  invoiceNumber String  @unique
+  customerId  String
+  jobId       String?
+  claimId     String?
+  status      String   @default("draft")
+  issueDate   DateTime @default(now())
+  dueDate     DateTime?
+  subtotal    Float    @default(0)
+  tax         Float    @default(0)
+  total       Float    @default(0)
+  amountPaid  Float    @default(0)
+  balanceDue  Float    @default(0)
+  notes       String?
+  pdfFileName String?
+  pdfFilePath String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer    Customer @relation(fields: [customerId], references: [id])
+  job         Job?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  claim       Claim?   @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  lineItems   InvoiceLineItem[]
+  payments    Payment[]
+
+  @@index([customerId])
+  @@index([jobId])
+  @@index([claimId])
+  @@map("invoices")
+}
+
+model InvoiceLineItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  description String
+  quantity    Float   @default(1)
+  unitPrice   Float   @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_line_items")
+}
+
+model Payment {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  method      String
+  amount      Float
+  date        DateTime @default(now())
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+model RecurringExpense {
+  id          String   @id @default(cuid())
+  name        String
+  category    String?
+  amount      Float
+  frequency   String   @default("monthly")
+  startDate   DateTime
+  endDate     DateTime?
+  active      Boolean  @default(true)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([active, startDate])
+  @@map("recurring_expenses")
+}
+
+model RepairAuthorization {
+  id          String   @id @default(cuid())
+  jobId       String
+  fileName    String
+  filePath    String
+  status      String   @default("generated")
+  generatedAt DateTime @default(now())
+
+  job         Job      @relation(fields: [jobId], references: [id])
+
+  @@index([jobId])
+  @@map("repair_authorizations")
 }
 
 model ClaimDocument {
@@ -172,6 +421,7 @@ model ClaimDocument {
   fileName    String
   filePath    String
   documentType String?
+  description  String?
   createdAt   DateTime @default(now())
 
   claim       Claim     @relation(fields: [claimId], references: [id])
@@ -185,6 +435,7 @@ model JobDocument {
   fileName    String
   filePath    String
   documentType String?
+  description  String?
   createdAt   DateTime @default(now())
 
   job         Job      @relation(fields: [jobId], references: [id])

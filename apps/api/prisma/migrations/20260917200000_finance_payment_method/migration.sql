@@ -1,0 +1,1 @@
+ALTER TABLE "finance_entries" ADD COLUMN "paymentMethod" TEXT;
