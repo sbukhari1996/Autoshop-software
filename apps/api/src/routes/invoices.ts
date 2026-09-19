@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Router } from 'express';
+import multer from 'multer';
 import PDFDocument from 'pdfkit';
 import { PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
@@ -10,16 +11,17 @@ import { optionalText, requiredText } from '../validation.js';
 const statuses = ['draft', 'sent', 'partial', 'paid', 'overdue', 'cancelled'] as const;
 const paymentMethods = ['cash', 'debit_card', 'credit_card', 'check', 'ach', 'other'] as const;
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 export function createInvoicesRouter(prisma: PrismaClient) {
   const router = Router();
 
   router.get('/', asyncHandler(async (_req, res) => {
-    res.json(await prisma.invoice.findMany({ orderBy: { issueDate: 'desc' }, include: { customer: true, job: { select: { id: true, jobNumber: true } }, claim: { select: { id: true, claimNumber: true } }, lineItems: true, payments: true } }));
+    res.json(await prisma.invoice.findMany({ orderBy: { issueDate: 'desc' }, include: { customer: true, job: { select: { id: true, jobNumber: true } }, claim: { select: { id: true, claimNumber: true } }, lineItems: true, payments: true, documents: true } }));
   }));
 
   router.get('/:id', asyncHandler(async (req, res) => {
-    const invoice = await prisma.invoice.findUnique({ where: { id: routeParam(req, 'id') }, include: { customer: true, job: true, claim: true, lineItems: true, payments: { orderBy: { date: 'desc' } } } });
+    const invoice = await prisma.invoice.findUnique({ where: { id: routeParam(req, 'id') }, include: { customer: true, job: true, claim: true, lineItems: true, payments: { orderBy: { date: 'desc' } }, documents: { orderBy: { createdAt: 'desc' } } } });
     if (!invoice) throw new ApiError(404, 'Invoice not found');
     res.json(invoice);
   }));
@@ -128,6 +130,60 @@ export function createInvoicesRouter(prisma: PrismaClient) {
       return created;
     });
     res.status(201).json(payment);
+  }));
+
+  router.get('/:id/documents', asyncHandler(async (req, res) => {
+    const invoiceId = routeParam(req, 'id');
+    if (!(await prisma.invoice.findUnique({ where: { id: invoiceId }, select: { id: true } }))) throw new ApiError(404, 'Invoice not found');
+    res.json(await prisma.invoiceDocument.findMany({ where: { invoiceId }, orderBy: { createdAt: 'desc' } }));
+  }));
+
+  router.post('/:id/documents', upload.array('file', 10), asyncHandler(async (req, res) => {
+    const invoiceId = routeParam(req, 'id');
+    if (!(await prisma.invoice.findUnique({ where: { id: invoiceId }, select: { id: true } }))) throw new ApiError(404, 'Invoice not found');
+    const files = (req.files as Express.Multer.File[] | undefined) || [];
+    if (!files.length || files.some((file) => file.size === 0)) throw new ApiError(400, 'at least one non-empty file is required');
+    const documentType = optionalText(req.body.documentType, 'documentType') || 'receipt';
+    const description = optionalText(req.body.description, 'description');
+    await mkdir(uploadDirectory, { recursive: true });
+    const documents = [];
+    for (const file of files) {
+      const originalName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'receipt';
+      const storedName = `${randomUUID()}-${originalName}`;
+      await writeFile(path.join(uploadDirectory, storedName), file.buffer, { flag: 'wx' });
+      const filePath = path.relative(process.cwd(), path.join(uploadDirectory, storedName));
+      const document = await prisma.invoiceDocument.create({ data: { invoiceId, fileName: originalName, filePath, documentType, description } });
+      documents.push({ ...document, downloadUrl: `/api/invoices/${invoiceId}/documents/${document.id}/download` });
+    }
+    res.status(201).json({ documents });
+  }));
+
+  router.get('/:id/documents/:documentId/download', asyncHandler(async (req, res) => {
+    const invoiceId = routeParam(req, 'id');
+    const documentId = routeParam(req, 'documentId');
+    const document = await prisma.invoiceDocument.findFirst({ where: { id: documentId, invoiceId } });
+    if (!document) throw new ApiError(404, 'Receipt not found');
+    const resolvedPath = path.resolve(process.cwd(), document.filePath);
+    const relativePath = path.relative(uploadDirectory, resolvedPath);
+    if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) throw new ApiError(400, 'Stored file path is invalid');
+    try {
+      await stat(resolvedPath);
+      res.type(path.extname(document.fileName) || 'application/octet-stream').set('Content-Disposition', `attachment; filename="${document.fileName}"`).send(await readFile(resolvedPath));
+    } catch {
+      throw new ApiError(404, 'Stored file not found');
+    }
+  }));
+
+  router.delete('/:id/documents/:documentId', asyncHandler(async (req, res) => {
+    const invoiceId = routeParam(req, 'id');
+    const documentId = routeParam(req, 'documentId');
+    const document = await prisma.invoiceDocument.findFirst({ where: { id: documentId, invoiceId } });
+    if (!document) throw new ApiError(404, 'Receipt not found');
+    await prisma.invoiceDocument.delete({ where: { id: documentId } });
+    const resolvedPath = path.resolve(process.cwd(), document.filePath);
+    const relativePath = path.relative(uploadDirectory, resolvedPath);
+    if (relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath)) await unlink(resolvedPath).catch(() => {});
+    res.status(204).send();
   }));
 
   return router;

@@ -418,6 +418,7 @@ model Invoice {
   claim       Claim?   @relation(fields: [claimId], references: [id], onDelete: SetNull)
   lineItems   InvoiceLineItem[]
   payments    Payment[]
+  documents   InvoiceDocument[]
 
   @@index([customerId])
   @@index([jobId])
@@ -513,4 +514,19 @@ model JobDocument {
   job         Job      @relation(fields: [jobId], references: [id])
 
   @@map("job_documents")
+}
+
+model InvoiceDocument {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  fileName    String
+  filePath    String
+  documentType String  @default("receipt")
+  description  String?
+  createdAt   DateTime @default(now())
+
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+  @@map("invoice_documents")
 }

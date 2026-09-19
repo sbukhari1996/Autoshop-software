@@ -549,4 +549,6 @@ body { color: var(--text); background: #f5f6f7; }
 .preset-picker-item-body { display: flex; flex-direction: column; gap: 2px; }
 .preset-picker-item-body small { color: #718087; }
 .preset-picker-footer { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #e1e6e4; padding-top: 10px; }
+.receipt-upload-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.receipt-upload-form input[type="text"], .receipt-upload-form input:not([type]) { flex: 1; min-width: 160px; }
 
