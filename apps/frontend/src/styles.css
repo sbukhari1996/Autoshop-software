@@ -538,3 +538,15 @@ body { color: var(--text); background: #f5f6f7; }
 .forgot-button:hover { color: var(--orange-light); }
 .auth-notice { padding: 9px 10px; color: #536b64; background: #edf7f1; border: 1px solid #c8e2d3; border-radius: 3px; font-size: .68rem; line-height: 1.35; }
 .auth-back { margin-top: 3px; }
+.preset-picker-modal { width: min(720px, 92vw); max-height: 85vh; display: flex; flex-direction: column; }
+.preset-picker-controls { display: flex; gap: 10px; margin: 12px 0; }
+.preset-picker-search { flex: 1; }
+.preset-picker-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; margin-bottom: 12px; }
+.preset-picker-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 10px; border: 1px solid #e1e6e4; border-radius: 6px; cursor: pointer; }
+.preset-picker-item:hover { border-color: var(--orange-light, #d97b3f); }
+.preset-picker-item.checked { border-color: var(--orange-light, #d97b3f); background: #fdf3ea; }
+.preset-picker-item input[type="checkbox"] { margin-top: 3px; }
+.preset-picker-item-body { display: flex; flex-direction: column; gap: 2px; }
+.preset-picker-item-body small { color: #718087; }
+.preset-picker-footer { display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #e1e6e4; padding-top: 10px; }
+

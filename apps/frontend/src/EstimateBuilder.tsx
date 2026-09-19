@@ -1,4 +1,6 @@
 import React from "react";
+import { LineItemPresetPicker } from "./LineItemPresetPicker";
+import type { CollisionPresetItem } from "./collisionLineItemPresets";
 
 type Job = {
   id: string;
@@ -94,6 +96,7 @@ export function EstimateBuilder({
   const [error, setError] = React.useState("");
   const [savedEstimateId, setSavedEstimateId] = React.useState("");
   const [downloading, setDownloading] = React.useState(false);
+  const [presetsOpen, setPresetsOpen] = React.useState(false);
   const selectedJob = jobs.find((job) => job.id === jobId);
   const customerName =
     source === "walkin"
@@ -153,6 +156,21 @@ export function EstimateBuilder({
     setLines(
       lines.map((line, i) => (i === index ? { ...line, [key]: value } : line)),
     );
+  function addPresetLines(items: CollisionPresetItem[]) {
+    const presetLines: Line[] = items.map((item) => ({
+      section: item.category,
+      operation: item.operation,
+      description: item.description,
+      partNumber: "",
+      quantity: "1",
+      unitPrice: item.unitPrice ? String(item.unitPrice) : "",
+      laborHours: item.laborHours ? String(item.laborHours) : "",
+      paintHours: item.paintHours ? String(item.paintHours) : "",
+    }));
+    const onlyBlankLine =
+      lines.length === 1 && !lines[0].description && !lines[0].unitPrice;
+    setLines(onlyBlankLine ? presetLines : [...lines, ...presetLines]);
+  }
   const updateWalkIn = (key: keyof WalkIn, value: string) =>
     setWalkIn({ ...walkIn, [key]: value });
   async function decodeVin() {
@@ -473,13 +491,26 @@ export function EstimateBuilder({
             <h2>Repair operations</h2>
             <p>Use sections to group the estimate like the sample.</p>
           </div>
-          <button
-            className="secondary-button"
-            onClick={() => setLines([...lines, newLine()])}
-          >
-            + Add line item
-          </button>
+          <div className="estimate-actions">
+            <button
+              className="secondary-button"
+              onClick={() => setPresetsOpen(true)}
+            >
+              Select from line item library
+            </button>
+            <button
+              className="secondary-button"
+              onClick={() => setLines([...lines, newLine()])}
+            >
+              + Add line item
+            </button>
+          </div>
         </div>
+        <LineItemPresetPicker
+          open={presetsOpen}
+          onClose={() => setPresetsOpen(false)}
+          onAdd={addPresetLines}
+        />
         <div className="estimate-line-table">
           <div className="estimate-line-head">
             <span>Section</span>

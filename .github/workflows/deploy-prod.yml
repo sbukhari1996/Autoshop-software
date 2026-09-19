@@ -1,0 +1,17 @@
+name: Deploy to production
+
+on:
+  push:
+    branches: [prod]
+
+jobs:
+  deploy:
+    # Requires a self-hosted runner installed on the production Ubuntu VM
+    # (Settings -> Actions -> Runners -> New self-hosted runner) so this job
+    # executes directly on that machine without exposing SSH to the internet.
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy
+        run: bash scripts/deploy.sh
