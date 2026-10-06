@@ -1,0 +1,7 @@
+mastercraftauto.com, www.mastercraftauto.com {
+	reverse_proxy frontend:80
+}
+
+api.mastercraftauto.com {
+	reverse_proxy api:4000
+}
