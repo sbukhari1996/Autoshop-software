@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
@@ -85,13 +85,30 @@ export function createOperationsRouter(prisma: PrismaClient) {
 
   router.get('/documents/:documentId/download', asyncHandler(async (req, res) => {
     const documentId = routeParam(req, 'documentId');
-    const [claimDocument, jobDocument] = await Promise.all([
+    const [claimDocument, jobDocument, customerDocument] = await Promise.all([
       prisma.claimDocument.findUnique({ where: { id: documentId } }),
       prisma.jobDocument.findUnique({ where: { id: documentId } }),
+      prisma.customerDocument.findUnique({ where: { id: documentId } }),
     ]);
-    const document = claimDocument || jobDocument;
+    const document = claimDocument || jobDocument || customerDocument;
     if (!document) throw new ApiError(404, 'Document not found');
     await sendStoredFile(res, document.filePath, document.fileName);
+  }));
+
+  router.delete('/documents/:documentId', asyncHandler(async (req, res) => {
+    const documentId = routeParam(req, 'documentId');
+    const [claimDocument, jobDocument, customerDocument] = await Promise.all([
+      prisma.claimDocument.findUnique({ where: { id: documentId } }),
+      prisma.jobDocument.findUnique({ where: { id: documentId } }),
+      prisma.customerDocument.findUnique({ where: { id: documentId } }),
+    ]);
+    const document = claimDocument || jobDocument || customerDocument;
+    if (!document) throw new ApiError(404, 'Document not found');
+    await removeStoredFile(document.filePath);
+    if (claimDocument) await prisma.claimDocument.delete({ where: { id: documentId } });
+    else if (jobDocument) await prisma.jobDocument.delete({ where: { id: documentId } });
+    else await prisma.customerDocument.delete({ where: { id: documentId } });
+    res.status(204).send();
   }));
 
   router.post('/documents/upload', upload.array('file', 20), asyncHandler(async (req, res) => {
@@ -99,10 +116,12 @@ export function createOperationsRouter(prisma: PrismaClient) {
     if (!files.length || files.some((file) => file.size === 0)) throw new ApiError(400, 'at least one non-empty file is required');
     const claimId = optionalText(req.body.claimId, 'claimId');
     const jobId = optionalText(req.body.jobId, 'jobId');
-    if ((claimId ? 1 : 0) + (jobId ? 1 : 0) !== 1) throw new ApiError(400, 'exactly one of claimId or jobId is required');
+    const customerId = optionalText(req.body.customerId, 'customerId');
+    if ((claimId ? 1 : 0) + (jobId ? 1 : 0) + (customerId ? 1 : 0) !== 1) throw new ApiError(400, 'exactly one of claimId, jobId, or customerId is required');
     if (claimId && !(await prisma.claim.findUnique({ where: { id: claimId }, select: { id: true } }))) throw new ApiError(404, 'Claim not found');
     if (jobId && !(await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } }))) throw new ApiError(404, 'Job not found');
-    const documentType = requiredDocumentType(req.body.documentType);
+    if (customerId && !(await prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } }))) throw new ApiError(404, 'Customer not found');
+    const documentType = requiredDocumentType(req.body.documentType || 'other');
     const description = optionalText(req.body.description, 'description');
     await mkdir(uploadDirectory, { recursive: true });
     const documents = [];
@@ -113,7 +132,9 @@ export function createOperationsRouter(prisma: PrismaClient) {
       const filePath = path.relative(process.cwd(), path.join(uploadDirectory, storedName));
       const document = claimId
         ? await prisma.claimDocument.create({ data: { claimId, fileName: originalName, filePath, documentType, description } })
-        : await prisma.jobDocument.create({ data: { jobId: jobId!, fileName: originalName, filePath, documentType, description } });
+        : jobId
+          ? await prisma.jobDocument.create({ data: { jobId, fileName: originalName, filePath, documentType, description } })
+          : await prisma.customerDocument.create({ data: { customerId: customerId!, fileName: originalName, filePath, documentType, description } });
       documents.push({ ...document, downloadUrl: `/api/documents/${document.id}/download` });
     }
     res.status(201).json({ documents });
@@ -152,6 +173,18 @@ async function sendStoredFile(res: { type: (value: string) => { send: (value: Bu
     res.type(path.extname(fileName) || 'application/octet-stream').send(contents);
   } catch {
     throw new ApiError(404, 'Stored file not found');
+  }
+}
+
+async function removeStoredFile(filePath: string) {
+  const resolvedPath = path.resolve(process.cwd(), filePath);
+  const relativePath = path.relative(uploadDirectory, resolvedPath);
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) throw new ApiError(400, 'Stored file path is invalid');
+  try {
+    await unlink(resolvedPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new ApiError(404, 'Stored file not found');
+    throw error;
   }
 }
 

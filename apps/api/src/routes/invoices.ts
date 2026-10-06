@@ -86,7 +86,7 @@ export function createInvoicesRouter(prisma: PrismaClient) {
     const id = routeParam(req, 'id');
     const existing = await prisma.invoice.findUnique({ where: { id }, include: { payments: true } });
     if (!existing) throw new ApiError(404, 'Invoice not found');
-    const links = await validateLinks(prisma, req.body.customerId ?? existing.customerId, req.body.jobId === undefined ? existing.jobId : req.body.jobId, req.body.claimId === undefined ? existing.claimId : req.body.claimId);
+    const links = await validateLinks(prisma, req.body.customerId === undefined ? existing.customerId : req.body.customerId, req.body.jobId === undefined ? existing.jobId : req.body.jobId, req.body.claimId === undefined ? existing.claimId : req.body.claimId);
     const lineItems = req.body.lineItems === undefined ? undefined : parseLineItems(req.body.lineItems);
     const invoice = await prisma.$transaction(async (tx) => {
       const totals = lineItems ? totalsFor(lineItems, req.body.taxRate) : undefined;
@@ -190,11 +190,12 @@ export function createInvoicesRouter(prisma: PrismaClient) {
 }
 
 async function validateLinks(prisma: PrismaClient, customerIdValue: unknown, jobIdValue: unknown, claimIdValue: unknown) {
-  const customerId = requiredText(customerIdValue, 'customerId');
-  const jobId = optionalText(jobIdValue, 'jobId');
-  const claimId = optionalText(claimIdValue, 'claimId');
-  const [customer, job, claim] = await Promise.all([prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } }), jobId ? prisma.job.findUnique({ where: { id: jobId }, select: { id: true, customerId: true, claimId: true } }) : null, claimId ? prisma.claim.findUnique({ where: { id: claimId }, select: { id: true, customerId: true } }) : null]);
-  if (!customer) throw new ApiError(404, 'Customer not found');
+  const customerId = optionalText(customerIdValue, 'customerId') || null;
+  const jobId = optionalText(jobIdValue, 'jobId') || null;
+  const claimId = optionalText(claimIdValue, 'claimId') || null;
+  if (!customerId && (jobId || claimId)) throw new ApiError(400, 'A customer is required to link an invoice to a job or claim');
+  const [customer, job, claim] = await Promise.all([customerId ? prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } }) : null, jobId ? prisma.job.findUnique({ where: { id: jobId }, select: { id: true, customerId: true, claimId: true } }) : null, claimId ? prisma.claim.findUnique({ where: { id: claimId }, select: { id: true, customerId: true } }) : null]);
+  if (customerId && !customer) throw new ApiError(404, 'Customer not found');
   if (jobId && (!job || job.customerId !== customerId)) throw new ApiError(400, 'Job must belong to the customer');
   if (claimId && (!claim || claim.customerId !== customerId)) throw new ApiError(400, 'Claim must belong to the customer');
   if (jobId && claimId && job?.claimId !== claimId) throw new ApiError(400, 'Claim must belong to the job');
@@ -218,7 +219,7 @@ async function createInvoicePdf(invoice: {
   total: number;
   amountPaid: number;
   balanceDue: number;
-  customer: { firstName: string; lastName: string; phone: string | null; email: string | null; address: string | null };
+  customer: { firstName: string; lastName: string; phone: string | null; email: string | null; address: string | null } | null;
   job: { jobNumber: string; vehicle: { year: number | null; make: string | null; model: string | null; trim: string | null; vin: string | null; licensePlate: string | null; licenseState: string | null } | null } | null;
   claim: { claimNumber: string | null } | null;
   lineItems: Array<{ description: string; quantity: number; unitPrice: number }>;
@@ -241,7 +242,7 @@ async function createInvoicePdf(invoice: {
   doc.rect(36, 126, pageWidth, 34).fill('#c90000'); text('INVOICE / ESTIMATE OF RECORD', 36, 136, { size: 15, bold: true, color: '#ffffff', width: pageWidth, align: 'center' });
   doc.rect(36, 174, pageWidth, 25).lineWidth(0.6).stroke('#bdbdbd'); text(`Invoice No: ${invoice.invoiceNumber}`, 45, 182, { size: 8.5, bold: true }); text(`Invoice Date: ${date(invoice.issueDate)}`, 350, 182, { size: 8.5, bold: true, width: 215, align: 'right' });
   doc.rect(36, 216, pageWidth, 78).lineWidth(0.6).stroke('#bdbdbd'); doc.moveTo(306, 216).lineTo(306, 294).stroke('#bdbdbd');
-  text('CUSTOMER', 45, 226, { size: 10, bold: true }); text(`${invoice.customer.firstName} ${invoice.customer.lastName}`, 45, 243, { size: 10 }); text(`Address: ${invoice.customer.address || 'N/A'}`, 45, 260, { size: 8.5 }); text(`Phone: ${invoice.customer.phone || 'N/A'}    Email: ${invoice.customer.email || 'N/A'}`, 45, 275, { size: 8.5 });
+  text('CUSTOMER', 45, 226, { size: 10, bold: true }); text(invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : 'Walk-in / counter sale', 45, 243, { size: 10 }); text(`Address: ${invoice.customer?.address || 'N/A'}`, 45, 260, { size: 8.5 }); text(`Phone: ${invoice.customer?.phone || 'N/A'}    Email: ${invoice.customer?.email || 'N/A'}`, 45, 275, { size: 8.5 });
   text('VEHICLE / JOB', 315, 226, { size: 10, bold: true }); text(vehicle ? [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(' ') : 'Not specified', 315, 243, { size: 9 }); text(`VIN: ${vehicle?.vin || 'N/A'}`, 315, 260, { size: 8.5 }); text(`License: ${vehicle?.licensePlate || 'N/A'}${vehicle?.licenseState ? ` (${vehicle.licenseState})` : ''}`, 315, 275, { size: 8.5 }); text(`Job: ${invoice.job?.jobNumber || 'N/A'}   Claim: ${invoice.claim?.claimNumber || 'N/A'}`, 315, 287, { size: 7.5 });
   text('REPAIR WORK AND JOB EXPENSES', 36, 316, { size: 10, bold: true, color: '#ffffff', width: pageWidth }); doc.rect(36, 312, pageWidth, 20).fill('#292929'); text('REPAIR WORK AND JOB EXPENSES', 45, 318, { size: 10, bold: true, color: '#ffffff' });
   const columns = [36, 345, 400, 476, 576]; let y = 332; doc.rect(36, y, pageWidth, 22).fill('#c90000'); ['Description', 'Qty', 'Unit Price', 'Amount'].forEach((label, index) => text(label, columns[index] + 5, y + 7, { size: 8, bold: true, color: '#ffffff', width: columns[index + 1] - columns[index] - 10, align: index ? 'right' : 'left' })); y += 22;

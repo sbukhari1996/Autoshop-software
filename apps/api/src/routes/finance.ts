@@ -1,4 +1,8 @@
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { Router } from 'express';
+import multer from 'multer';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
 import { optionalBoolean, optionalDate, optionalText, requiredText } from '../validation.js';
@@ -6,6 +10,8 @@ import { optionalBoolean, optionalDate, optionalText, requiredText } from '../va
 const entryTypes = ['income', 'expense'] as const;
 const frequencies = ['weekly', 'monthly', 'yearly'] as const;
 const paymentMethods = ['cash', 'debit_card', 'credit_card', 'check', 'ach', 'other'] as const;
+const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
+const receiptUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 export function createFinanceRouter(prisma: PrismaClient) {
   const router = Router();
@@ -102,7 +108,7 @@ export function createFinanceRouter(prisma: PrismaClient) {
     res.status(204).send();
   }));
   router.get('/entries', asyncHandler(async (req, res) => {
-    const entries = await prisma.financeEntry.findMany({ orderBy: { entryDate: 'desc' }, include: { job: { select: { jobNumber: true } }, claim: { select: { claimNumber: true } } } });
+    const entries = await prisma.financeEntry.findMany({ orderBy: { entryDate: 'desc' }, include: { job: { select: { id: true, jobNumber: true } }, claim: { select: { id: true, claimNumber: true } }, documents: { orderBy: { createdAt: 'desc' } } } });
     res.json(entries);
   }));
   router.post('/entries', asyncHandler(async (req, res) => {
@@ -114,8 +120,77 @@ export function createFinanceRouter(prisma: PrismaClient) {
     const entry = await prisma.financeEntry.create({ data: { type, amount, description: requiredText(req.body.description, 'description'), category: optionalText(req.body.category, 'category'), paymentMethod: req.body.paymentMethod === undefined ? null : validate(req.body.paymentMethod, paymentMethods, 'paymentMethod'), entryDate: req.body.entryDate ? date(req.body.entryDate, 'entryDate') : new Date(), jobId, claimId, documentId: optionalText(req.body.documentId, 'documentId'), notes: optionalText(req.body.notes, 'notes') } });
     res.status(201).json(entry);
   }));
-  router.patch('/entries/:id', asyncHandler(async (req, res) => { const entry = await prisma.financeEntry.update({ where: { id: requiredText(req.params.id, 'id') }, data: { type: req.body.type === undefined ? undefined : validate(req.body.type, entryTypes, 'type'), amount: req.body.amount === undefined ? undefined : positive(req.body.amount), description: req.body.description === undefined ? undefined : requiredText(req.body.description, 'description'), category: req.body.category === undefined ? undefined : optionalText(req.body.category, 'category'), paymentMethod: req.body.paymentMethod === undefined ? undefined : validate(req.body.paymentMethod, paymentMethods, 'paymentMethod'), entryDate: req.body.entryDate === undefined ? undefined : date(req.body.entryDate, 'entryDate'), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes') } }); res.json(entry); }));
-  router.delete('/entries/:id', asyncHandler(async (req, res) => { await prisma.financeEntry.delete({ where: { id: requiredText(req.params.id, 'id') } }); res.status(204).send(); }));
+  router.patch('/entries/:id', asyncHandler(async (req, res) => {
+    const id = requiredText(req.params.id, 'id');
+    const existing = await prisma.financeEntry.findUnique({ where: { id } });
+    if (!existing) throw new ApiError(404, 'Ledger entry not found');
+    if (existing.sourceReference) throw new ApiError(409, 'Edit this synced entry from its original payroll, rental, or job expense record');
+    const jobId = req.body.jobId === undefined ? undefined : optionalText(req.body.jobId, 'jobId');
+    const claimId = req.body.claimId === undefined ? undefined : optionalText(req.body.claimId, 'claimId');
+    if (jobId && !(await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } }))) throw new ApiError(404, 'Job not found');
+    if (claimId && !(await prisma.claim.findUnique({ where: { id: claimId }, select: { id: true } }))) throw new ApiError(404, 'Claim not found');
+    const entry = await prisma.financeEntry.update({
+      where: { id },
+      data: {
+        type: req.body.type === undefined ? undefined : validate(req.body.type, entryTypes, 'type'),
+        amount: req.body.amount === undefined ? undefined : positive(req.body.amount),
+        description: req.body.description === undefined ? undefined : requiredText(req.body.description, 'description'),
+        category: req.body.category === undefined ? undefined : optionalText(req.body.category, 'category'),
+        paymentMethod: req.body.paymentMethod === undefined ? undefined : validate(req.body.paymentMethod, paymentMethods, 'paymentMethod'),
+        entryDate: req.body.entryDate === undefined ? undefined : date(req.body.entryDate, 'entryDate'),
+        jobId,
+        claimId,
+        notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'),
+      },
+    });
+    res.json(entry);
+  }));
+  router.delete('/entries/:id', asyncHandler(async (req, res) => {
+    const id = requiredText(req.params.id, 'id');
+    const entry = await prisma.financeEntry.findUnique({ where: { id }, include: { documents: true } });
+    if (!entry) throw new ApiError(404, 'Ledger entry not found');
+    if (entry.sourceReference) throw new ApiError(409, 'Delete this synced entry from its original payroll, rental, or job expense record');
+    for (const document of entry.documents) await removeStoredFile(document.filePath);
+    await prisma.financeEntry.delete({ where: { id } });
+    res.status(204).send();
+  }));
+  router.post('/entries/:id/documents', receiptUpload.single('file'), asyncHandler(async (req, res) => {
+    const entryId = requiredText(req.params.id, 'id');
+    const entry = await prisma.financeEntry.findUnique({ where: { id: entryId }, select: { id: true, type: true } });
+    if (!entry) throw new ApiError(404, 'Ledger entry not found');
+    if (entry.type !== 'expense') throw new ApiError(400, 'Receipts can only be attached to expense entries');
+    const file = req.file;
+    if (!file || !file.size) throw new ApiError(400, 'Choose a non-empty receipt file');
+    await mkdir(uploadDirectory, { recursive: true });
+    const fileName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'receipt';
+    const storedPath = path.join(uploadDirectory, `${randomUUID()}-${fileName}`);
+    await writeFile(storedPath, file.buffer, { flag: 'wx' });
+    try {
+      const document = await prisma.financeEntryDocument.create({
+        data: { entryId, fileName, filePath: path.relative(process.cwd(), storedPath) },
+      });
+      res.status(201).json(document);
+    } catch (error) {
+      await unlink(storedPath);
+      throw error;
+    }
+  }));
+  router.get('/entries/:id/documents/:documentId/download', asyncHandler(async (req, res) => {
+    const document = await prisma.financeEntryDocument.findFirst({
+      where: { id: requiredText(req.params.documentId, 'documentId'), entryId: requiredText(req.params.id, 'id') },
+    });
+    if (!document) throw new ApiError(404, 'Receipt not found');
+    await sendStoredFile(res, document.filePath, document.fileName);
+  }));
+  router.delete('/entries/:id/documents/:documentId', asyncHandler(async (req, res) => {
+    const entryId = requiredText(req.params.id, 'id');
+    const documentId = requiredText(req.params.documentId, 'documentId');
+    const document = await prisma.financeEntryDocument.findFirst({ where: { id: documentId, entryId } });
+    if (!document) throw new ApiError(404, 'Receipt not found');
+    await removeStoredFile(document.filePath);
+    await prisma.financeEntryDocument.delete({ where: { id: documentId } });
+    res.status(204).send();
+  }));
   router.get('/recurring', asyncHandler(async (_req, res) => { res.json(await prisma.recurringExpense.findMany({ orderBy: [{ active: 'desc' }, { name: 'asc' }] })); }));
   router.post('/recurring', asyncHandler(async (req, res) => { const item = await prisma.recurringExpense.create({ data: { name: requiredText(req.body.name, 'name'), amount: positive(req.body.amount), category: optionalText(req.body.category, 'category'), frequency: validate(req.body.frequency || 'monthly', frequencies, 'frequency'), startDate: date(req.body.startDate, 'startDate'), endDate: req.body.endDate ? date(req.body.endDate, 'endDate') : undefined, active: req.body.active === undefined ? true : Boolean(req.body.active), notes: optionalText(req.body.notes, 'notes') } }); res.status(201).json(item); }));
   router.patch('/recurring/:id', asyncHandler(async (req, res) => { const item = await prisma.recurringExpense.update({ where: { id: requiredText(req.params.id, 'id') }, data: { name: req.body.name === undefined ? undefined : requiredText(req.body.name, 'name'), amount: req.body.amount === undefined ? undefined : positive(req.body.amount), frequency: req.body.frequency === undefined ? undefined : validate(req.body.frequency, frequencies, 'frequency'), category: req.body.category === undefined ? undefined : optionalText(req.body.category, 'category'), active: req.body.active === undefined ? undefined : Boolean(req.body.active), endDate: req.body.endDate === undefined ? undefined : (req.body.endDate ? date(req.body.endDate, 'endDate') : null), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes') } }); res.json(item); }));
@@ -148,6 +223,29 @@ function date(value: unknown, field: string) { const result = new Date(String(va
 function positive(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result <= 0) throw new ApiError(400, 'amount must be a positive number'); return result; }
 function nonNegative(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result < 0) throw new ApiError(400, 'startingBalance must be zero or greater'); return result; }
 function nonNegativeWeeklyRate(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result < 0) throw new ApiError(400, 'weeklyRate must be zero or greater'); return result; }
+async function sendStoredFile(res: { type: (value: string) => { send: (value: Buffer) => void } }, filePath: string, fileName: string) {
+  const resolvedPath = path.resolve(process.cwd(), filePath);
+  const relativePath = path.relative(uploadDirectory, resolvedPath);
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) throw new ApiError(400, 'Stored file path is invalid');
+  try {
+    await stat(resolvedPath);
+    res.type(path.extname(fileName) || 'application/octet-stream').send(await readFile(resolvedPath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new ApiError(404, 'Stored file not found');
+    throw error;
+  }
+}
+async function removeStoredFile(filePath: string) {
+  const resolvedPath = path.resolve(process.cwd(), filePath);
+  const relativePath = path.relative(uploadDirectory, resolvedPath);
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) throw new ApiError(400, 'Stored file path is invalid');
+  try {
+    await unlink(resolvedPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new ApiError(404, 'Stored file not found');
+    throw error;
+  }
+}
 function rentalTenantData(body: Record<string, unknown>, partial: true): Prisma.RentalTenantUpdateInput;
 function rentalTenantData(body: Record<string, unknown>, partial?: false): Prisma.RentalTenantCreateInput;
 function rentalTenantData(body: Record<string, unknown>, partial = false): Prisma.RentalTenantCreateInput | Prisma.RentalTenantUpdateInput {

@@ -255,19 +255,7 @@ These were designed to support:
 	- Email: `admin@mastercraftautony.com`
 	- Password: `Mastercraft2026!`
 - Default seed is disabled in production unless explicitly enabled.
-- Local-first login is intentional: the app tries local login before Neon for existing local accounts, then falls through to Neon for external users.
-
-### Neon Auth / Better Auth
-- Configured through `NEON_AUTH_URL` and optional `NEON_AUTH_JWKS_URL`.
-- Google and email/password Neon endpoints are called with `credentials: include`.
-- Google flow uses Better Auth `/sign-in/social` and redirects to the frontend root.
-- Callback detection checks `neon_auth_session_verifier` on every app load.
-- Backend `/api/auth/neon-callback` validates a Neon session through `/get-session` before creating/linking a local user.
-- Invalid Neon tokens are rejected with `401`.
-- Do not trust browser-supplied user data as an authentication fallback.
-- Neon Console local trusted origin: `http://localhost:5173`.
-- Neon Google and email/password providers must be enabled in Neon Console.
-- Current limitation: Neon package integration was investigated; use the actual installed Neon SDK contract before replacing the working REST bridge. Do not assume the archived Flask guide exactly matches current Managed Better Auth behavior.
+- Sign-in and account registration use the app's local email/password API and HMAC-signed tokens.
 
 ### Organization flow
 - Users can belong to multiple organizations through memberships.
@@ -287,9 +275,9 @@ These were designed to support:
 
 ### Backend
 - `apps/api/src/server.ts`: Express bootstrap, middleware, route registration, default admin setup.
-- `apps/api/src/auth.ts`: hashing, local tokens, Neon JWT/session verification, mutation protection, roles.
+- `apps/api/src/auth.ts`: hashing, local token verification, mutation protection, roles.
 - `apps/api/src/seed.ts`: Mastercraft organization and default admin seed.
-- `apps/api/src/routes/auth.ts`: local auth, Neon handoff, session, organization selection.
+- `apps/api/src/routes/auth.ts`: local auth, session, organization selection.
 - `apps/api/src/routes/customers.ts`: customer CRUD.
 - `apps/api/src/routes/workflows.ts`: dashboard, VIN, vehicles, claims, jobs, estimates, documents list, reports, inspections.
 - `apps/api/src/routes/operations.ts`: job expenses, job status, authorization PDF, file upload/download.
@@ -369,7 +357,7 @@ The visual direction adapts the referenced MIT-licensed RepairOS repository:
 - Steel blue, signal orange, success green, warm warning, info teal, and restrained lavender accents.
 - Light workspace with layered warm/cool background lighting and a subtle grid texture.
 - Compact white surfaces, readable tables, soft borders, deliberate shadows, status pills, and responsive layouts.
-- Auth screen: centered card, logo, Google button, divider, sign-in/create-account tabs, forgot password, email/password fields.
+- Auth screen: centered card, logo, sign-in/create-account tabs, and email/password fields.
 - Account controls: top-right and sidebar profile menus with logout.
 
 Do not collapse the UI back into generic dark dashboard styling. Keep the existing light RepairOS language and improve it with restraint.
@@ -379,7 +367,6 @@ Do not collapse the UI back into generic dark dashboard styling. Keep the existi
 Auth:
 - POST `/api/auth/register`
 - POST `/api/auth/login`
-- POST `/api/auth/neon-callback`
 - GET `/api/auth/session`
 - POST `/api/auth/organizations`
 - POST `/api/auth/organizations/:organizationId/select`
@@ -438,14 +425,13 @@ Database cleanup for a fresh local workspace:
 ## 12. Known Gaps And Risks
 
 1. Full tenant isolation is incomplete because many legacy business models do not yet carry organizationId.
-2. Neon browser SDK integration is still a hand-written REST bridge; current Google callback behavior depends on Better Auth session response/token availability.
-3. Default admin credentials are suitable only for local development and must be changed before production.
-4. No formal automated test runner exists; validation is currently build, API smoke tests, browser checks, and database checks.
-5. Multiple stale dev servers can cause EADDRINUSE or stale-code confusion.
-6. Existing legacy route code contains some compact one-line handlers; preserve behavior while refactoring cautiously.
-7. Historical imported data contains source typos and ambiguous/missing fields. Preserve original meaning and document normalization.
-8. Uploaded files are local filesystem state and require persistent production storage/backups.
-9. Browser warnings about duplicate `createRoot` can come from multiple development tabs/HMR and should be investigated separately from business failures.
+2. Default admin credentials are suitable only for local development and must be changed before production.
+3. No formal automated test runner exists; validation is currently build, API smoke tests, browser checks, and database checks.
+4. Multiple stale dev servers can cause EADDRINUSE or stale-code confusion.
+5. Existing legacy route code contains some compact one-line handlers; preserve behavior while refactoring cautiously.
+6. Historical imported data contains source typos and ambiguous/missing fields. Preserve original meaning and document normalization.
+7. Uploaded files are local filesystem state and require persistent production storage/backups.
+8. Browser warnings about duplicate `createRoot` can come from multiple development tabs/HMR and should be investigated separately from business failures.
 
 ## 13. Recommended Claude Improvement Plan
 
@@ -455,12 +441,9 @@ Database cleanup for a fresh local workspace:
 - Add structured error logging and a visible toast system.
 - Refactor compact route handlers only where tests protect behavior.
 
-### Phase 2: Finish authentication
-- Install/use the official `@neondatabase/auth` or current Neon SPA SDK contract only after verifying its actual exports.
-- Use a shared auth client/session hook where supported.
-- Support Neon email verification and password reset states.
-- Support OAuth verifier callback without requiring a token field that Managed Better Auth intentionally omits.
-- Keep local admin fallback for local development.
+### Phase 2: Harden local authentication
+- Keep sign-in and registration on the app-managed email/password flow.
+- Improve account recovery and production credential provisioning without adding external identity providers.
 
 ### Phase 3: Tenant safety
 - Add organizationId to every operational model or enforce an equivalent ownership boundary.
@@ -514,7 +497,7 @@ At the latest handoff:
 - Local operational data has been populated with six legacy claims and the September bookkeeping import. July/August bookkeeping data remains pending import.
 - Default local admin login works.
 - The app runs at `http://localhost:5173` with API at `http://localhost:4000`.
-- The next highest-value engineering work is tenant isolation, formal tests, and completing the official Neon Auth SPA integration without breaking local login.
+- The next highest-value engineering work is tenant isolation, formal tests, and hardening local authentication.
 
 ### collision-shop-architect
 Handles:

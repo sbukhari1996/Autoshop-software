@@ -30,11 +30,6 @@ services:
       DATABASE_URL: postgresql://collision_shop_app:collision_shop_app@db:5432/collision_shop?schema=public
       PORT: 4000
       AUTH_SECRET: ${AUTH_SECRET:-change-me-in-production}
-      NEON_AUTH_URL: ${NEON_AUTH_URL:-}
-      NEON_AUTH_JWKS_URL: ${NEON_AUTH_JWKS_URL:-}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@mastercraftautony.com}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-Mastercraft2026!}
       DEFAULT_ADMIN_NAME: ${DEFAULT_ADMIN_NAME:-Mastercraft Admin}
@@ -51,7 +46,6 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:4000/api}
-        VITE_NEON_AUTH_URL: ${VITE_NEON_AUTH_URL:-}
     container_name: collision-shop-frontend
     restart: unless-stopped
     depends_on:

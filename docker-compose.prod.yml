@@ -21,7 +21,6 @@ services:
     build:
       args:
         VITE_API_URL: ${VITE_API_URL:?VITE_API_URL is required in production}
-        VITE_NEON_AUTH_URL: ${VITE_NEON_AUTH_URL:-}
     ports: []
     restart: always
 

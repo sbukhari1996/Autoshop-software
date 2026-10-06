@@ -42,9 +42,7 @@ Development login defaults to `admin@mastercraftautony.com` / `Mastercraft2026!`
 
 ### Authentication and organizations
 
-Local email/password login remains available at `/api/auth/register` and `/api/auth/login`. Authenticated users can inspect their current context with `GET /api/auth/session`, create an organization with `POST /api/auth/organizations`, and switch organizations with `POST /api/auth/organizations/:organizationId/select`. Write requests require an authenticated membership.
-
-Neon Auth JWT verification is optional. Set `NEON_AUTH_URL` or `NEON_AUTH_JWKS_URL` in `apps/api/.env`; local HMAC tokens continue to work for development. Google OAuth is only exposed as configuration/status and explicit `501` responses until `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` are configured and the callback flow is implemented.
+Sign in and account registration use the app's local email/password authentication at `/api/auth/login` and `/api/auth/register`. Passwords are hashed by the API and authenticated users receive an app-managed token. Authenticated users can inspect their current context with `GET /api/auth/session`, create an organization with `POST /api/auth/organizations`, and switch organizations with `POST /api/auth/organizations/:organizationId/select`. Write requests require an authenticated membership.
 
 ## Apps
 

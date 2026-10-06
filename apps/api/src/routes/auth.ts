@@ -1,8 +1,7 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
-import { hashPassword, readNeonSession, requireAuth, signToken, verifyPassword, type AuthUser } from '../auth.js';
-import { randomBytes } from 'node:crypto';
+import { hashPassword, requireAuth, signToken, verifyPassword, type AuthUser } from '../auth.js';
 import { requiredText } from '../validation.js';
 
 export function createAuthRouter(prisma: PrismaClient) {
@@ -22,16 +21,6 @@ export function createAuthRouter(prisma: PrismaClient) {
     const password = requiredText(req.body.password, 'password');
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !(await verifyPassword(password, user.password))) throw new ApiError(401, 'Invalid email or password');
-    res.json({ user: publicUser(user), token: signToken({ sub: user.id, email: user.email, role: user.role }) });
-  }));
-
-  router.post('/neon-callback', asyncHandler(async (req, res) => {
-    const token = requiredText(req.body.token, 'token');
-    const neonUser = await readNeonSession(token);
-    if (!neonUser) throw new ApiError(401, 'Unable to validate Neon Auth session');
-    const identity = neonUser;
-    let user = await prisma.user.findUnique({ where: { email: identity.email } });
-    if (!user) user = await prisma.user.create({ data: { email: identity.email, name: identity.name, password: await hashPassword(randomBytes(32).toString('hex')) } });
     res.json({ user: publicUser(user), token: signToken({ sub: user.id, email: user.email, role: user.role }) });
   }));
 
@@ -60,23 +49,6 @@ export function createAuthRouter(prisma: PrismaClient) {
     if (!membership) throw new ApiError(403, 'You are not a member of this organization');
     res.json({ organization: { id: membership.organization.id, name: membership.organization.name, slug: membership.organization.slug }, role: membership.role, token: signToken({ sub: authUser.sub, email: authUser.email, role: membership.role, organizationId }) });
   }));
-
-  router.get('/google/status', (_req, res) => {
-    const configured = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REDIRECT_URI);
-    res.json({ configured, provider: 'google', message: configured ? 'Google OAuth is configured' : 'Google OAuth credentials are required' });
-  });
-
-  router.get('/google/redirect', (_req, res) => {
-    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
-      res.status(501).json({ error: 'Google OAuth configuration required' });
-      return;
-    }
-    res.status(501).json({ error: 'Google OAuth callback is not enabled yet' });
-  });
-
-  router.get('/google/callback', (_req, res) => {
-    res.status(501).json({ error: 'Google OAuth callback is not enabled yet' });
-  });
 
   return router;
 }

@@ -197,6 +197,7 @@ type DocumentRecord = {
   documentType: string | null;
   description?: string | null;
   createdAt: string;
+  customer?: Customer;
   claim?: Claim & { customer: Customer; vehicle: Vehicle | null };
   job?: Job;
 };
@@ -204,19 +205,19 @@ type ClaimHub = Claim & { documents: DocumentRecord[]; jobs: Job[] };
 type DocumentsData = {
   claimDocuments: DocumentRecord[];
   jobDocuments: DocumentRecord[];
+  customerDocuments: DocumentRecord[];
 };
 type ReportsData = DashboardData & {
   jobsByStatus: Array<{ status: string; count: number }>;
   estimateTotals: { count: number; total: number };
   documentCount: number;
 };
-type FinanceEntry = { id: string; type: "income" | "expense"; description: string; category: string | null; amount: number; paymentMethod: string | null; entryDate: string; notes: string | null; job?: { jobNumber: string } | null };
+type FinanceEntry = { id: string; type: "income" | "expense"; description: string; category: string | null; amount: number; paymentMethod: string | null; entryDate: string; notes: string | null; job?: { id: string; jobNumber: string } | null; claim?: { id: string; claimNumber: string | null } | null; documents: Array<{ id: string; fileName: string; createdAt: string }> };
 type RecurringExpense = { id: string; name: string; amount: number; category: string | null; frequency: "weekly" | "monthly" | "yearly"; startDate: string; active: boolean };
 type FinanceSummary = { income: number; generalExpenses: number; jobExpenses: number; expenses: number; net: number };
 type FinanceData = { entries: FinanceEntry[]; recurring: RecurringExpense[]; summary: FinanceSummary };
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
-const NEON_AUTH_URL = import.meta.env.VITE_NEON_AUTH_URL || "";
 const REPAIROS_LOGO_URL = "https://raw.githubusercontent.com/ChanMeng666/automotive-repair-management-system/main/app/static/images/RepairOS-logo.svg";
 const DEFAULT_ORGANIZATION = "Mastercraft Auto Repair & Collision";
 const navItems: Array<{ label: View; icon: string }> = [
@@ -277,29 +278,6 @@ async function fetchJson<T>(
   return result;
 }
 
-async function neonRequest(path: string, options: RequestInit = {}) {
-  const response = await fetch(`${NEON_AUTH_URL.replace(/\/$/, "")}${path}`, { ...options, credentials: "include", headers: { "Content-Type": "application/json", ...(options.headers || {}) } });
-  const body = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(body?.message || body?.error || `Neon Auth request failed (HTTP ${response.status})`);
-  return body as any;
-}
-
-async function finishNeonSession(sessionData: any) {
-  const findToken = (value: any): string | null => {
-    if (!value || typeof value !== "object") return null;
-    for (const key of ["token", "accessToken", "access_token", "sessionToken", "session_token"]) if (typeof value[key] === "string") return value[key];
-    for (const nested of Object.values(value)) { const token = findToken(nested); if (token) return token; }
-    return null;
-  };
-  const token = findToken(sessionData);
-  const user = sessionData?.user || sessionData?.data?.user || sessionData?.session?.user;
-  if (!token) throw new Error("Neon Auth did not return a session token.");
-  const response = await fetch(`${API_URL}/auth/neon-callback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, user }) });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || !body.token) throw new Error(body.error || "Unable to connect Neon Auth to this workspace");
-  return body.token as string;
-}
-
 type Session = {
   user: { id: string; name: string; email: string; role: string };
   organizations: Array<{ id: string; name: string; slug: string; role: string }>;
@@ -352,47 +330,11 @@ function AuthScreen({
   const [form, setForm] = React.useState({ name: "", email: "", password: "" });
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(false);
-  const [notice, setNotice] = React.useState(() => sessionStorage.getItem("repairos_auth_notice") || "");
-  React.useEffect(() => { sessionStorage.removeItem("repairos_auth_notice"); }, []);
-  const openNeonAuth = () => {
-    if (NEON_AUTH_URL) {
-      setLoading(true); setError("");
-      void neonRequest("/sign-in/social", { method: "POST", body: JSON.stringify({ provider: "google", callbackURL: window.location.origin }) })
-        .then((result) => { const redirectUrl = result?.url || result?.redirect || result?.data?.url || result?.data?.redirect; if (!redirectUrl) throw new Error("Neon Auth did not return a Google sign-in URL."); window.location.href = redirectUrl; })
-        .catch((authError) => setError(authError instanceof Error ? authError.message : "Unable to start Google sign-in"))
-        .finally(() => setLoading(false));
-    }
-    else setNotice("Google sign-in is not configured for this local workspace.");
-  };
-  const requestPasswordReset = async () => {
-    if (!form.email) { setNotice("Enter your email address first, then choose Forgot password."); return; }
-    if (!NEON_AUTH_URL) { setNotice("Please contact your shop administrator to reset your password."); return; }
-    setLoading(true); setError(""); setNotice("");
-    try { await neonRequest("/forget-password/email", { method: "POST", body: JSON.stringify({ email: form.email }) }); setNotice("If that email is registered, Neon Auth sent password reset instructions."); }
-    catch (resetError) { setError(resetError instanceof Error ? resetError.message : "Unable to request password reset"); }
-    finally { setLoading(false); }
-  };
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setLoading(true);
     setError("");
     try {
-      if (NEON_AUTH_URL) {
-        if (mode === "login") {
-          try {
-            const localResult = await fetchJson<{ token: string }>("/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: form.email, password: form.password }) });
-            localStorage.setItem("repairos_token", localResult.token); onAuthenticated(localResult.token); return;
-          } catch { }
-        }
-        try {
-          const neonResult = await neonRequest(mode === "login" ? "/sign-in/email" : "/sign-up/email", { method: "POST", body: JSON.stringify(mode === "login" ? { email: form.email, password: form.password } : { email: form.email, password: form.password, name: form.name }) });
-          const neonToken = neonResult?.token || neonResult?.session?.token || neonResult?.data?.token || neonResult?.data?.session?.token;
-          const result = await finishNeonSession(neonToken ? { ...neonResult, token: neonToken } : neonResult);
-          localStorage.setItem("repairos_token", result); onAuthenticated(result); return;
-        } catch (neonError) {
-          throw neonError;
-        }
-      }
       const result = await fetchJson<{ token: string }>(`/auth/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -424,19 +366,13 @@ function AuthScreen({
         </div>
         <p className="auth-welcome">Welcome to RepairOS</p>
         <p className="auth-caption">Mastercraft Auto Repair &amp; Collision</p>
-        <button type="button" className="google-button" onClick={openNeonAuth}>
-          <span className="google-mark">G</span>
-          Continue with Google
-        </button>
-        <div className="auth-divider"><span>or</span></div>
         <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
-          <button type="button" role="tab" aria-selected={mode === "login"} className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); setNotice(""); }}>Sign in</button>
-          <button type="button" role="tab" aria-selected={mode === "register"} className={mode === "register" ? "active" : ""} onClick={() => { setMode("register"); setError(""); setNotice(""); }}>Create account</button>
+          <button type="button" role="tab" aria-selected={mode === "login"} className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); }}>Sign in</button>
+          <button type="button" role="tab" aria-selected={mode === "register"} className={mode === "register" ? "active" : ""} onClick={() => { setMode("register"); setError(""); }}>Create account</button>
         </div>
         <h1>{mode === "login" ? "Sign in" : "Create account"}</h1>
         <p className="subheading">{mode === "login" ? "Use your shop account to continue." : "Create access for your shop workspace."}</p>
         {error && <div className="error-banner">{error}</div>}
-        {notice && <div className="auth-notice">{notice}</div>}
         {mode === "register" && (
           <label>
             Name
@@ -479,7 +415,6 @@ function AuthScreen({
                   ? "Sign in"
                   : "Create account"}
             </button>
-        {mode === "login" && <button type="button" className="forgot-button" onClick={() => void requestPasswordReset()}>Forgot password?</button>}
         <button type="button" className="auth-back" onClick={onBack}>Back to overview</button>
       </form>
     </div>
@@ -510,7 +445,6 @@ function App() {
   const [entry, setEntry] = React.useState<"landing" | "auth">("landing");
   const [session, setSession] = React.useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = React.useState(Boolean(token));
-  const [neonLoading, setNeonLoading] = React.useState(false);
   const [view, setView] = React.useState<View>("Dashboard");
   const [search, setSearch] = React.useState("");
   const [dashboard, setDashboard] = React.useState<DashboardData | null>(null);
@@ -532,16 +466,6 @@ function App() {
   const [profileOpen, setProfileOpen] = React.useState(false);
   const [dismissedNotifications, setDismissedNotifications] = React.useState<string[]>([]);
   const notificationStorageKey = `repairos_dismissed_notifications_${session?.activeOrganization?.id || "default"}`;
-  React.useEffect(() => {
-    const verifier = new URLSearchParams(window.location.search).get("neon_auth_session_verifier");
-    if (!verifier || neonLoading || token) return;
-    setNeonLoading(true);
-    void neonRequest("/get-session")
-      .then((sessionData) => finishNeonSession(sessionData))
-      .then((nextToken) => { localStorage.setItem("repairos_token", nextToken); window.history.replaceState({}, document.title, window.location.pathname); setToken(nextToken); })
-      .catch((callbackError) => { sessionStorage.setItem("repairos_auth_notice", callbackError instanceof Error ? callbackError.message : "Neon Auth sign-in could not be completed."); window.history.replaceState({}, document.title, window.location.pathname); setEntry("auth"); })
-      .finally(() => setNeonLoading(false));
-  }, [token, neonLoading]);
   React.useEffect(() => {
     try { setDismissedNotifications(JSON.parse(localStorage.getItem(notificationStorageKey) || "[]")); }
     catch { setDismissedNotifications([]); }
@@ -603,7 +527,18 @@ function App() {
       if (view === "Claims") setClaims(await fetchJson("/claims"));
       if (view === "Jobs") setJobs(await fetchJson("/jobs"));
       if (view === "Estimates") setEstimates(await fetchJson("/estimates"));
-      if (view === "Documents") setDocuments(await fetchJson("/documents"));
+      if (view === "Documents") {
+        const [documentResult, customerResult, claimResult, jobResult] = await Promise.all([
+          fetchJson<DocumentsData>("/documents"),
+          fetchJson<Customer[]>("/customers"),
+          fetchJson<Claim[]>("/claims"),
+          fetchJson<Job[]>("/jobs"),
+        ]);
+        setDocuments(documentResult);
+        setCustomers(customerResult);
+        setClaims(claimResult);
+        setJobs(jobResult);
+      }
       if (view === "Invoices") {
         const [invoiceResult, customerResult, jobResult, claimResult] = await Promise.all([
           fetchJson<Invoice[]>("/invoices"),
@@ -784,7 +719,7 @@ function App() {
                           : view === "Estimates"
                             ? "Build a clear view of repair value before authorization."
                             : view === "Documents"
-                              ? "Keep claim and job paperwork visible to the office."
+                              ? "                              Keep customer, claim, and job paperwork visible to the office."
                               : view === "Invoices"
                                 ? "Create repair invoices, record payments, and keep balances current."
                               : "Measure shop throughput, revenue, and follow-up work."}
@@ -826,7 +761,7 @@ function App() {
           {view === "Estimates" && (
             <><EstimateBuilder jobs={jobs} request={fetchJson} onSaved={loadData} /><EstimateRegister estimates={estimates} request={fetchJson} onChanged={loadData} onNavigate={navigate} /></>
           )}
-          {view === "Documents" && <DocumentView documents={documents} jobs={jobs} claims={claims} onUploaded={loadData} />}
+          {view === "Documents" && <DocumentView documents={documents} customers={customers} jobs={jobs} claims={claims} onUploaded={loadData} />}
           {view === "Invoices" && <InvoiceView invoices={invoices} customers={customers} jobs={jobs} claims={claims} request={fetchJson} apiUrl={API_URL} onChanged={loadData} />}
           {view === "Bookkeeping" && <BookkeepingView data={finance} jobs={jobs} claims={claims} request={fetchJson} onChanged={() => void loadData()} />}
           {view === "Reports" && (
@@ -1318,20 +1253,28 @@ function ClaimRecordsPanel({ claim, selectedJobId }: { claim: Claim; selectedJob
   async function accessDocument(documentRecord: DocumentRecord, download: boolean) {
     const previewWindow = download ? null : window.open("about:blank", "_blank");
     if (!download && !previewWindow) { setError("Your browser blocked the document preview. Allow pop-ups for this app and try again."); return; }
-    if (previewWindow) previewWindow.document.title = documentRecord.fileName;
     try {
       const response = await fetch(downloadUrl(documentRecord.id), { headers: { Authorization: `Bearer ${localStorage.getItem("repairos_token") || ""}` } });
       if (!response.ok) throw new Error("Unable to open document");
-      const url = URL.createObjectURL(await response.blob());
+      const blob = await response.blob();
       if (download) {
+        const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
         link.download = documentRecord.fileName;
         link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
       } else {
+        const isPdf = blob.type === "application/pdf" || /\.pdf$/i.test(documentRecord.fileName);
+        if (!isPdf && !blob.type.startsWith("image/")) {
+          previewWindow!.close();
+          setError("Use the Documents page to preview supported text files, or download this file to open it in a compatible app.");
+          return;
+        }
+        if (previewWindow) previewWindow.document.title = documentRecord.fileName;
+        const url = URL.createObjectURL(blob);
         previewWindow!.location.href = url;
       }
-      if (download) window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (documentError) {
       previewWindow?.close();
       setError(documentError instanceof Error ? documentError.message : "Unable to access document");
@@ -1717,11 +1660,13 @@ function EstimateRegister({
 }
 function DocumentView({
   documents,
+  customers = [],
   jobs = [],
   claims = [],
   onUploaded = async () => undefined,
 }: {
   documents: DocumentsData | null;
+  customers?: Customer[];
   jobs?: Job[];
   claims?: Claim[];
   onUploaded?: () => Promise<void>;
@@ -1729,45 +1674,117 @@ function DocumentView({
   const records = [
     ...(documents?.claimDocuments || []),
     ...(documents?.jobDocuments || []),
-  ];
+    ...(documents?.customerDocuments || []),
+  ].sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
   const [context, setContext] = React.useState("");
   const [files, setFiles] = React.useState<File[]>([]);
+  const [documentType, setDocumentType] = React.useState<typeof documentTypes[number]>("other");
+  const [description, setDescription] = React.useState("");
   const [message, setMessage] = React.useState("");
+  const [preview, setPreview] = React.useState<{ document: DocumentRecord; url?: string; type: string; text?: string } | null>(null);
+  const [error, setError] = React.useState("");
+  const previewUrl = React.useRef<string | null>(null);
+  const fileInput = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => () => {
+    if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+  }, []);
   async function upload(event: React.FormEvent) {
     event.preventDefault();
     if (!files.length || !context) return;
+    setError("");
+    setMessage("");
     const body = new FormData();
     files.forEach((file) => body.append("file", file));
     if (context.startsWith("job:")) body.append("jobId", context.slice(4));
-    else body.append("claimId", context.slice(6));
+    else if (context.startsWith("claim:")) body.append("claimId", context.slice(6));
+    else body.append("customerId", context.slice(9));
+    body.append("documentType", documentType);
+    if (description.trim()) body.append("description", description.trim());
     try {
       await fetchJson("/documents/upload", { method: "POST", body });
       setFiles([]);
+      if (fileInput.current) fileInput.current.value = "";
       setContext("");
+      setDescription("");
+      setError("");
       setMessage(
-        "Uploaded and persisted by the API in its local uploads directory.",
+        "Document uploaded and linked to the selected customer, claim, or job.",
       );
       await onUploaded();
     } catch (uploadError) {
-      setMessage(
+      setError(
         uploadError instanceof Error ? uploadError.message : "Unable to upload",
       );
     }
+  }
+  async function deleteDocument(documentRecord: DocumentRecord) {
+    if (!window.confirm(`Delete "${documentRecord.fileName}"? This cannot be undone.`)) return;
+    setError("");
+    try {
+      await fetchJson(`/documents/${documentRecord.id}`, { method: "DELETE" });
+      setMessage(`Deleted ${documentRecord.fileName}.`);
+      await onUploaded();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete document");
+    }
+  }
+  async function accessDocument(documentRecord: DocumentRecord, download: boolean) {
+    setError("");
+    try {
+      const token = localStorage.getItem("repairos_token");
+      const response = await fetch(`${API_URL}/documents/${documentRecord.id}/download`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) throw new Error(`${download ? "Unable to download" : "Unable to preview"} document (HTTP ${response.status})`);
+      const blob = await response.blob();
+      if (download) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = documentRecord.fileName;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        return;
+      }
+      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+      const type = blob.type || "application/octet-stream";
+      if (type.startsWith("text/") || /^(application\/(json|xml|javascript))$/.test(type)) {
+        setPreview({ document: documentRecord, type, text: await blob.text() });
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      previewUrl.current = url;
+      setPreview({ document: documentRecord, type, url });
+    } catch (documentError) {
+      setError(documentError instanceof Error ? documentError.message : "Unable to access document");
+    }
+  }
+  function closePreview() {
+    if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+    previewUrl.current = null;
+    setPreview(null);
   }
   return (
     <>
       <div className="surface upload-panel">
         <SurfaceHeading
           title="Upload document"
-          subtitle="Attach one or more files to a job or claim"
+          subtitle="Attach one or more files to a customer, job, or claim"
         />
-        <form className="upload-form" onSubmit={upload}>
-          <select
+        <form className="upload-form documents-upload-form" onSubmit={upload}>
+          <label>Attach to<select
             required
             value={context}
             onChange={(event) => setContext(event.target.value)}
           >
-            <option value="">Select a job or claim</option>
+            <option value="">Select a customer, job, or claim</option>
+            <optgroup label="Customers">
+              {customers.map((customer) => (
+                <option value={`customer:${customer.id}`} key={customer.id}>
+                  {customer.firstName} {customer.lastName}
+                </option>
+              ))}
+            </optgroup>
             <optgroup label="Jobs">
               {jobs.map((job) => (
                 <option value={`job:${job.id}`} key={job.id}>
@@ -1784,37 +1801,43 @@ function DocumentView({
                 </option>
               ))}
             </optgroup>
-          </select>
-          <input
+          </select></label>
+          <label>Document type<select value={documentType} onChange={(event) => setDocumentType(event.target.value as typeof documentTypes[number])}>
+            {documentTypes.map((type) => <option value={type} key={type}>{type.replaceAll("_", " ")}</option>)}
+          </select></label>
+          <label>Description<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Optional note" /></label>
+          <label>Files<input
+            ref={fileInput}
             required
             type="file"
             multiple
             onChange={(event) => setFiles(Array.from(event.target.files || []))}
-          />
+          /></label>
           <button className="orange-button" disabled={!files.length || !context}>
             <Icon name="plus" /> Upload {files.length ? `(${files.length})` : ""}
           </button>
         </form>
         {files.length > 0 && <small className="upload-note selected-files">Selected: {files.map((file) => file.name).join(", ")}</small>}
+        {error && <div className="error-banner">{error}</div>}
         {message && <small className="upload-note">{message}</small>}
         <small className="upload-note">
-          Files are stored as local server files, so they require the API's
-          upload directory to remain available.
+          Any file type can be uploaded (up to 10 MB per file). PDFs, images, audio, video, and text files preview here; download other types to open them in a compatible app. Files are kept in the API upload directory.
         </small>
       </div>
       <div className="surface">
         <SurfaceHeading
           title="Document register"
-          subtitle="Claim and job paperwork, receipts, and authorizations"
+          subtitle="Customer, claim, and job files with preview and download"
         />
         {records.length ? (
           <table className="data-table">
             <thead>
               <tr>
                 <th>File</th>
-                <th>Context</th>
+                <th>Customer / context</th>
                 <th>Type</th>
                 <th>Added</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1830,17 +1853,22 @@ function DocumentView({
                       </div>
                     </td>
                     <td>
-                      {document.claim
-                        ? `Claim ${document.claim.claimNumber || "unassigned"}`
-                        : `Job ${document.job?.jobNumber}`}
+                      {document.customer
+                        ? `${document.customer.firstName} ${document.customer.lastName} · Customer file`
+                        : document.claim
+                          ? `Claim ${document.claim.claimNumber || "unassigned"}`
+                          : `Job ${document.job?.jobNumber}`}
                       <small className="table-subtext">
                         {customer
                           ? `${customer.firstName} ${customer.lastName}`
-                          : "Customer unavailable"}
+                          : document.customer
+                            ? document.customer.email || document.customer.phone || ""
+                            : "Customer unavailable"}
                       </small>
                     </td>
-                    <td>{document.documentType || "General document"}</td>
+                    <td>{document.documentType || "other"}{document.description ? <small className="table-subtext">{document.description}</small> : null}</td>
                     <td>{new Date(document.createdAt).toLocaleDateString()}</td>
+                    <td><div className="document-actions"><button type="button" onClick={() => void accessDocument(document, false)}>Preview</button><button type="button" onClick={() => void accessDocument(document, true)}>Download</button><button type="button" className="danger-button compact-danger" onClick={() => void deleteDocument(document)}>Delete</button></div></td>
                   </tr>
                 );
               })}
@@ -1850,6 +1878,23 @@ function DocumentView({
           <EmptyState text="No documents uploaded yet." />
         )}
       </div>
+      {preview && <div className="modal-backdrop" onClick={closePreview}>
+        <section className="modal document-preview-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-heading"><h2>{preview.document.fileName}</h2><button type="button" className="close-button" onClick={closePreview}>×</button></div>
+          {preview.type === "application/pdf" || /\.pdf$/i.test(preview.document.fileName)
+            ? <iframe className="document-preview-pdf" src={preview.url} title={`Preview: ${preview.document.fileName}`} />
+            : preview.type.startsWith("image/")
+              ? <img className="document-preview-image" src={preview.url} alt={preview.document.fileName} />
+              : preview.type.startsWith("audio/")
+                ? <audio controls src={preview.url} />
+                : preview.type.startsWith("video/")
+                  ? <video controls className="document-preview-video" src={preview.url} />
+                  : preview.text !== undefined
+                    ? <pre className="document-preview-text">{preview.text}</pre>
+                    : <p className="records-muted">This file type cannot be previewed in the browser. Use Download to open it in a compatible app.</p>}
+          <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => void accessDocument(preview.document, true)}>Download</button><button type="button" className="secondary-button" onClick={closePreview}>Close</button></div>
+        </section>
+      </div>}
     </>
   );
 }

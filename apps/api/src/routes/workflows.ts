@@ -301,11 +301,12 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
   }));
 
   workflowsRouter.get('/documents', asyncHandler(async (_req, res) => {
-    const [claimDocuments, jobDocuments] = await Promise.all([
+    const [claimDocuments, jobDocuments, customerDocuments] = await Promise.all([
       prisma.claimDocument.findMany({ orderBy: { createdAt: 'desc' }, include: { claim: { include: { customer: true, vehicle: true } } } }),
       prisma.jobDocument.findMany({ orderBy: { createdAt: 'desc' }, include: { job: { include: { customer: true, vehicle: true } } } }),
+      prisma.customerDocument.findMany({ orderBy: { createdAt: 'desc' }, include: { customer: true } }),
     ]);
-    res.json({ claimDocuments, jobDocuments });
+    res.json({ claimDocuments, jobDocuments, customerDocuments });
   }));
 
   workflowsRouter.get('/reports', asyncHandler(async (_req, res) => {
@@ -313,13 +314,13 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
       getDashboardData(prisma),
       prisma.job.groupBy({ by: ['status'], _count: { _all: true }, orderBy: { status: 'asc' } }),
       prisma.estimate.aggregate({ _count: { _all: true }, _sum: { totalAmount: true } }),
-      Promise.all([prisma.claimDocument.count(), prisma.jobDocument.count()]),
+      Promise.all([prisma.claimDocument.count(), prisma.jobDocument.count(), prisma.customerDocument.count()]),
     ]);
     res.json({
       ...dashboard,
       jobsByStatus: jobsByStatus.map((entry) => ({ status: entry.status, count: entry._count._all })),
       estimateTotals: { count: estimateTotals._count._all, total: estimateTotals._sum.totalAmount || 0 },
-      documentCount: documentCounts[0] + documentCounts[1],
+      documentCount: documentCounts[0] + documentCounts[1] + documentCounts[2],
     });
   }));
 

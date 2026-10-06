@@ -16,9 +16,11 @@ type FinanceEntry = {
   entryDate: string;
   notes: string | null;
   sourceReference?: string | null;
-  job?: { jobNumber: string } | null;
-  claim?: { claimNumber: string | null } | null;
+  job?: { id: string; jobNumber: string } | null;
+  claim?: { id: string; claimNumber: string | null } | null;
+  documents: FinanceEntryDocument[];
 };
+type FinanceEntryDocument = { id: string; fileName: string; createdAt: string };
 type RecurringExpense = {
   id: string;
   name: string;
@@ -61,6 +63,7 @@ const paymentMethods = [
   ["ach", "ACH"],
   ["other", "Other"],
 ];
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
 const categories = [
   "Parts",
   "Labor",
@@ -135,16 +138,23 @@ export function BookkeepingView({
     prior: 0,
   });
   const [entryOpen, setEntryOpen] = React.useState(false);
+  const [editingEntryId, setEditingEntryId] = React.useState<string | null>(null);
   const [recurringOpen, setRecurringOpen] = React.useState(false);
   const [entry, setEntry] = React.useState(emptyEntry);
   const [recurring, setRecurring] = React.useState(emptyRecurring);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
+  const [uploadingReceiptFor, setUploadingReceiptFor] = React.useState<string | null>(null);
+  const [receiptPreview, setReceiptPreview] = React.useState<{ entryId: string; document: FinanceEntryDocument; type: string; url?: string; text?: string } | null>(null);
+  const receiptPreviewUrl = React.useRef<string | null>(null);
   const entries = data?.entries || [];
   const recurringItems = data?.recurring || [];
   React.useEffect(() => {
     setSummary(data?.summary || null);
   }, [data]);
+  React.useEffect(() => () => {
+    if (receiptPreviewUrl.current) URL.revokeObjectURL(receiptPreviewUrl.current);
+  }, []);
   React.useEffect(() => {
     void request<BankBalance>("/finance/bank-balance")
       .then((balance) => {
@@ -185,24 +195,41 @@ export function BookkeepingView({
       )
       .catch(() => undefined);
   }, [request]);
+  function openEntryForm(item?: FinanceEntry) {
+    setError("");
+    setEditingEntryId(item?.id || null);
+    setEntry(item ? {
+      type: item.type,
+      description: item.description,
+      category: item.category || "",
+      amount: String(item.amount),
+      entryDate: new Date(item.entryDate).toISOString().slice(0, 10),
+      paymentMethod: item.paymentMethod || "cash",
+      jobId: item.job?.id || "",
+      claimId: item.claim?.id || "",
+      notes: item.notes || "",
+    } : { ...emptyEntry });
+    setEntryOpen(true);
+  }
   async function saveEntry(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
     setError("");
     try {
-      await request("/finance/entries", {
-        method: "POST",
+      await request(editingEntryId ? `/finance/entries/${editingEntryId}` : "/finance/entries", {
+        method: editingEntryId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...entry,
           amount: Number(entry.amount),
-          jobId: entry.jobId || undefined,
-          claimId: entry.claimId || undefined,
-          category: entry.category || undefined,
-          notes: entry.notes || undefined,
+          jobId: entry.jobId || null,
+          claimId: entry.claimId || null,
+          category: entry.category || null,
+          notes: entry.notes || null,
         }),
       });
-      setEntry(emptyEntry);
+      setEntry({ ...emptyEntry });
+      setEditingEntryId(null);
       setEntryOpen(false);
       onChanged();
     } catch (saveError) {
@@ -211,6 +238,67 @@ export function BookkeepingView({
       );
     } finally {
       setSaving(false);
+    }
+  }
+  async function uploadEntryReceipt(entryId: string, file: File) {
+    setUploadingReceiptFor(entryId);
+    setError("");
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      await request(`/finance/entries/${entryId}/documents`, { method: "POST", body });
+      onChanged();
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Unable to attach receipt");
+    } finally {
+      setUploadingReceiptFor(null);
+    }
+  }
+  async function accessEntryReceipt(entryId: string, receipt: FinanceEntryDocument, download: boolean) {
+    setError("");
+    try {
+      const token = localStorage.getItem("repairos_token");
+      const response = await fetch(`${API_URL}/finance/entries/${entryId}/documents/${receipt.id}/download`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!response.ok) throw new Error(`Unable to ${download ? "download" : "preview"} receipt (HTTP ${response.status})`);
+      const blob = await response.blob();
+      if (download) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = receipt.fileName;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        return;
+      }
+      if (receiptPreviewUrl.current) URL.revokeObjectURL(receiptPreviewUrl.current);
+      const type = blob.type || "application/octet-stream";
+      if (type.startsWith("text/") || /^(application\/(json|xml|javascript))$/.test(type)) {
+        setReceiptPreview({ entryId, document: receipt, type, text: await blob.text() });
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      receiptPreviewUrl.current = url;
+      setReceiptPreview({ entryId, document: receipt, type, url });
+    } catch (receiptError) {
+      setError(receiptError instanceof Error ? receiptError.message : "Unable to access receipt");
+    }
+  }
+  function closeReceiptPreview() {
+    if (receiptPreviewUrl.current) URL.revokeObjectURL(receiptPreviewUrl.current);
+    receiptPreviewUrl.current = null;
+    setReceiptPreview(null);
+  }
+  async function deleteEntryReceipt(entryId: string, receipt: FinanceEntryDocument) {
+    if (!window.confirm(`Delete receipt "${receipt.fileName}"? This cannot be undone.`)) return;
+    setError("");
+    try {
+      await request(`/finance/entries/${entryId}/documents/${receipt.id}`, { method: "DELETE" });
+      if (receiptPreview?.document.id === receipt.id) closeReceiptPreview();
+      onChanged();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete receipt");
     }
   }
   async function saveStartingBalance(event: React.FormEvent) {
@@ -414,7 +502,7 @@ export function BookkeepingView({
               <h2>Ledger</h2>
               <p>Income and expense activity</p>
             </div>
-            <button className="text-button" onClick={() => setEntryOpen(true)}>
+            <button className="text-button" onClick={() => openEntryForm()}>
               Add entry <span>+</span>
             </button>
           </div>
@@ -427,7 +515,9 @@ export function BookkeepingView({
                   <th>Category</th>
                   <th>Method</th>
                   <th>Claim / job</th>
+                  <th>Receipts</th>
                   <th>Amount</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -447,6 +537,26 @@ export function BookkeepingView({
                         ? `Claim ${item.claim.claimNumber}`
                         : item.job?.jobNumber || "General"}
                     </td>
+                    <td>
+                      <div className="ledger-receipts">
+                        {item.documents.map((receipt) => (
+                          <div className="ledger-receipt" key={receipt.id}>
+                            <span>{receipt.fileName}</span>
+                            <button type="button" onClick={() => void accessEntryReceipt(item.id, receipt, false)}>Preview</button>
+                            <button type="button" onClick={() => void accessEntryReceipt(item.id, receipt, true)}>Download</button>
+                            <button type="button" className="danger-button compact-danger" onClick={() => void deleteEntryReceipt(item.id, receipt)}>Delete</button>
+                          </div>
+                        ))}
+                        {item.type === "expense" && <label className="ledger-receipt-upload">
+                          {uploadingReceiptFor === item.id ? "Uploading..." : "Attach receipt"}
+                          <input type="file" disabled={uploadingReceiptFor === item.id} onChange={(event) => {
+                            const file = event.currentTarget.files?.[0];
+                            event.currentTarget.value = "";
+                            if (file) void uploadEntryReceipt(item.id, file);
+                          }} />
+                        </label>}
+                      </div>
+                    </td>
                     <td
                       className={
                         item.type === "income"
@@ -455,8 +565,8 @@ export function BookkeepingView({
                       }
                     >
                       <span>{item.type === "income" ? "+" : "-"}{currency(item.amount)}</span>
-                      {item.sourceReference ? <small className="table-subtext">Synced source · deletion disabled</small> : <button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete ledger entry "${item.description}"?`)) return; setError(""); try { await request(`/finance/entries/${item.id}`, { method: "DELETE" }); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete ledger entry"); } }}>Delete</button>}
                     </td>
+                    <td>{item.sourceReference ? <small className="table-subtext">Synced source · edit at source</small> : <div className="ledger-entry-actions"><button type="button" className="secondary-button" onClick={() => openEntryForm(item)}>Edit</button><button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete ledger entry "${item.description}"?`)) return; setError(""); try { await request(`/finance/entries/${item.id}`, { method: "DELETE" }); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete ledger entry"); } }}>Delete</button></div>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -630,7 +740,7 @@ export function BookkeepingView({
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Ledger entry</p>
-                <h2>Record transaction</h2>
+                <h2>{editingEntryId ? "Edit transaction" : "Record transaction"}</h2>
               </div>
               <button
                 type="button"
@@ -763,11 +873,34 @@ export function BookkeepingView({
               </label>
             </div>
             <button className="orange-button submit-button" disabled={saving}>
-              {saving ? "Saving..." : "Save entry"}
+              {saving ? "Saving..." : editingEntryId ? "Save changes" : "Save entry"}
             </button>
           </form>
         </div>
       )}
+      {receiptPreview && <div className="modal-backdrop" onClick={closeReceiptPreview}>
+        <section className="modal finance-receipt-preview" onClick={(event) => event.stopPropagation()}>
+          <div className="modal-heading">
+            <h2>{receiptPreview.document.fileName}</h2>
+            <button type="button" className="close-button" onClick={closeReceiptPreview}>×</button>
+          </div>
+          {receiptPreview.type === "application/pdf" || /\.pdf$/i.test(receiptPreview.document.fileName)
+            ? <iframe className="finance-receipt-preview-pdf" src={receiptPreview.url} title={`Receipt preview: ${receiptPreview.document.fileName}`} />
+            : receiptPreview.type.startsWith("image/")
+              ? <img className="finance-receipt-preview-image" src={receiptPreview.url} alt={receiptPreview.document.fileName} />
+              : receiptPreview.type.startsWith("audio/")
+                ? <audio controls src={receiptPreview.url} />
+                : receiptPreview.type.startsWith("video/")
+                  ? <video controls className="document-preview-video" src={receiptPreview.url} />
+                  : receiptPreview.text !== undefined
+                    ? <pre className="document-preview-text">{receiptPreview.text}</pre>
+                    : <p className="records-muted">This file type cannot be previewed in the browser. Download it to open it in a compatible app.</p>}
+          <div className="modal-actions">
+            <button type="button" className="secondary-button" onClick={() => void accessEntryReceipt(receiptPreview.entryId, receiptPreview.document, true)}>Download</button>
+            <button type="button" className="secondary-button" onClick={closeReceiptPreview}>Close</button>
+          </div>
+        </section>
+      </div>}
       {recurringOpen && (
         <div className="modal-backdrop">
           <form className="modal finance-modal" onSubmit={saveRecurring}>

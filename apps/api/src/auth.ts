@@ -2,7 +2,6 @@ import { createHmac, randomBytes, pbkdf2, timingSafeEqual } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { promisify } from 'node:util';
 import { ApiError } from './errors.js';
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import type { PrismaClient } from '@prisma/client';
 
 const deriveKey = promisify(pbkdf2);
@@ -50,38 +49,8 @@ function readToken(token: string): TokenPayload | null {
   }
 }
 
-async function readExternalToken(token: string): Promise<TokenPayload | null> {
-  const jwksUrl = process.env.NEON_AUTH_JWKS_URL || (process.env.NEON_AUTH_URL ? `${process.env.NEON_AUTH_URL.replace(/\/$/, '')}/.well-known/jwks.json` : '');
-  if (!jwksUrl || token.split('.').length !== 3) return null;
-  try {
-    const keySet = createRemoteJWKSet(new URL(jwksUrl));
-    const options = process.env.NEON_AUTH_URL ? { issuer: process.env.NEON_AUTH_URL } : undefined;
-    const { payload } = await jwtVerify(token, keySet, options);
-    return externalPayload(payload);
-  } catch {
-    return null;
-  }
-}
-
-function externalPayload(payload: JWTPayload): TokenPayload | null {
-  if (typeof payload.sub !== 'string' || typeof payload.email !== 'string') return null;
-  return { sub: payload.sub, email: payload.email, role: typeof payload.role === 'string' ? payload.role : 'viewer', exp: payload.exp || Math.floor(Date.now() / 1000) + tokenLifetimeSeconds };
-}
-
-export async function readAuthToken(token: string): Promise<TokenPayload | null> {
-  return token.split('.').length === 3 ? readExternalToken(token) : readToken(token);
-}
-
-export async function readNeonSession(token: string): Promise<{ id: string; email: string; name: string } | null> {
-  const authUrl = process.env.NEON_AUTH_URL?.replace(/\/$/, '');
-  if (!authUrl) return null;
-  try {
-    const response = await fetch(`${authUrl}/get-session`, { headers: { Authorization: `Bearer ${token}`, Cookie: `better-auth.session_token=${token}` } });
-    const body = await response.json().catch(() => null) as { user?: { id?: string; email?: string; name?: string }; session?: { user?: { id?: string; email?: string; name?: string } } } | null;
-    const user = body?.user || body?.session?.user;
-    if (!response.ok || !user?.id || !user.email) return null;
-    return { id: String(user.id), email: user.email.toLowerCase(), name: user.name || user.email.split('@')[0] };
-  } catch { return null; }
+export function readAuthToken(token: string): TokenPayload | null {
+  return readToken(token);
 }
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {

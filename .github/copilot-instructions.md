@@ -1,6 +1,0 @@
-- Fix the bug directly. No explanation before editing.
-- Final reply: 1-2 lines. File and what changed only.
-- Never create .md, summary, docs or test files unless asked.
-- Minimal edits. Don't refactor unrelated code.
-- Don't recap my request or suggest extras.
-- Open only the files needed. Prefer targeted search.
