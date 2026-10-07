@@ -47,7 +47,7 @@ services:
       context: ./apps/frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000/api}
+        VITE_API_URL: ${VITE_API_URL:-/api}
     container_name: collision-shop-frontend
     restart: unless-stopped
     depends_on:

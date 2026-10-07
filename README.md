@@ -42,9 +42,9 @@ Development login defaults to `admin@mastercraftautony.com` / `Mastercraft2026!`
 
 ### Windows Docker Desktop and backups
 
-The Compose project is pinned to `autoshopsoftware`, so PostgreSQL and uploaded files remain in named Docker volumes when containers are restarted or rebuilt. Use `docker compose up -d --build` to start the app; do not use `docker compose down -v`, which removes the database and uploads volumes. The registered sign-in task starts Docker Desktop and runs `docker compose up -d`; the containers use `unless-stopped` restart policies as well.
+The Compose project is pinned to `autoshopsoftware`, so PostgreSQL and uploaded files remain in named Docker volumes when containers are restarted or rebuilt. Use `docker compose up -d --build` to start the app; do not use `docker compose down -v`, which removes the database and uploads volumes. The registered sign-in task starts Docker Desktop and runs `docker compose up -d --build`; the containers use `unless-stopped` restart policies as well.
 
-On Windows, the app is available at http://localhost:5173. To keep database and document backups on `E:\AutoshopBackups\Postgres`, run the following from PowerShell in the repository folder:
+On Windows, the app is available locally at http://localhost:5173. To share it privately over Tailscale, run `tailscale serve --bg 5173` once from PowerShell, then use the HTTPS URL printed by `tailscale serve status`. This exposes the app to tailnet devices without publishing the Docker port on the LAN or internet. `tailscale serve` configuration is retained by Tailscale across Docker restarts. To keep database and document backups on `E:\AutoshopBackups\Postgres`, run the following from PowerShell in the repository folder:
 
 ```powershell
 .\scripts\register-windows-backup-task.ps1

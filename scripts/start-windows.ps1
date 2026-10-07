@@ -30,7 +30,7 @@ try {
 
   Push-Location $repositoryDirectory
   try {
-    docker compose up -d
+    docker compose up -d --build
     if ($LASTEXITCODE -ne 0) {
       throw "Could not start the Autoshop Docker Compose services."
     }
