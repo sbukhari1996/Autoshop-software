@@ -1,3 +1,5 @@
+name: autoshopsoftware
+
 services:
   db:
     image: postgres:16-alpine
@@ -8,7 +10,7 @@ services:
       POSTGRES_USER: collision_shop_app
       POSTGRES_PASSWORD: collision_shop_app
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -35,7 +37,7 @@ services:
       DEFAULT_ADMIN_NAME: ${DEFAULT_ADMIN_NAME:-Mastercraft Admin}
       ENABLE_DEFAULT_ADMIN: ${ENABLE_DEFAULT_ADMIN:-true}
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     volumes:
       - api_uploads:/app/uploads
     command: sh -c "npx prisma migrate deploy && node dist/server.js"
@@ -51,7 +53,7 @@ services:
     depends_on:
       - api
     ports:
-      - "5173:80"
+      - "127.0.0.1:5173:80"
 
 volumes:
   postgres_data:
