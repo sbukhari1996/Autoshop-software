@@ -4,6 +4,7 @@ import "./styles.css";
 import { EstimateBuilder } from "./EstimateBuilder";
 import { BookkeepingView } from "./BookkeepingView";
 import { InvoiceView, type Invoice } from "./InvoiceView";
+import { CompanyTodoList, type CompanyTodo } from "./CompanyTodoList";
 
 type View =
   | "Dashboard"
@@ -113,6 +114,7 @@ type Job = {
   totalExpenses?: number;
   customer: Customer;
   vehicle: Vehicle | null;
+  claim?: Pick<Claim, "claimNumber" | "insuranceCompany" | "customerName" | "customerPolicyNumber" | "incidentDate" | "adjusterName" | "adjusterPhone"> | null;
   documents?: DocumentRecord[];
   estimates?: HubEstimate[];
   expenses?: Expense[];
@@ -154,7 +156,8 @@ type Estimate = {
   estimateNumber: string | null;
   status: string;
   totalAmount: number;
-  job: Job;
+  job: Job | null;
+  walkInCustomerName?: string | null;
   lineItems: Array<{
     id: string;
     description: string;
@@ -213,11 +216,15 @@ type ReportsData = DashboardData & {
   documentCount: number;
 };
 type FinanceEntry = { id: string; type: "income" | "expense"; description: string; category: string | null; amount: number; paymentMethod: string | null; entryDate: string; notes: string | null; job?: { id: string; jobNumber: string } | null; claim?: { id: string; claimNumber: string | null } | null; documents: Array<{ id: string; fileName: string; createdAt: string }> };
-type RecurringExpense = { id: string; name: string; amount: number; category: string | null; frequency: "weekly" | "monthly" | "yearly"; startDate: string; active: boolean };
+type RecurringExpensePayment = { id: string; period: string; amount: number; paidAt: string };
+type RecurringExpense = { id: string; name: string; amount: number; category: string | null; frequency: "weekly" | "monthly" | "yearly"; startDate: string; endDate: string | null; active: boolean; payments: RecurringExpensePayment[] };
 type FinanceSummary = { income: number; generalExpenses: number; jobExpenses: number; expenses: number; net: number };
 type FinanceData = { entries: FinanceEntry[]; recurring: RecurringExpense[]; summary: FinanceSummary };
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
+const API_URL = new URL(
+  import.meta.env.VITE_API_URL || "http://localhost:4000/api",
+  window.location.origin,
+).toString().replace(/\/$/, "");
 const REPAIROS_LOGO_URL = "https://raw.githubusercontent.com/ChanMeng666/automotive-repair-management-system/main/app/static/images/RepairOS-logo.svg";
 const DEFAULT_ORGANIZATION = "Mastercraft Auto Repair & Collision";
 const navItems: Array<{ label: View; icon: string }> = [
@@ -446,13 +453,19 @@ function App() {
   const [session, setSession] = React.useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = React.useState(Boolean(token));
   const [view, setView] = React.useState<View>("Dashboard");
+  const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
+  const mobileNavToggleRef = React.useRef<HTMLButtonElement>(null);
+  const mobileNavFirstItemRef = React.useRef<HTMLButtonElement>(null);
   const [search, setSearch] = React.useState("");
   const [dashboard, setDashboard] = React.useState<DashboardData | null>(null);
+  const [todos, setTodos] = React.useState<CompanyTodo[]>([]);
   const [customers, setCustomers] = React.useState<Customer[]>([]);
   const [vehicles, setVehicles] = React.useState<Vehicle[]>([]);
   const [claims, setClaims] = React.useState<Claim[]>([]);
   const [jobs, setJobs] = React.useState<Job[]>([]);
   const [estimates, setEstimates] = React.useState<Estimate[]>([]);
+  const [editingEstimateId, setEditingEstimateId] = React.useState<string | null>(null);
+  const [estimateFormKey, setEstimateFormKey] = React.useState(0);
   const [documents, setDocuments] = React.useState<DocumentsData | null>(null);
   const [invoices, setInvoices] = React.useState<Invoice[]>([]);
   const [reports, setReports] = React.useState<ReportsData | null>(null);
@@ -464,7 +477,31 @@ function App() {
   const [loading, setLoading] = React.useState(false);
   const [notificationsOpen, setNotificationsOpen] = React.useState(false);
   const [profileOpen, setProfileOpen] = React.useState(false);
+  const [profileMenuAnchor, setProfileMenuAnchor] = React.useState<"sidebar" | "topbar">("sidebar");
+  const [passwordDialogOpen, setPasswordDialogOpen] = React.useState(false);
   const [dismissedNotifications, setDismissedNotifications] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    if (!mobileNavOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileNavOpen(false);
+        mobileNavToggleRef.current?.focus();
+      }
+    };
+    const closeOnDesktop = () => {
+      if (window.matchMedia("(min-width: 1024px)").matches) setMobileNavOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnDesktop);
+    mobileNavFirstItemRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnDesktop);
+    };
+  }, [mobileNavOpen]);
   const notificationStorageKey = `repairos_dismissed_notifications_${session?.activeOrganization?.id || "default"}`;
   React.useEffect(() => {
     try { setDismissedNotifications(JSON.parse(localStorage.getItem(notificationStorageKey) || "[]")); }
@@ -476,6 +513,14 @@ function App() {
       localStorage.setItem(notificationStorageKey, JSON.stringify(next));
       return next;
     });
+  };
+  const toggleProfileMenu = (anchor: "sidebar" | "topbar") => {
+    if (profileOpen && profileMenuAnchor === anchor) {
+      setProfileOpen(false);
+      return;
+    }
+    setProfileMenuAnchor(anchor);
+    setProfileOpen(true);
   };
   const logout = () => {
     localStorage.removeItem("repairos_token");
@@ -505,16 +550,19 @@ function App() {
     setError("");
     try {
       if (view === "Dashboard") {
-        const [dashboardResult, customerResult, claimResult, jobResult] = await Promise.allSettled([
+        const [dashboardResult, customerResult, claimResult, jobResult, todosResult] = await Promise.allSettled([
           fetchJson<DashboardData>("/dashboard"),
           fetchJson<Customer[]>("/customers"),
           fetchJson<Claim[]>("/claims"),
           fetchJson<Job[]>("/jobs"),
+          fetchJson<CompanyTodo[]>("/todos"),
         ]);
         if (dashboardResult.status === "fulfilled") setDashboard(dashboardResult.value);
         if (customerResult.status === "fulfilled") setCustomers(customerResult.value);
         if (claimResult.status === "fulfilled") setClaims(claimResult.value);
         if (jobResult.status === "fulfilled") setJobs(jobResult.value);
+        if (todosResult.status === "fulfilled") setTodos(todosResult.value);
+        if (todosResult.status === "rejected") throw todosResult.reason;
         if (dashboardResult.status === "rejected") throw dashboardResult.reason;
       }
       if (view === "Customers" || view === "Claims") setCustomers(await fetchJson("/customers"));
@@ -607,7 +655,7 @@ function App() {
   const organizationName = session.activeOrganization.name || DEFAULT_ORGANIZATION;
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={mobileNavOpen ? "sidebar is-open" : "sidebar"} id="workspace-sidebar">
         <div className="brand">
           <img className="brand-logo" src={REPAIROS_LOGO_URL} alt="RepairOS" />
           <div>
@@ -631,7 +679,16 @@ function App() {
             <button
               className={view === item.label ? "nav-item active" : "nav-item"}
               key={item.label}
-              onClick={() => navigate(item.label)}
+              aria-label={item.label}
+              title={item.label}
+              ref={navItems[0].label === item.label ? mobileNavFirstItemRef : undefined}
+              onClick={() => {
+                navigate(item.label);
+                setMobileNavOpen(false);
+                if (!window.matchMedia("(min-width: 1024px)").matches) {
+                  mobileNavToggleRef.current?.focus();
+                }
+              }}
             >
               <Icon name={item.icon} />
               <span>{item.label}</span>
@@ -640,7 +697,7 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button className="nav-item" onClick={() => setNotificationsOpen((open) => !open)} aria-expanded={notificationsOpen}>
+          <button className="nav-item" aria-label="Notifications" title="Notifications" onClick={() => setNotificationsOpen((open) => !open)} aria-expanded={notificationsOpen}>
             <Icon name="bell" />
             <span>Notifications</span>
             {(dashboard?.upcomingSchedule?.some((inspection) => !dismissedNotifications.includes(`inspection:${inspection.id}`)) || claims.some((claim) => ["new", "in_review"].includes(claim.claimStatus) && !dismissedNotifications.includes(`claim:${claim.id}`)) || jobs.some((job) => ["ready", "completed"].includes(job.status) && !dismissedNotifications.includes(`job:${job.id}`))) ? <b className="notification-dot" /> : null}
@@ -654,7 +711,7 @@ function App() {
               {!dashboard?.upcomingSchedule?.some((inspection) => !dismissedNotifications.includes(`inspection:${inspection.id}`)) && !claims.some((claim) => ["new", "in_review"].includes(claim.claimStatus) && !dismissedNotifications.includes(`claim:${claim.id}`)) && !jobs.some((job) => ["ready", "completed"].includes(job.status) && !dismissedNotifications.includes(`job:${job.id}`)) && <p className="notification-empty">You are all caught up.</p>}
             </div>
           </div>}
-          <button type="button" className="user-card" onClick={() => setProfileOpen((open) => !open)} aria-label="Open profile menu" aria-expanded={profileOpen}>
+          <button type="button" className="user-card" onClick={() => toggleProfileMenu("sidebar")} aria-label="Open profile menu" title="Open profile menu" aria-expanded={profileOpen && profileMenuAnchor === "sidebar"}>
             <div className="avatar">SB</div>
             <div>
               <strong>{session.user.name || "Shop admin"}</strong>
@@ -662,9 +719,32 @@ function App() {
             </div>
             <span className="more">...</span>
           </button>
-          {profileOpen && <div className="profile-menu sidebar-profile-menu"><strong>{session.user.name || "Shop admin"}</strong><small>{session.user.email}</small><button type="button" onClick={logout}>Log out</button></div>}
+          {profileOpen && profileMenuAnchor === "sidebar" && <div className="profile-menu sidebar-profile-menu"><strong>{session.user.name || "Shop admin"}</strong><small>{session.user.email}</small><button type="button" onClick={() => { setProfileOpen(false); setPasswordDialogOpen(true); }}>Change password</button><button type="button" onClick={logout}>Log out</button></div>}
         </div>
       </aside>
+      <button
+        type="button"
+        className={mobileNavOpen ? "nav-overlay is-visible" : "nav-overlay"}
+        aria-label="Close navigation"
+        hidden={!mobileNavOpen}
+        onClick={() => {
+          setMobileNavOpen(false);
+          mobileNavToggleRef.current?.focus();
+        }}
+      />
+      <button
+        ref={mobileNavToggleRef}
+        type="button"
+        className="nav-toggle"
+        aria-label={mobileNavOpen ? "Close menu" : "Open menu"}
+        aria-controls="workspace-sidebar"
+        aria-expanded={mobileNavOpen}
+        onClick={() => setMobileNavOpen((open) => !open)}
+      >
+        <span />
+        <span />
+        <span />
+      </button>
       <main className="main-panel">
         <header className="topbar">
           <div className="breadcrumbs">
@@ -690,8 +770,8 @@ function App() {
               <Icon name="bell" />
               <i />
             </button>
-            <button className="top-avatar profile-trigger" onClick={() => setProfileOpen((open) => !open)} aria-label="Open profile menu" aria-expanded={profileOpen}>SB</button>
-            {profileOpen && <div className="profile-menu top-profile-menu"><strong>{session.user.name || "Shop admin"}</strong><small>{session.user.email}</small><button type="button" onClick={logout}>Log out</button></div>}
+            <button className="top-avatar profile-trigger" onClick={() => toggleProfileMenu("topbar")} aria-label="Open profile menu" aria-expanded={profileOpen && profileMenuAnchor === "topbar"}>SB</button>
+            {profileOpen && profileMenuAnchor === "topbar" && <div className="profile-menu top-profile-menu"><strong>{session.user.name || "Shop admin"}</strong><small>{session.user.email}</small><button type="button" onClick={() => { setProfileOpen(false); setPasswordDialogOpen(true); }}>Change password</button><button type="button" onClick={logout}>Log out</button></div>}
           </div>
         </header>
         <div className="page-content">
@@ -744,6 +824,9 @@ function App() {
               jobs={jobs}
               onNavigate={navigate}
               onCreated={() => void loadData()}
+              todos={todos}
+              request={fetchJson}
+              onTodosChanged={() => void loadData()}
             />
           )}
           {view === "Customers" && <CustomerView customers={customers} claims={claims} vehicles={vehicles} jobs={jobs} onChanged={loadData} />}
@@ -759,11 +842,11 @@ function App() {
           )}
           {view === "Jobs" && <JobView jobs={jobs} onChanged={loadData} />}
           {view === "Estimates" && (
-            <><EstimateBuilder jobs={jobs} request={fetchJson} onSaved={loadData} /><EstimateRegister estimates={estimates} request={fetchJson} onChanged={loadData} onNavigate={navigate} /></>
+            <><EstimateBuilder key={estimateFormKey} jobs={jobs} request={fetchJson} onSaved={loadData} editEstimateId={editingEstimateId} onStartNew={() => { setEditingEstimateId(null); setEstimateFormKey((key) => key + 1); window.scrollTo({ top: 0, behavior: "smooth" }); }} onCancelEdit={() => { setEditingEstimateId(null); setEstimateFormKey((key) => key + 1); window.scrollTo({ top: 0, behavior: "smooth" }); }} /><EstimateRegister estimates={estimates} request={fetchJson} onChanged={loadData} onNavigate={navigate} onEdit={(id) => { setEditingEstimateId(id); setEstimateFormKey((key) => key + 1); window.scrollTo({ top: 0, behavior: "smooth" }); }} /></>
           )}
           {view === "Documents" && <DocumentView documents={documents} customers={customers} jobs={jobs} claims={claims} onUploaded={loadData} />}
           {view === "Invoices" && <InvoiceView invoices={invoices} customers={customers} jobs={jobs} claims={claims} request={fetchJson} apiUrl={API_URL} onChanged={loadData} />}
-          {view === "Bookkeeping" && <BookkeepingView data={finance} jobs={jobs} claims={claims} request={fetchJson} onChanged={() => void loadData()} />}
+          {view === "Bookkeeping" && <BookkeepingView data={finance} request={fetchJson} onChanged={() => void loadData()} />}
           {view === "Reports" && (
             <ReportView reports={reports} onNavigate={navigate} />
           )}
@@ -781,6 +864,85 @@ function App() {
           }}
         />
       )}
+      {passwordDialogOpen && <ChangePasswordDialog request={fetchJson} onClose={() => setPasswordDialogOpen(false)} />}
+    </div>
+  );
+}
+
+function ChangePasswordDialog({
+  request,
+  onClose,
+}: {
+  request: (path: string, options?: RequestInit) => Promise<unknown>;
+  onClose: () => void;
+}) {
+  const [currentPassword, setCurrentPassword] = React.useState("");
+  const [newPassword, setNewPassword] = React.useState("");
+  const [confirmPassword, setConfirmPassword] = React.useState("");
+  const [error, setError] = React.useState("");
+  const [saved, setSaved] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !saving) onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, saving]);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    if (newPassword.length < 8) {
+      setError("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("New password and confirmation do not match.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await request("/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      setSaved(true);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (changeError) {
+      setError(changeError instanceof Error ? changeError.message : "Unable to change password.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
+      <form className="modal password-change-modal" role="dialog" aria-modal="true" onSubmit={submit} onClick={(event) => event.stopPropagation()} aria-labelledby="password-change-title">
+        <div className="modal-heading">
+          <div><p className="eyebrow">Account security</p><h2 id="password-change-title">Change password</h2></div>
+          <button type="button" className="close-button" onClick={onClose} aria-label="Close password dialog"><Icon name="close" /></button>
+        </div>
+        {error && <div className="error-banner" role="alert">{error}</div>}
+        {saved ? (
+          <div className="password-change-success" role="status">Your password has been changed.</div>
+        ) : (
+          <>
+            <label>Current password<input type="password" autoComplete="current-password" required value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
+            <label>New password<input type="password" autoComplete="new-password" minLength={8} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label>
+            <label>Confirm new password<input type="password" autoComplete="new-password" minLength={8} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>
+            <p className="password-change-hint">Use at least 8 characters.</p>
+          </>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={onClose}>{saved ? "Done" : "Cancel"}</button>
+          {!saved && <button type="submit" className="orange-button submit-button" disabled={saving}>{saving ? "Saving..." : "Update password"}</button>}
+        </div>
+      </form>
     </div>
   );
 }
@@ -792,6 +954,9 @@ function Dashboard({
   jobs,
   onNavigate,
   onCreated,
+  todos,
+  request,
+  onTodosChanged,
 }: {
   data: DashboardData | null;
   customers: Customer[];
@@ -799,6 +964,9 @@ function Dashboard({
   jobs: Job[];
   onNavigate: (view: View) => void;
   onCreated: () => void;
+  todos: CompanyTodo[];
+  request: typeof fetchJson;
+  onTodosChanged: () => void;
 }) {
   const [scheduleModalOpen, setScheduleModalOpen] = React.useState(false);
   const [selectedInspection, setSelectedInspection] = React.useState<Inspection | null>(null);
@@ -863,6 +1031,9 @@ function Dashboard({
             <Icon name="arrow" />
           </button>
         ))}
+      </section>
+      <section className="surface dashboard-todo-surface">
+        <CompanyTodoList todos={todos} request={request} onChanged={onTodosChanged} />
       </section>
       <section className="dashboard-grid">
         <div className="surface wide">
@@ -937,6 +1108,11 @@ function Dashboard({
             setSelectedInspection(null);
             onCreated();
           }}
+          onDeleted={() => {
+            setScheduleModalOpen(false);
+            setSelectedInspection(null);
+            onCreated();
+          }}
         />
       )}
     </>
@@ -945,19 +1121,72 @@ function Dashboard({
 function CustomerView({ customers, claims, vehicles, jobs, onChanged }: { customers: Customer[]; claims: Claim[]; vehicles: Vehicle[]; jobs: Job[]; onChanged: () => Promise<void> }) {
   const [selectedCustomer, setSelectedCustomer] = React.useState<Customer | null>(null);
   const [selectedClaim, setSelectedClaim] = React.useState<Claim | null>(null);
+  const [editingCustomer, setEditingCustomer] = React.useState(false);
   const [error, setError] = React.useState("");
   const customerClaims = selectedCustomer ? claims.filter((claim) => claim.customerId === selectedCustomer.id) : [];
   const customerVehicles = selectedCustomer ? vehicles.filter((vehicle) => vehicle.customer.id === selectedCustomer.id) : [];
   const customerJobs = selectedCustomer ? jobs.filter((job) => job.customer.id === selectedCustomer.id) : [];
   return <>
     {error && <div className="error-banner">{error}</div>}
-    {selectedCustomer && <div className="customer-file-action"><span>Customer file: <strong>{selectedCustomer.firstName} {selectedCustomer.lastName}</strong></span><button type="button" className="danger-button" onClick={async () => { if (!window.confirm(`Delete ${selectedCustomer.firstName} ${selectedCustomer.lastName}? This cannot be undone.`)) return; setError(""); try { await fetchJson(`/customers/${selectedCustomer.id}`, { method: "DELETE" }); setSelectedCustomer(null); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete customer"); } }}>Delete customer</button></div>}
+    {selectedCustomer && <div className="customer-file-action"><span>Customer file: <strong>{selectedCustomer.firstName} {selectedCustomer.lastName}</strong></span><div className="customer-file-actions"><button type="button" className="secondary-button" onClick={() => setEditingCustomer(true)}>Edit customer</button><button type="button" className="danger-button" onClick={async () => { if (!window.confirm(`Delete ${selectedCustomer.firstName} ${selectedCustomer.lastName}? This cannot be undone.`)) return; setError(""); try { await fetchJson(`/customers/${selectedCustomer.id}`, { method: "DELETE" }); setSelectedCustomer(null); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete customer"); } }}>Delete customer</button></div></div>}
     <div className="customer-workspace">
-      <div className="surface customer-directory"><div className="surface-heading"><div><h2>Customer directory</h2><p>{customers.length} customer records · Select a customer to see their complete file</p></div></div><table className="data-table"><thead><tr><th>Customer</th><th>Contact</th><th>Open jobs</th><th>Claims</th></tr></thead><tbody>{customers.map((customer) => <tr className={selectedCustomer?.id === customer.id ? "clickable-row selected-row" : "clickable-row"} key={customer.id} onClick={() => { setSelectedCustomer(customer); setSelectedClaim(null); }}><td><div className="person-cell"><div className="table-avatar">{customer.firstName[0]}{customer.lastName[0]}</div><strong>{customer.firstName} {customer.lastName}</strong></div></td><td>{customer.phone || customer.email || "No contact details"}</td><td>{customer._count?.jobs || 0}</td><td><span className="status-pill blue">{customer._count?.claims || 0} claims</span></td></tr>)}</tbody></table>{!customers.length && <EmptyState text="No customers yet. Create the first customer to begin an intake." />}</div>
-      <div className="surface customer-file">{selectedCustomer ? <><div className="customer-file-heading"><div className="table-avatar large-avatar">{selectedCustomer.firstName[0]}{selectedCustomer.lastName[0]}</div><div><p className="eyebrow">Customer file</p><h2>{selectedCustomer.firstName} {selectedCustomer.lastName}</h2><p>{selectedCustomer.phone || "No phone"} · {selectedCustomer.email || "No email"}</p></div></div><div className="customer-stats"><span><strong>{customerClaims.length}</strong> claims</span><span><strong>{customerVehicles.length}</strong> vehicles</span><span><strong>{customerJobs.length}</strong> jobs</span></div><div className="customer-file-section"><div className="records-section-heading"><h4>Claims</h4><span>Click a claim to open its full file</span></div>{customerClaims.length ? <div className="customer-claims">{customerClaims.map((claim) => <button className="customer-claim-row" key={claim.id} onClick={() => setSelectedClaim(claim)}><span><strong>{claim.claimNumber || "Unnumbered claim"}</strong><small>{claim.insuranceCompany || "Insurance pending"} · {claim.vehicle ? [claim.vehicle.year, claim.vehicle.make, claim.vehicle.model].filter(Boolean).join(" ") : "Vehicle pending"}</small></span><span className={`status-pill ${claim.claimStatus === "approved" ? "green" : "orange"}`}>{claim.claimStatus}</span><Icon name="arrow" /></button>)}</div> : <p className="records-muted">No claims attached to this customer.</p>}</div><div className="customer-file-section"><div className="records-section-heading"><h4>Vehicles</h4><span>{customerVehicles.length} registered</span></div>{customerVehicles.length ? <div className="customer-vehicle-list">{customerVehicles.map((vehicle) => <span key={vehicle.id}>{[vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || "Vehicle pending"}</span>)}</div> : <p className="records-muted">No vehicles attached to this customer.</p>}</div></> : <EmptyState text="Select a customer to view every claim, vehicle, and repair record together." />}</div>
+      <div className="surface customer-directory"><div className="surface-heading"><div><h2>Customer directory</h2><p>{customers.length} customer records · Select a customer to see their complete file</p></div></div><table className="data-table"><thead><tr><th>Customer</th><th>Contact</th><th>Open jobs</th><th>Claims</th></tr></thead><tbody>{customers.map((customer) => <tr className={selectedCustomer?.id === customer.id ? "clickable-row selected-row" : "clickable-row"} key={customer.id} onClick={() => { setSelectedCustomer(customer); setSelectedClaim(null); }}><td data-label="Customer"><div className="person-cell"><div className="table-avatar">{customer.firstName[0]}{customer.lastName[0]}</div><strong>{customer.firstName} {customer.lastName}</strong></div></td><td data-label="Contact">{customer.phone || customer.email || "No contact details"}</td><td data-label="Open jobs">{customer._count?.jobs || 0}</td><td data-label="Claims"><span className="status-pill blue">{customer._count?.claims || 0} claims</span></td></tr>)}</tbody></table>{!customers.length && <EmptyState text="No customers yet. Create the first customer to begin an intake." />}</div>
+      <div className="surface customer-file">{selectedCustomer ? <><div className="customer-file-heading"><div className="table-avatar large-avatar">{selectedCustomer.firstName[0]}{selectedCustomer.lastName[0]}</div><div><p className="eyebrow">Customer file</p><h2>{selectedCustomer.firstName} {selectedCustomer.lastName}</h2><p>{selectedCustomer.phone || "No phone"} · {selectedCustomer.email || "No email"}</p>{selectedCustomer.address && <p>{selectedCustomer.address}</p>}</div></div><div className="customer-stats"><span><strong>{customerClaims.length}</strong> claims</span><span><strong>{customerVehicles.length}</strong> vehicles</span><span><strong>{customerJobs.length}</strong> jobs</span></div><div className="customer-file-section"><div className="records-section-heading"><h4>Claims</h4><span>Click a claim to open its full file</span></div>{customerClaims.length ? <div className="customer-claims">{customerClaims.map((claim) => <button className="customer-claim-row" key={claim.id} onClick={() => setSelectedClaim(claim)}><span><strong>{claim.claimNumber || "Unnumbered claim"}</strong><small>{claim.insuranceCompany || "Insurance pending"} · {claim.vehicle ? [claim.vehicle.year, claim.vehicle.make, claim.vehicle.model].filter(Boolean).join(" ") : "Vehicle pending"}</small></span><span className={`status-pill ${claim.claimStatus === "approved" ? "green" : "orange"}`}>{claim.claimStatus}</span><Icon name="arrow" /></button>)}</div> : <p className="records-muted">No claims attached to this customer.</p>}</div><div className="customer-file-section"><div className="records-section-heading"><h4>Vehicles</h4><span>{customerVehicles.length} registered</span></div>{customerVehicles.length ? <div className="customer-vehicle-list">{customerVehicles.map((vehicle) => <span key={vehicle.id}>{[vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || "Vehicle pending"}</span>)}</div> : <p className="records-muted">No vehicles attached to this customer.</p>}</div></> : <EmptyState text="Select a customer to view every claim, vehicle, and repair record together." />}</div>
     </div>
+    {selectedCustomer && editingCustomer && <CustomerEditModal customer={selectedCustomer} onClose={() => setEditingCustomer(false)} onSaved={async (updated) => { setSelectedCustomer(updated); setEditingCustomer(false); await onChanged(); }} />}
     {selectedClaim && <ClaimWorkspace claim={selectedClaim} customers={customers} vehicles={vehicles} jobs={jobs} onClose={() => setSelectedClaim(null)} onSaved={async () => { await onChanged(); setSelectedClaim(null); }} />}
   </>;
+}
+function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer; onClose: () => void; onSaved: (customer: Customer) => Promise<void> }) {
+  const [form, setForm] = React.useState({
+    firstName: customer.firstName,
+    lastName: customer.lastName,
+    phone: customer.phone || "",
+    email: customer.email || "",
+    address: customer.address || "",
+  });
+  const [error, setError] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  function update(key: keyof typeof form, value: string) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await fetchJson<Customer>(`/customers/${customer.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      await onSaved(updated);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to update customer");
+    } finally {
+      setSaving(false);
+    }
+  }
+  return <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget && !saving) onClose(); }}>
+    <form className="modal customer-edit-modal" onSubmit={save}>
+      <div className="modal-heading">
+        <div><p className="eyebrow">Customer record</p><h2>Edit customer</h2></div>
+        <button type="button" className="close-button" onClick={onClose} aria-label="Close customer form"><Icon name="close" /></button>
+      </div>
+      {error && <div className="error-banner">{error}</div>}
+      <div className="customer-edit-grid">
+        <label>First name<input required maxLength={100} value={form.firstName} onChange={(event) => update("firstName", event.target.value)} /></label>
+        <label>Last name<input required maxLength={100} value={form.lastName} onChange={(event) => update("lastName", event.target.value)} /></label>
+        <label>Phone<input type="tel" maxLength={50} value={form.phone} onChange={(event) => update("phone", event.target.value)} /></label>
+        <label>Email<input type="email" maxLength={254} value={form.email} onChange={(event) => update("email", event.target.value)} /></label>
+        <label className="customer-address-field">Address<textarea maxLength={500} value={form.address} onChange={(event) => update("address", event.target.value)} /></label>
+      </div>
+      <div className="customer-edit-actions">
+        <button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancel</button>
+        <button className="orange-button" disabled={saving}>{saving ? "Saving..." : "Save customer"}</button>
+      </div>
+    </form>
+  </div>;
 }
 function VehicleView({ vehicles, customers, onChanged }: { vehicles: Vehicle[]; customers: Customer[]; onChanged: () => Promise<void> }) {
   const [selected, setSelected] = React.useState<Vehicle | null>(null);
@@ -1010,16 +1239,16 @@ function ClaimView({
             <tbody>
               {claims.map((claim) => (
                 <tr className="clickable-row" key={claim.id} onClick={() => setSelectedClaim(claim)}>
-                  <td><strong className="mono">{claim.claimNumber || "UNNUMBERED"}</strong></td>
-                  <td>
+                  <td data-label="Claim"><strong className="mono">{claim.claimNumber || "UNNUMBERED"}</strong></td>
+                  <td data-label="Customer / vehicle">
                     {claim.customer.firstName} {claim.customer.lastName}
                     <small className="table-subtext">
                       {claim.vehicle ? [claim.vehicle.year, claim.vehicle.make, claim.vehicle.model].filter(Boolean).join(" ") : "Vehicle pending"}
                     </small>
                   </td>
-                  <td>{claim.insuranceCompany || "Carrier pending"}</td>
-                  <td>{claim.jobs?.[0]?.jobNumber || "Unlinked"}</td>
-                  <td><span className={`status-pill ${claim.claimStatus === "approved" ? "green" : "orange"}`}>{claim.claimStatus}</span></td>
+                  <td data-label="Carrier">{claim.insuranceCompany || "Carrier pending"}</td>
+                  <td data-label="Repair order">{claim.jobs?.[0]?.jobNumber || "Unlinked"}</td>
+                  <td data-label="Status"><span className={`status-pill ${claim.claimStatus === "approved" ? "green" : "orange"}`}>{claim.claimStatus}</span></td>
                 </tr>
               ))}
             </tbody>
@@ -1525,7 +1754,7 @@ function JobOperations({
                       {new Date(expense.expenseDate).toLocaleDateString()}
                     </small>
                   </span>
-                  <span className="expense-actions"><strong>${expense.amount.toLocaleString()}</strong><button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete expense "${expense.description}"?`)) return; setError(""); try { await fetchJson(`/jobs/expenses/${expense.id}`, { method: "DELETE" }); await loadExpenses(); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete expense"); } }}>Delete</button></span>
+                  <span className="expense-actions"><strong>${expense.amount.toLocaleString()}</strong><button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete expense "${expense.description}"?`)) return; setError(""); try { await fetchJson(`/expenses/${expense.id}`, { method: "DELETE" }); await loadExpenses(); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete expense"); } }}>Delete</button></span>
                 </div>
               ))}
             </div>
@@ -1572,9 +1801,13 @@ function JobOperations({
 function EstimateRegister({
   estimates,
   onNavigate,
+  onEdit,
+  request,
+  onChanged,
 }: {
   estimates: Estimate[];
   onNavigate: (view: View) => void;
+  onEdit: (estimateId: string) => void;
   request: <T>(path: string, options?: RequestInit) => Promise<T>;
   onChanged: () => Promise<void>;
 }) {
@@ -1621,28 +1854,29 @@ function EstimateRegister({
             <tbody>
               {estimates.map((estimate) => (
                 <tr key={estimate.id}>
-                  <td>
+                  <td data-label="Estimate">
                     <strong className="mono">
                       {estimate.estimateNumber || "DRAFT"}
                     </strong>
                   </td>
-                  <td className="mono">{estimate.job.jobNumber}</td>
-                  <td>
-                    {estimate.job.customer.firstName}{" "}
-                    {estimate.job.customer.lastName}
+                  <td className="mono" data-label="Work order">{estimate.job?.jobNumber || "WALK-IN"}</td>
+                  <td data-label="Customer">
+                    {estimate.job
+                      ? `${estimate.job.customer.firstName} ${estimate.job.customer.lastName}`
+                      : estimate.walkInCustomerName || "Walk-in customer"}
                   </td>
-                  <td>{estimate.lineItems.length}</td>
-                  <td>
+                  <td data-label="Line items">{estimate.lineItems.length}</td>
+                  <td data-label="Status">
                     <span
                       className={`status-pill ${estimate.status === "approved" ? "green" : estimate.status === "draft" ? "blue" : "orange"}`}
                     >
                       {estimate.status}
                     </span>
                   </td>
-                  <td>
+                  <td data-label="Total">
                     <strong>${estimate.totalAmount.toLocaleString()}</strong>
                   </td>
-                  <td><button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete estimate ${estimate.estimateNumber || "DRAFT"}?`)) return; try { await request(`/estimates/${estimate.id}`, { method: "DELETE" }); await onChanged(); } catch (deleteError) { window.alert(deleteError instanceof Error ? deleteError.message : "Unable to delete estimate"); } }}>Delete</button></td>
+                  <td className="table-actions" data-label="Actions"><button type="button" className="text-button" onClick={() => onEdit(estimate.id)}>Edit</button><button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete estimate ${estimate.estimateNumber || "DRAFT"}?`)) return; try { await request(`/estimates/${estimate.id}`, { method: "DELETE" }); await onChanged(); } catch (deleteError) { window.alert(deleteError instanceof Error ? deleteError.message : "Unable to delete estimate"); } }}>Delete</button></td>
                 </tr>
               ))}
             </tbody>
@@ -1846,13 +2080,13 @@ function DocumentView({
                 const customer = owner?.customer;
                 return (
                   <tr key={document.id}>
-                    <td>
+                    <td data-label="File">
                       <div className="document-cell">
                         <Icon name="file" />
                         <strong>{document.fileName}</strong>
                       </div>
                     </td>
-                    <td>
+                    <td data-label="Customer / context">
                       {document.customer
                         ? `${document.customer.firstName} ${document.customer.lastName} · Customer file`
                         : document.claim
@@ -1866,9 +2100,9 @@ function DocumentView({
                             : "Customer unavailable"}
                       </small>
                     </td>
-                    <td>{document.documentType || "other"}{document.description ? <small className="table-subtext">{document.description}</small> : null}</td>
-                    <td>{new Date(document.createdAt).toLocaleDateString()}</td>
-                    <td><div className="document-actions"><button type="button" onClick={() => void accessDocument(document, false)}>Preview</button><button type="button" onClick={() => void accessDocument(document, true)}>Download</button><button type="button" className="danger-button compact-danger" onClick={() => void deleteDocument(document)}>Delete</button></div></td>
+                    <td data-label="Type">{document.documentType || "other"}{document.description ? <small className="table-subtext">{document.description}</small> : null}</td>
+                    <td data-label="Added">{new Date(document.createdAt).toLocaleDateString()}</td>
+                    <td data-label="Actions"><div className="document-actions"><button type="button" onClick={() => void accessDocument(document, false)}>Preview</button><button type="button" onClick={() => void accessDocument(document, true)}>Download</button><button type="button" className="danger-button compact-danger" onClick={() => void deleteDocument(document)}>Delete</button></div></td>
                   </tr>
                 );
               })}
@@ -2064,7 +2298,7 @@ function DataSurface({
           {rows.map((row, index) => (
             <tr key={index} className={onRowClick ? "clickable-row" : undefined} onClick={() => onRowClick?.(index)}>
               {row.map((cell, cellIndex) => (
-                <td key={cellIndex}>{cell}</td>
+                <td key={cellIndex} data-label={headers[cellIndex]}>{cell}</td>
               ))}
             </tr>
           ))}
@@ -2118,27 +2352,27 @@ function JobTable({
             className={onSelect ? "clickable-row" : ""}
             onClick={() => onSelect?.(job)}
           >
-            <td>
+            <td data-label="Work order">
               <strong className="mono">{job.jobNumber}</strong>
             </td>
-            <td>
+            <td data-label="Customer">
               {job.customer.firstName} {job.customer.lastName}
             </td>
-            <td>
+            <td data-label="Vehicle">
               {job.vehicle
                 ? [job.vehicle.year, job.vehicle.make, job.vehicle.model]
                     .filter(Boolean)
                     .join(" ")
                 : "Vehicle pending"}
             </td>
-            <td>
+            <td data-label="Stage">
               <span
                 className={`status-pill ${job.status === "completed" ? "green" : job.status === "new" ? "blue" : "orange"}`}
               >
                 {job.status}
               </span>
             </td>
-            <td>${job.totalRevenue.toLocaleString()}</td>
+            <td data-label="Revenue">${job.totalRevenue.toLocaleString()}</td>
           </tr>
         ))}
       </tbody>
@@ -2152,6 +2386,7 @@ function InspectionModal({
   inspection,
   onClose,
   onCreated,
+  onDeleted,
 }: {
   customers: Customer[];
   claims: Claim[];
@@ -2159,6 +2394,7 @@ function InspectionModal({
   inspection?: Inspection | null;
   onClose: () => void;
   onCreated: () => void;
+  onDeleted: () => void;
 }) {
   const [form, setForm] = React.useState({
     customerId: inspection?.customer.id || "",
@@ -2179,6 +2415,19 @@ function InspectionModal({
   );
   const update = (key: keyof typeof form, value: string) =>
     setForm((current) => ({ ...current, [key]: value }));
+  async function deleteInspection() {
+    if (!inspection || !window.confirm("Delete this scheduled event? This cannot be undone.")) return;
+    setSaving(true);
+    setError("");
+    try {
+      await fetchJson(`/inspections/${inspection.id}`, { method: "DELETE" });
+      onDeleted();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete scheduled event");
+    } finally {
+      setSaving(false);
+    }
+  }
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setSaving(true);
@@ -2187,7 +2436,12 @@ function InspectionModal({
       await fetchJson(inspection ? `/inspections/${inspection.id}` : "/inspections", {
         method: inspection ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, claimId: form.claimId || undefined, jobId: form.jobId || undefined }),
+        body: JSON.stringify({
+          ...form,
+          scheduledFor: new Date(form.scheduledFor).toISOString(),
+          claimId: form.claimId || undefined,
+          jobId: form.jobId || undefined,
+        }),
       });
       onCreated();
     } catch (submitError) {
@@ -2287,9 +2541,12 @@ function InspectionModal({
           Notes
           <textarea className="inspection-notes" value={form.notes} onChange={(event) => update("notes", event.target.value)} />
         </label>
-        <button className="orange-button submit-button" type="submit" disabled={saving}>
-          {saving ? "Saving..." : inspection ? "Save changes" : "Schedule inspection"} <Icon name="arrow" />
-        </button>
+        <div className="inspection-form-actions">
+          {inspection && <button type="button" className="danger-button" onClick={() => void deleteInspection()} disabled={saving}>Delete event</button>}
+          <button className="orange-button submit-button" type="submit" disabled={saving}>
+            {saving ? "Saving..." : inspection ? "Save changes" : "Schedule inspection"} <Icon name="arrow" />
+          </button>
+        </div>
       </form>
     </div>
   );
@@ -2439,6 +2696,7 @@ function CreateModal({
             {input("lastName", "Last name", true)}
             {input("phone", "Phone")}
             {input("email", "Email")}
+            {input("address", "Address")}
           </>
         )}
         {type === "vehicle" && (
@@ -2499,7 +2757,7 @@ function CreateModal({
               form={form}
               setForm={setForm}
             />
-            {input("jobNumber", "Job number", true, "J-2040")}
+            {input("jobNumber", "Job number (leave blank to auto-generate)", false, "JOB-001")}
             <Select
               name="vehicleId"
               label="Vehicle"

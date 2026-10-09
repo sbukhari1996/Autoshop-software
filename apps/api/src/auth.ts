@@ -71,8 +71,9 @@ export function requireRole(...allowed: OrganizationRole[]) {
 
 export function protectMutations(prisma: PrismaClient) {
   return (req: Request, res: Response, next: NextFunction) => {
-  if (req.method === 'GET' || req.path === '/health' || req.path.startsWith('/auth')) return next();
-    return requireAuth(req, res, () => {
+    if (req.method === 'GET' || req.method === 'OPTIONS' || req.path === '/health' || req.path.startsWith('/auth')) return next();
+    return requireAuth(req, res, (error) => {
+      if (error) return next(error);
       const authUser = res.locals.user as TokenPayload;
       void prisma.organizationMembership.findFirst({
         where: { userId: authUser.sub, ...(authUser.organizationId ? { organizationId: authUser.organizationId } : {}) },

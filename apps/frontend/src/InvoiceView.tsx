@@ -2,13 +2,13 @@ import React from "react";
 import { LineItemPresetPicker } from "./LineItemPresetPicker";
 import type { CollisionPresetItem } from "./collisionLineItemPresets";
 
-type Customer = { id: string; firstName: string; lastName: string; phone: string | null };
+type Customer = { id: string; firstName: string; lastName: string; phone: string | null; email?: string | null; address?: string | null };
 type Job = { id: string; jobNumber: string; claimId?: string | null; customer: Customer };
 type Claim = { id: string; claimNumber: string | null; customer: Customer };
 type LineItem = { id?: string; description: string; quantity: number | string; unitPrice: number | string };
 type Payment = { id: string; method: string; amount: number; date: string; notes: string | null };
 type InvoiceDocument = { id: string; fileName: string; documentType: string; description: string | null; createdAt: string };
-export type Invoice = { id: string; invoiceNumber: string; customerId?: string | null; customer: Customer | null; jobId?: string | null; job?: { id: string; jobNumber: string } | null; claimId?: string | null; claim?: { id: string; claimNumber: string | null } | null; status: string; issueDate: string; dueDate: string | null; subtotal: number; tax: number; total: number; amountPaid: number; balanceDue: number; lineItems: LineItem[]; payments: Payment[]; documents?: InvoiceDocument[]; notes: string | null };
+export type Invoice = { id: string; invoiceNumber: string; customerId?: string | null; customer: Customer | null; jobId?: string | null; job?: { id: string; jobNumber: string } | null; claimId?: string | null; claim?: { id: string; claimNumber: string | null } | null; walkInCustomerName?: string | null; walkInCustomerAddress?: string | null; walkInCustomerPhone?: string | null; walkInCustomerEmail?: string | null; walkInVehicleYear?: number | null; walkInVehicleMake?: string | null; walkInVehicleModel?: string | null; walkInVehicleTrim?: string | null; walkInVehicleVin?: string | null; walkInVehicleLicense?: string | null; walkInVehicleState?: string | null; status: string; issueDate: string; dueDate: string | null; subtotal: number; tax: number; total: number; amountPaid: number; balanceDue: number; lineItems: LineItem[]; payments: Payment[]; documents?: InvoiceDocument[]; notes: string | null };
 type Request = <T>(path: string, options?: RequestInit) => Promise<T>;
 type FormLine = { description: string; quantity: string; unitPrice: string };
 type PdfResult = { downloadUrl: string; fileName: string };
@@ -25,28 +25,61 @@ export function InvoiceView({ invoices, customers, jobs, claims, request, apiUrl
   const [creating, setCreating] = React.useState(false);
   const [paymentInvoice, setPaymentInvoice] = React.useState<Invoice | null>(null);
   const [query, setQuery] = React.useState("");
-  const filtered = invoices.filter((invoice) => `${invoice.invoiceNumber} ${invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : "walk-in counter sale"} ${invoice.job?.jobNumber || ""}`.toLowerCase().includes(query.toLowerCase()));
+  const filtered = invoices.filter((invoice) => `${invoice.invoiceNumber} ${invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : invoice.walkInCustomerName || "walk-in counter sale"} ${invoice.job?.jobNumber || ""}`.toLowerCase().includes(query.toLowerCase()));
   return <div className="invoice-workspace">
     <section className="invoice-toolbar"><div><p className="eyebrow">Receivables control</p><h2>Invoice register</h2><p className="subheading">Create repair invoices, record collections, and keep balances current.</p></div><div className="invoice-actions"><input aria-label="Search invoices" placeholder="Search invoice, customer, or RO" value={query} onChange={(event) => setQuery(event.target.value)} /><button className="secondary-button" onClick={() => void onChanged()}>Refresh</button><button className="orange-button" onClick={() => setCreating(true)}>New invoice</button></div></section>
     <section className="metric-grid invoice-metrics"><Metric label="Open balance" value={money(invoices.reduce((sum, item) => sum + item.balanceDue, 0))} note="Across all invoices" tone="orange" /><Metric label="Collected" value={money(invoices.reduce((sum, item) => sum + item.amountPaid, 0))} note="Payments recorded" tone="green" /><Metric label="Invoices" value={String(invoices.length)} note="All statuses" tone="blue" /><Metric label="Needs follow-up" value={String(invoices.filter((item) => item.status === "overdue" || item.status === "partial").length)} note="Partial or overdue" tone="purple" /></section>
-    <section className="surface"><div className="surface-heading"><div><h2>Invoices</h2><p>Every invoice and its current collection status</p></div></div>{filtered.length ? <div className="finance-table-wrap"><table className="data-table invoice-table"><thead><tr><th>Invoice</th><th>Customer</th><th>Repair order</th><th>Issued</th><th>Total</th><th>Balance</th><th>Status</th></tr></thead><tbody>{filtered.map((invoice) => <tr className="clickable-row" key={invoice.id} onClick={() => setSelected(invoice)}><td><strong className="mono">{invoice.invoiceNumber}</strong><small className="table-subtext">Due {date(invoice.dueDate)}</small></td><td>{invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : "Walk-in / counter sale"}</td><td>{invoice.job?.jobNumber || "Unlinked"}<small className="table-subtext">{invoice.claim?.claimNumber ? `Claim ${invoice.claim.claimNumber}` : "No claim linked"}</small></td><td>{date(invoice.issueDate)}</td><td><strong>{money(invoice.total)}</strong></td><td className={invoice.balanceDue > 0 ? "finance-expense" : "finance-income"}>{money(invoice.balanceDue)}</td><td><span className={`status-pill ${invoice.status === "paid" ? "green" : invoice.status === "partial" || invoice.status === "overdue" ? "orange" : "blue"}`}>{invoice.status}</span></td></tr>)}</tbody></table></div> : <EmptyInvoice text={query ? "No invoices match this search." : "No invoices yet. Create one with or without an existing customer."} action={!query ? () => setCreating(true) : undefined} />}</section>
+    <section className="surface"><div className="surface-heading"><div><h2>Invoices</h2><p>Every invoice and its current collection status</p></div></div>{filtered.length ? <div className="finance-table-wrap"><table className="data-table invoice-table"><thead><tr><th>Invoice</th><th>Customer</th><th>Repair order</th><th>Issued</th><th>Total</th><th>Balance</th><th>Status</th></tr></thead><tbody>{filtered.map((invoice) => <tr className="clickable-row" key={invoice.id} onClick={() => setSelected(invoice)}><td data-label="Invoice"><strong className="mono">{invoice.invoiceNumber}</strong><small className="table-subtext">Due {date(invoice.dueDate)}</small></td><td data-label="Customer">{invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : invoice.walkInCustomerName || "Walk-in / counter sale"}</td><td data-label="Repair order">{invoice.job?.jobNumber || "Unlinked"}<small className="table-subtext">{invoice.claim?.claimNumber ? `Claim ${invoice.claim.claimNumber}` : "No claim linked"}</small></td><td data-label="Issued">{date(invoice.issueDate)}</td><td data-label="Total"><strong>{money(invoice.total)}</strong></td><td data-label="Balance" className={invoice.balanceDue > 0 ? "finance-expense" : "finance-income"}>{money(invoice.balanceDue)}</td><td data-label="Status"><span className={`status-pill ${invoice.status === "paid" ? "green" : invoice.status === "partial" || invoice.status === "overdue" ? "orange" : "blue"}`}>{invoice.status}</span></td></tr>)}</tbody></table></div> : <EmptyInvoice text={query ? "No invoices match this search." : "No invoices yet. Create one with or without an existing customer."} action={!query ? () => setCreating(true) : undefined} />}</section>
     {(creating || selected || paymentInvoice) && <InvoiceModal invoice={paymentInvoice || selected} mode={creating ? "create" : paymentInvoice ? "payment" : "detail"} customers={customers} jobs={jobs} claims={claims} request={request} apiUrl={apiUrl} onClose={() => { setCreating(false); setSelected(null); setPaymentInvoice(null); }} onSaved={async () => { setCreating(false); setSelected(null); setPaymentInvoice(null); await onChanged(); }} onPayment={() => { if (selected) { setPaymentInvoice(selected); setSelected(null); } }} />}
   </div>;
 }
 
 function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl, onClose, onSaved, onPayment }: { invoice: Invoice | null; mode: "create" | "detail" | "payment"; customers: Customer[]; jobs: Job[]; claims: Claim[]; request: Request; apiUrl: string; onClose: () => void; onSaved: () => Promise<void>; onPayment: () => void }) {
+  const [editingExisting, setEditingExisting] = React.useState(false);
   const [customerId, setCustomerId] = React.useState(invoice?.customerId || invoice?.customer?.id || "");
   const [jobId, setJobId] = React.useState(invoice?.jobId || "");
   const [claimId, setClaimId] = React.useState(invoice?.claimId || "");
+  const [walkInCustomerName, setWalkInCustomerName] = React.useState(invoice?.walkInCustomerName || "");
+  const [walkInCustomerAddress, setWalkInCustomerAddress] = React.useState(invoice?.walkInCustomerAddress || "");
+  const [walkInCustomerPhone, setWalkInCustomerPhone] = React.useState(invoice?.walkInCustomerPhone || "");
+  const [walkInCustomerEmail, setWalkInCustomerEmail] = React.useState(invoice?.walkInCustomerEmail || "");
+  const [walkInVehicleYear, setWalkInVehicleYear] = React.useState(invoice?.walkInVehicleYear ? String(invoice.walkInVehicleYear) : "");
+  const [walkInVehicleMake, setWalkInVehicleMake] = React.useState(invoice?.walkInVehicleMake || "");
+  const [walkInVehicleModel, setWalkInVehicleModel] = React.useState(invoice?.walkInVehicleModel || "");
+  const [walkInVehicleTrim, setWalkInVehicleTrim] = React.useState(invoice?.walkInVehicleTrim || "");
+  const [walkInVehicleVin, setWalkInVehicleVin] = React.useState(invoice?.walkInVehicleVin || "");
+  const [walkInVehicleLicense, setWalkInVehicleLicense] = React.useState(invoice?.walkInVehicleLicense || "");
+  const [walkInVehicleState, setWalkInVehicleState] = React.useState(invoice?.walkInVehicleState || "");
+  const [vinLoading, setVinLoading] = React.useState(false);
+  const [vinMessage, setVinMessage] = React.useState("");
   const [number, setNumber] = React.useState(invoice?.invoiceNumber || "");
   const [issueDate, setIssueDate] = React.useState(invoice?.issueDate?.slice(0, 10) || today());
   const [dueDate, setDueDate] = React.useState(invoice?.dueDate?.slice(0, 10) || today());
-  const [taxRate, setTaxRate] = React.useState(invoice ? String(invoice.tax * 100 / Math.max(invoice.subtotal, 0.01)) : "0");
+  const [taxRate, setTaxRate] = React.useState(invoice ? String(Number((invoice.tax * 100 / Math.max(invoice.subtotal, 0.01)).toFixed(3))) : "8.875");
   const [lines, setLines] = React.useState<FormLine[]>(invoice?.lineItems.map((line) => ({ description: line.description, quantity: String(line.quantity), unitPrice: String(line.unitPrice) })) || [freshLine()]);
   const [payment, setPayment] = React.useState({ method: "cash", amount: "", date: today(), notes: "" });
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [presetsOpen, setPresetsOpen] = React.useState(false);
+  async function decodeWalkInVin() {
+    const vin = walkInVehicleVin.trim();
+    if (!vin) { setVinMessage("Enter a VIN first."); return; }
+    setVinLoading(true);
+    setVinMessage("");
+    try {
+      const result = await request<{ year: string; make: string; model: string; trim: string }>(`/vin/${encodeURIComponent(vin)}`);
+      setWalkInVehicleVin(vin.toUpperCase());
+      setWalkInVehicleYear(result.year);
+      setWalkInVehicleMake(result.make);
+      setWalkInVehicleModel(result.model);
+      setWalkInVehicleTrim(result.trim);
+      setVinMessage(`Decoded ${[result.year, result.make, result.model, result.trim].filter(Boolean).join(" ")}`);
+    } catch (decodeError) {
+      setVinMessage(decodeError instanceof Error ? decodeError.message : "VIN could not be decoded");
+    } finally {
+      setVinLoading(false);
+    }
+  }
   async function downloadPdf() {
     if (!invoice) return;
     setBusy(true);
@@ -69,7 +102,7 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
   const subtotal = lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0), 0);
   const tax = subtotal * Number(taxRate || 0) / 100;
   const total = subtotal + tax;
-  async function save(event: React.FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { await request(mode === "create" ? "/invoices" : `/invoices/${invoice?.id}`, { method: mode === "create" ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customerId: customerId || null, jobId: jobId || null, claimId: claimId || null, invoiceNumber: number || undefined, issueDate, dueDate: dueDate || undefined, taxRate: Number(taxRate || 0), lineItems: lines.map((line) => ({ description: line.description, quantity: Number(line.quantity), unitPrice: Number(line.unitPrice) })) }) }); await onSaved(); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to save invoice"); } finally { setBusy(false); } }
+  async function save(event: React.FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { await request(mode === "create" ? "/invoices" : `/invoices/${invoice?.id}`, { method: mode === "create" ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customerId: customerId || null, jobId: jobId || null, claimId: claimId || null, walkInCustomerName, walkInCustomerAddress, walkInCustomerPhone, walkInCustomerEmail, walkInVehicleYear: walkInVehicleYear ? Number(walkInVehicleYear) : null, walkInVehicleMake, walkInVehicleModel, walkInVehicleTrim, walkInVehicleVin, walkInVehicleLicense, walkInVehicleState, invoiceNumber: number || undefined, issueDate, dueDate: dueDate || undefined, taxRate: Number(taxRate || 0), lineItems: lines.map((line) => ({ description: line.description, quantity: Number(line.quantity), unitPrice: Number(line.unitPrice) })) }) }); await onSaved(); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to save invoice"); } finally { setBusy(false); } }
   async function recordPayment(event: React.FormEvent) { event.preventDefault(); if (!invoice) return; setBusy(true); setError(""); try { await request(`/invoices/${invoice.id}/payments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payment, amount: Number(payment.amount) }) }); await onSaved(); } catch (paymentError) { setError(paymentError instanceof Error ? paymentError.message : "Unable to record payment"); } finally { setBusy(false); } }
   async function deleteInvoice() { if (!invoice || !window.confirm(`Delete invoice ${invoice.invoiceNumber}? This cannot be undone.`)) return; setBusy(true); setError(""); try { await request(`/invoices/${invoice.id}`, { method: "DELETE" }); await onSaved(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete invoice"); } finally { setBusy(false); } }
   function updateLine(index: number, key: keyof FormLine, value: string) { setLines(lines.map((line, lineIndex) => lineIndex === index ? { ...line, [key]: value } : line)); }
@@ -82,20 +115,37 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
     <div className="modal-backdrop" onClick={onClose}>
       <form
         className="modal invoice-modal"
-        onSubmit={mode === "payment" ? recordPayment : mode === "detail" ? (event) => event.preventDefault() : save}
+        onSubmit={mode === "payment" ? recordPayment : mode === "detail" && !editingExisting ? (event) => event.preventDefault() : save}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal-heading">
           <div><p className="eyebrow">{mode === "create" ? "Receivable setup" : "Invoice record"}</p><h2>{mode === "create" ? "Create invoice" : invoice?.invoiceNumber || "Invoice"}</h2></div>
+          {mode === "detail" && editingExisting && <button className="orange-button invoice-edit-save" type="submit" disabled={busy}>{busy ? "Saving..." : "Save changes"}</button>}
           <button type="button" className="close-button" onClick={onClose}><span aria-hidden="true">×</span></button>
         </div>
         {error && <div className="error-banner">{error}</div>}
-        {mode === "detail" && invoice ? (
-          <InvoiceDetail invoice={invoice} onPayment={onPayment} request={request} apiUrl={apiUrl} />
+        {mode === "detail" && invoice && !editingExisting ? (
+          <InvoiceDetail invoice={invoice} onEdit={() => setEditingExisting(true)} onPayment={onPayment} request={request} apiUrl={apiUrl} />
         ) : mode === "payment" && invoice ? (
           <PaymentForm payment={payment} setPayment={setPayment} balance={invoice.balanceDue} />
         ) : (
           <>
+            {!jobId && <>
+              <div className="records-section-heading"><h4>Vehicle details (optional)</h4></div>
+              <div className="vin-control-row">
+                <label>VIN<input value={walkInVehicleVin} onChange={(event) => setWalkInVehicleVin(event.target.value.toUpperCase())} autoComplete="off" /></label>
+                <button type="button" className="secondary-button" onClick={() => void decodeWalkInVin()} disabled={vinLoading}>{vinLoading ? "Decoding..." : "Decode VIN"}</button>
+              </div>
+              {vinMessage && <p className={vinMessage.startsWith("Decoded") ? "vin-success" : "vin-error"}>{vinMessage}</p>}
+              <div className="invoice-form-grid">
+                <label>Year<input type="number" min="1886" step="1" value={walkInVehicleYear} onChange={(event) => setWalkInVehicleYear(event.target.value)} /></label>
+                <label>Make<input value={walkInVehicleMake} onChange={(event) => setWalkInVehicleMake(event.target.value)} /></label>
+                <label>Model<input value={walkInVehicleModel} onChange={(event) => setWalkInVehicleModel(event.target.value)} /></label>
+                <label>Trim<input value={walkInVehicleTrim} onChange={(event) => setWalkInVehicleTrim(event.target.value)} /></label>
+                <label>License plate<input value={walkInVehicleLicense} onChange={(event) => setWalkInVehicleLicense(event.target.value.toUpperCase())} /></label>
+                <label>Plate state<input value={walkInVehicleState} onChange={(event) => setWalkInVehicleState(event.target.value.toUpperCase())} /></label>
+              </div>
+            </>}
             <div className="invoice-form-grid">
               <label>Existing customer (optional)
                 <select value={customerId} onChange={(event) => { setCustomerId(event.target.value); setJobId(""); setClaimId(""); }}>
@@ -118,8 +168,17 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
                   {availableClaims.map((claim) => <option value={claim.id} key={claim.id}>{claim.claimNumber || "Unnumbered claim"}</option>)}
                 </select>
               </label>
-              <label>Tax rate (%)<input min="0" step="0.01" type="number" value={taxRate} onChange={(event) => setTaxRate(event.target.value)} /></label>
+              <label>Tax rate (%)<input min="0" step="0.001" type="number" value={taxRate} onChange={(event) => setTaxRate(event.target.value)} /></label>
             </div>
+            {!customerId && <>
+              <div className="records-section-heading"><h4>Walk-in customer details</h4></div>
+              <div className="invoice-form-grid">
+                <label>Customer name<input value={walkInCustomerName} onChange={(event) => setWalkInCustomerName(event.target.value)} autoComplete="name" /></label>
+                <label>Phone<input type="tel" value={walkInCustomerPhone} onChange={(event) => setWalkInCustomerPhone(event.target.value)} autoComplete="tel" /></label>
+                <label>Email<input type="email" value={walkInCustomerEmail} onChange={(event) => setWalkInCustomerEmail(event.target.value)} autoComplete="email" /></label>
+                <label>Address<input value={walkInCustomerAddress} onChange={(event) => setWalkInCustomerAddress(event.target.value)} autoComplete="street-address" /></label>
+              </div>
+            </>}
             <div className="invoice-lines">
               <div className="records-section-heading">
                 <h4>Line items</h4>
@@ -129,32 +188,60 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
                 </div>
               </div>
               <LineItemPresetPicker open={presetsOpen} onClose={() => setPresetsOpen(false)} onAdd={addPresetLines} />
-              {lines.map((line, index) => <div className="invoice-line" key={index}>
-                <input required placeholder="Description" value={line.description} onChange={(event) => updateLine(index, "description", event.target.value)} />
-                <input required min="0.01" step="0.01" type="number" placeholder="Qty" value={line.quantity} onChange={(event) => updateLine(index, "quantity", event.target.value)} />
-                <input required min="0" step="0.01" type="number" placeholder="Unit price" value={line.unitPrice} onChange={(event) => updateLine(index, "unitPrice", event.target.value)} />
-                <strong>{money(Number(line.quantity || 0) * Number(line.unitPrice || 0))}</strong>
-                {lines.length > 1 && <button type="button" className="remove-line" onClick={() => setLines(lines.filter((_, lineIndex) => lineIndex !== index))}>×</button>}
-              </div>)}
+              <div className="invoice-line-list">
+                {lines.map((line, index) => <div className="invoice-line" key={index}>
+                  <input required placeholder="Description" value={line.description} onChange={(event) => updateLine(index, "description", event.target.value)} />
+                  <input required min="0.01" step="0.01" type="number" placeholder="Qty" value={line.quantity} onChange={(event) => updateLine(index, "quantity", event.target.value)} />
+                  <input required min="0" step="0.01" type="number" placeholder="Unit price" value={line.unitPrice} onChange={(event) => updateLine(index, "unitPrice", event.target.value)} />
+                  <strong>{money(Number(line.quantity || 0) * Number(line.unitPrice || 0))}</strong>
+                  {lines.length > 1 && <button type="button" className="remove-line" onClick={() => setLines(lines.filter((_, lineIndex) => lineIndex !== index))}>×</button>}
+                </div>)}
+              </div>
+              <div className="invoice-totals">
+                <span>SUBTOTAL <b>{money(subtotal)}</b></span>
+                <span>SALES TAX <b>{money(tax)}</b></span>
+                <strong><span>TOTAL COST OF REPAIRS</span><b>{money(total)}</b></strong>
+                {invoice && <><span>AMOUNT PAID <b>{money(invoice.amountPaid)}</b></span><strong>BALANCE DUE <b>{money(Math.max(0, total - invoice.amountPaid))}</b></strong></>}
+              </div>
             </div>
-            <div className="invoice-totals"><span>Subtotal <b>{money(subtotal)}</b></span><span>Tax <b>{money(tax)}</b></span><strong>Total <b>{money(total)}</b></strong></div>
           </>
         )}
-        {mode === "detail" && invoice && <p className="bookkeeping-note">Payments recorded here automatically populate Bookkeeping as income.</p>}
-        <button
-          type={mode === "detail" ? "button" : "submit"}
+        {mode === "detail" && !editingExisting && invoice && <p className="bookkeeping-note">Payments recorded here automatically populate Bookkeeping as income.</p>}
+        {!(mode === "detail" && editingExisting) && <button
+          type={mode === "detail" && !editingExisting ? "button" : "submit"}
           className="orange-button submit-button"
-          onClick={mode === "detail" ? onClose : undefined}
+          onClick={mode === "detail" && !editingExisting ? onClose : undefined}
           disabled={busy}
         >
-          {busy ? "Saving..." : mode === "payment" ? "Record payment" : mode === "create" ? "Create invoice" : "Close"}
-        </button>
+          {busy ? "Saving..." : mode === "payment" ? "Record payment" : mode === "create" ? "Create invoice" : mode === "detail" ? "Save changes" : "Close"}
+        </button>}
       </form>
     </div>
   );
 }
 
-function InvoiceDetail({ invoice, onPayment, request, apiUrl }: { invoice: Invoice; onPayment: () => void; request: Request; apiUrl: string }) { return <><div className="invoice-detail-grid"><div><span>Customer</span><strong>{invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : "Walk-in / counter sale"}</strong></div><div><span>Status</span><strong className={`status-pill ${invoice.status === "paid" ? "green" : "orange"}`}>{invoice.status}</strong></div><div><span>Issue date</span><strong>{date(invoice.issueDate)}</strong></div><div><span>Due date</span><strong>{date(invoice.dueDate)}</strong></div><div><span>Total</span><strong>{money(invoice.total)}</strong></div><div><span>Balance</span><strong className={invoice.balanceDue ? "finance-expense" : "finance-income"}>{money(invoice.balanceDue)}</strong></div></div><div className="records-section"><div className="records-section-heading"><h4>Payments</h4><div className="invoice-actions"><button type="button" className="secondary-button" onClick={() => activeInvoicePdfDownload?.()}>Download invoice PDF</button><button type="button" className="orange-button" onClick={onPayment}>Record payment</button><button type="button" className="danger-button" onClick={() => activeInvoiceDelete?.()}>Delete invoice</button></div></div>{invoice.payments.length ? invoice.payments.map((payment) => <div className="record-summary" key={payment.id}><strong>{money(payment.amount)} · {payment.method.replace("_", " ")}</strong><small>{date(payment.date)}{payment.notes ? ` · ${payment.notes}` : ""}</small></div>) : <p className="records-muted">No payments recorded yet.</p>}</div><InvoiceReceipts invoiceId={invoice.id} initialDocuments={invoice.documents || []} request={request} apiUrl={apiUrl} /></>; }
+function InvoiceDetail({ invoice, onEdit, onPayment, request, apiUrl }: { invoice: Invoice; onEdit: () => void; onPayment: () => void; request: Request; apiUrl: string }) {
+  const customerName = invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : invoice.walkInCustomerName || "Walk-in / counter sale";
+  const customerAddress = invoice.customer?.address || invoice.walkInCustomerAddress;
+  const customerPhone = invoice.customer?.phone || invoice.walkInCustomerPhone;
+  const customerEmail = invoice.customer?.email || invoice.walkInCustomerEmail;
+  const vehicle = [invoice.walkInVehicleYear, invoice.walkInVehicleMake, invoice.walkInVehicleModel, invoice.walkInVehicleTrim].filter(Boolean).join(" ");
+  return <>
+    <div className="invoice-detail-grid">
+      <div><span>Customer</span><strong>{customerName}</strong></div>
+      <div><span>Status</span><strong className={`status-pill ${invoice.status === "paid" ? "green" : "orange"}`}>{invoice.status}</strong></div>
+      <div><span>Issue date</span><strong>{date(invoice.issueDate)}</strong></div>
+      <div><span>Due date</span><strong>{date(invoice.dueDate)}</strong></div>
+      <div><span>Total</span><strong>{money(invoice.total)}</strong></div>
+      <div><span>Balance</span><strong className={invoice.balanceDue ? "finance-expense" : "finance-income"}>{money(invoice.balanceDue)}</strong></div>
+    </div>
+    {(customerAddress || customerPhone || customerEmail || vehicle || invoice.walkInVehicleVin || invoice.walkInVehicleLicense) && <p className="bookkeeping-note">
+      {[customerAddress, customerPhone, customerEmail, vehicle, invoice.walkInVehicleVin && `VIN ${invoice.walkInVehicleVin}`, invoice.walkInVehicleLicense && `Plate ${invoice.walkInVehicleLicense}${invoice.walkInVehicleState ? ` (${invoice.walkInVehicleState})` : ""}`].filter(Boolean).join(" · ")}
+    </p>}
+    <div className="records-section"><div className="records-section-heading"><h4>Invoice actions</h4><div className="invoice-actions"><button type="button" className="secondary-button" onClick={onEdit}>Edit invoice</button><button type="button" className="secondary-button" onClick={() => activeInvoicePdfDownload?.()}>Print / download PDF</button><button type="button" className="orange-button" onClick={onPayment}>Record payment</button><button type="button" className="danger-button" onClick={() => activeInvoiceDelete?.()}>Delete invoice</button></div></div><h4>Payments</h4>{invoice.payments.length ? invoice.payments.map((payment) => <div className="record-summary" key={payment.id}><strong>{money(payment.amount)} · {payment.method.replace("_", " ")}</strong><small>{date(payment.date)}{payment.notes ? ` · ${payment.notes}` : ""}</small></div>) : <p className="records-muted">No payments recorded yet.</p>}</div>
+    <InvoiceReceipts invoiceId={invoice.id} initialDocuments={invoice.documents || []} request={request} apiUrl={apiUrl} />
+  </>;
+}
 
 function InvoiceReceipts({ invoiceId, initialDocuments, request, apiUrl }: { invoiceId: string; initialDocuments: InvoiceDocument[]; request: Request; apiUrl: string }) {
   const [documents, setDocuments] = React.useState<InvoiceDocument[]>(initialDocuments);

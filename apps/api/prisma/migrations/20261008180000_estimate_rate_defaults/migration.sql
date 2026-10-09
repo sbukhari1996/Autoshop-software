@@ -1,0 +1,4 @@
+ALTER TABLE "estimates" ALTER COLUMN "bodyRate" SET DEFAULT 63;
+ALTER TABLE "estimates" ALTER COLUMN "paintRate" SET DEFAULT 63;
+ALTER TABLE "estimates" ALTER COLUMN "supplyRate" SET DEFAULT 41;
+ALTER TABLE "estimates" ALTER COLUMN "mechanicRate" SET DEFAULT 80;

@@ -28,7 +28,6 @@ export function createOperationsRouter(prisma: PrismaClient) {
     const amount = positiveAmount(req.body.amount);
     const expense = await prisma.$transaction(async (tx) => {
       const created = await tx.jobExpense.create({ data: { jobId, description, amount, category: optionalText(req.body.category, 'category'), receiptFile: optionalText(req.body.receiptFile, 'receiptFile'), expenseDate: parseDate(req.body.expenseDate) } });
-      await syncExpenseLedger(tx, created);
       await refreshExpenseTotal(tx, jobId);
       return created;
     });
@@ -40,7 +39,6 @@ export function createOperationsRouter(prisma: PrismaClient) {
     if (!existing) throw new ApiError(404, 'Expense not found');
     const expense = await prisma.$transaction(async (tx) => {
       const updated = await tx.jobExpense.update({ where: { id: existing.id }, data: { description: req.body.description === undefined ? undefined : requiredText(req.body.description, 'description'), amount: req.body.amount === undefined ? undefined : positiveAmount(req.body.amount), category: req.body.category === undefined ? undefined : optionalText(req.body.category, 'category'), receiptFile: req.body.receiptFile === undefined ? undefined : optionalText(req.body.receiptFile, 'receiptFile'), expenseDate: req.body.expenseDate === undefined ? undefined : parseDate(req.body.expenseDate) } });
-      await syncExpenseLedger(tx, updated);
       await refreshExpenseTotal(tx, existing.jobId);
       return updated;
     });
@@ -50,7 +48,7 @@ export function createOperationsRouter(prisma: PrismaClient) {
   router.delete('/expenses/:expenseId', asyncHandler(async (req, res) => {
     const existing = await prisma.jobExpense.findUnique({ where: { id: routeParam(req, 'expenseId') } });
     if (!existing) throw new ApiError(404, 'Expense not found');
-    await prisma.$transaction(async (tx) => { await tx.financeEntry.deleteMany({ where: { sourceReference: `job-expense:${existing.id}` } }); await tx.jobExpense.delete({ where: { id: existing.id } }); await refreshExpenseTotal(tx, existing.jobId); });
+    await prisma.$transaction(async (tx) => { await tx.jobExpense.delete({ where: { id: existing.id } }); await refreshExpenseTotal(tx, existing.jobId); });
     res.status(204).send();
   }));
 
@@ -191,15 +189,6 @@ async function removeStoredFile(filePath: string) {
 async function refreshExpenseTotal(tx: any, jobId: string) {
   const aggregate = await tx.jobExpense.aggregate({ where: { jobId }, _sum: { amount: true } });
   await tx.job.update({ where: { id: jobId }, data: { totalExpenses: aggregate._sum.amount || 0 } });
-}
-
-async function syncExpenseLedger(tx: any, expense: { id: string; jobId: string; description: string; amount: number; category: string | null; expenseDate: Date | null }) {
-  const job = await tx.job.findUnique({ where: { id: expense.jobId }, select: { claimId: true } });
-  await tx.financeEntry.upsert({
-    where: { sourceReference: `job-expense:${expense.id}` },
-    create: { sourceReference: `job-expense:${expense.id}`, type: 'expense', description: expense.description, category: expense.category, amount: expense.amount, entryDate: expense.expenseDate || new Date(), jobId: expense.jobId, claimId: job?.claimId || null },
-    update: { type: 'expense', description: expense.description, category: expense.category, amount: expense.amount, entryDate: expense.expenseDate || new Date(), jobId: expense.jobId, claimId: job?.claimId || null },
-  });
 }
 
 function positiveAmount(value: unknown) {
