@@ -4,12 +4,13 @@ import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import PDFDocument from 'pdfkit';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
-import { optionalText, requiredText } from '../validation.js';
+import { optionalInteger, optionalText, requiredText } from '../validation.js';
 
 const statuses = ['draft', 'sent', 'partial', 'paid', 'overdue', 'cancelled'] as const;
 const paymentMethods = ['cash', 'debit_card', 'credit_card', 'check', 'ach', 'other'] as const;
+const defaultTaxRate = 8.875;
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -60,7 +61,8 @@ export function createInvoicesRouter(prisma: PrismaClient) {
     const lineItems = parseLineItems(req.body.lineItems);
     const invoice = await prisma.$transaction(async (tx) => {
       const totals = totalsFor(lineItems, req.body.taxRate);
-      return tx.invoice.create({ data: { invoiceNumber: optionalText(req.body.invoiceNumber, 'invoiceNumber') || `INV-${Date.now()}-${randomUUID().slice(0, 8)}`, customerId: links.customerId, customerName: links.customerId ? null : optionalText(req.body.customerName, 'customerName'), customerPhone: links.customerId ? null : optionalText(req.body.customerPhone, 'customerPhone'), customerEmail: links.customerId ? null : optionalText(req.body.customerEmail, 'customerEmail'), customerAddress: links.customerId ? null : optionalText(req.body.customerAddress, 'customerAddress'), jobId: links.jobId, claimId: links.claimId, status: req.body.status === undefined ? 'draft' : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate ? parseDate(req.body.issueDate, 'issueDate') : new Date(), dueDate: req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : undefined, subtotal: totals.subtotal, tax: totals.tax, total: totals.total, amountPaid: 0, balanceDue: totals.total, notes: optionalText(req.body.notes, 'notes'), lineItems: { create: lineItems } }, include: { lineItems: true, payments: true } });
+      const invoiceNumber = optionalText(req.body.invoiceNumber, 'invoiceNumber') || await nextInvoiceNumber(tx);
+      return tx.invoice.create({ data: { invoiceNumber, customerId: links.customerId, jobId: links.jobId, claimId: links.claimId, ...parseWalkInDetails(req.body), status: req.body.status === undefined ? 'draft' : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate ? parseDate(req.body.issueDate, 'issueDate') : new Date(), dueDate: req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : undefined, subtotal: totals.subtotal, tax: totals.tax, total: totals.total, amountPaid: 0, balanceDue: totals.total, notes: optionalText(req.body.notes, 'notes'), lineItems: { create: lineItems } }, include: { lineItems: true, payments: true } });
     });
     res.status(201).json(invoice);
   }));
@@ -77,8 +79,11 @@ export function createInvoicesRouter(prisma: PrismaClient) {
       ...job.expenses.map((expense) => ({ description: expense.category ? `${expense.category}: ${expense.description}` : expense.description, quantity: 1, unitPrice: expense.amount })),
     ];
     if (!lineItems.length) throw new ApiError(400, 'Job has no estimate or expenses to invoice');
-    const totals = totalsFor(lineItems, 0);
-    const invoice = await prisma.invoice.create({ data: { invoiceNumber: optionalText(req.body.invoiceNumber, 'invoiceNumber') || `INV-${job.jobNumber}-${Date.now()}`, customerId: job.customerId, jobId: job.id, claimId: job.claimId, status: 'sent', issueDate: new Date(), subtotal: totals.subtotal, tax: totals.tax, total: totals.total, balanceDue: totals.total, notes: 'Generated from completed job work and expenses', lineItems: { create: lineItems } }, include: { customer: true, job: { select: { id: true, jobNumber: true } }, claim: { select: { id: true, claimNumber: true } }, lineItems: true, payments: true } });
+    const totals = totalsFor(lineItems, req.body.taxRate);
+    const invoice = await prisma.$transaction(async (tx) => {
+      const invoiceNumber = optionalText(req.body.invoiceNumber, 'invoiceNumber') || await nextInvoiceNumber(tx);
+      return tx.invoice.create({ data: { invoiceNumber, customerId: job.customerId, jobId: job.id, claimId: job.claimId, status: 'sent', issueDate: new Date(), subtotal: totals.subtotal, tax: totals.tax, total: totals.total, balanceDue: totals.total, notes: 'Generated from completed job work and expenses', lineItems: { create: lineItems } }, include: { customer: true, job: { select: { id: true, jobNumber: true } }, claim: { select: { id: true, claimNumber: true } }, lineItems: true, payments: true } });
+    });
     res.status(201).json(invoice);
   }));
 
@@ -93,7 +98,7 @@ export function createInvoicesRouter(prisma: PrismaClient) {
       if (lineItems) await tx.invoiceLineItem.deleteMany({ where: { invoiceId: id } });
       const amountPaid = existing.amountPaid;
       const total = totals?.total ?? existing.total;
-      return tx.invoice.update({ where: { id }, data: { customerId: links.customerId, customerName: links.customerId ? null : req.body.customerName === undefined ? undefined : optionalText(req.body.customerName, 'customerName'), customerPhone: links.customerId ? null : req.body.customerPhone === undefined ? undefined : optionalText(req.body.customerPhone, 'customerPhone'), customerEmail: links.customerId ? null : req.body.customerEmail === undefined ? undefined : optionalText(req.body.customerEmail, 'customerEmail'), customerAddress: links.customerId ? null : req.body.customerAddress === undefined ? undefined : optionalText(req.body.customerAddress, 'customerAddress'), jobId: links.jobId, claimId: links.claimId, status: req.body.status === undefined ? undefined : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate === undefined ? undefined : parseDate(req.body.issueDate, 'issueDate'), dueDate: req.body.dueDate === undefined ? undefined : (req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : null), subtotal: totals?.subtotal, tax: totals?.tax, total, balanceDue: Math.max(0, total - amountPaid), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'), lineItems: lineItems ? { create: lineItems } : undefined }, include: { lineItems: true, payments: true } });
+      return tx.invoice.update({ where: { id }, data: { customerId: links.customerId, jobId: links.jobId, claimId: links.claimId, ...parseWalkInDetails(req.body), status: req.body.status === undefined ? undefined : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate === undefined ? undefined : parseDate(req.body.issueDate, 'issueDate'), dueDate: req.body.dueDate === undefined ? undefined : (req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : null), subtotal: totals?.subtotal, tax: totals?.tax, total, balanceDue: Math.max(0, total - amountPaid), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'), lineItems: lineItems ? { create: lineItems } : undefined }, include: { lineItems: true, payments: true } });
     });
     res.json(invoice);
   }));
@@ -102,10 +107,7 @@ export function createInvoicesRouter(prisma: PrismaClient) {
     const id = routeParam(req, 'id');
     const invoice = await prisma.invoice.findUnique({ where: { id }, include: { payments: true } });
     if (!invoice) throw new ApiError(404, 'Invoice not found');
-    await prisma.$transaction(async (tx) => {
-      await tx.financeEntry.deleteMany({ where: { sourceReference: { in: invoice.payments.map((payment) => `invoice-payment:${payment.id}`) } } });
-      await tx.invoice.delete({ where: { id } });
-    });
+    await prisma.invoice.delete({ where: { id } });
     res.status(204).send();
   }));
 
@@ -126,7 +128,6 @@ export function createInvoicesRouter(prisma: PrismaClient) {
       const created = await tx.payment.create({ data: { invoiceId, method: validate(req.body.method, paymentMethods, 'method'), amount, date: req.body.date ? parseDate(req.body.date, 'date') : new Date(), notes: optionalText(req.body.notes, 'notes') } });
       const amountPaid = paid + amount;
       await tx.invoice.update({ where: { id: invoiceId }, data: { amountPaid, balanceDue: Math.max(0, invoice.total - amountPaid), status: amountPaid >= invoice.total ? 'paid' : 'partial' } });
-      await tx.financeEntry.upsert({ where: { sourceReference: `invoice-payment:${created.id}` }, create: { sourceReference: `invoice-payment:${created.id}`, type: 'income', description: `Payment for invoice ${invoice.invoiceNumber}`, amount, paymentMethod: created.method, entryDate: created.date, jobId: invoice.jobId, claimId: invoice.claimId, notes: created.notes }, update: { amount, paymentMethod: created.method, entryDate: created.date, notes: created.notes, jobId: invoice.jobId, claimId: invoice.claimId } });
       return created;
     });
     res.status(201).json(payment);
@@ -203,12 +204,34 @@ async function validateLinks(prisma: PrismaClient, customerIdValue: unknown, job
 }
 
 function parseLineItems(value: unknown) { if (!Array.isArray(value) || value.length === 0) throw new ApiError(400, 'lineItems must contain at least one item'); return value.map((item, index) => ({ description: requiredText(item?.description, `lineItems[${index}].description`), quantity: positive(item?.quantity ?? 1), unitPrice: nonNegative(item?.unitPrice) })); }
-function totalsFor(items: Array<{ quantity: number; unitPrice: number }>, taxRateValue: unknown) { const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); const taxRate = taxRateValue === undefined ? 0 : nonNegative(taxRateValue); const tax = subtotal * taxRate / 100; return { subtotal, tax, total: subtotal + tax }; }
+function parseWalkInDetails(body: Record<string, unknown>) {
+  return {
+    walkInCustomerName: optionalText(body.walkInCustomerName, 'walkInCustomerName'),
+    walkInCustomerAddress: optionalText(body.walkInCustomerAddress, 'walkInCustomerAddress'),
+    walkInCustomerPhone: optionalText(body.walkInCustomerPhone, 'walkInCustomerPhone'),
+    walkInCustomerEmail: optionalText(body.walkInCustomerEmail, 'walkInCustomerEmail'),
+    walkInVehicleYear: optionalInteger(body.walkInVehicleYear, 'walkInVehicleYear'),
+    walkInVehicleMake: optionalText(body.walkInVehicleMake, 'walkInVehicleMake'),
+    walkInVehicleModel: optionalText(body.walkInVehicleModel, 'walkInVehicleModel'),
+    walkInVehicleTrim: optionalText(body.walkInVehicleTrim, 'walkInVehicleTrim'),
+    walkInVehicleVin: optionalText(body.walkInVehicleVin, 'walkInVehicleVin')?.toUpperCase(),
+    walkInVehicleLicense: optionalText(body.walkInVehicleLicense, 'walkInVehicleLicense')?.toUpperCase(),
+    walkInVehicleState: optionalText(body.walkInVehicleState, 'walkInVehicleState')?.toUpperCase(),
+  };
+}
+function totalsFor(items: Array<{ quantity: number; unitPrice: number }>, taxRateValue: unknown) { const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100; const subtotal = roundCurrency(items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)); const taxRate = taxRateValue === undefined ? defaultTaxRate : nonNegative(taxRateValue); const tax = roundCurrency(subtotal * taxRate / 100); const total = roundCurrency(subtotal + tax); return { subtotal, tax, total }; }
 function routeParam(req: { params: Record<string, string | string[]> }, name: string) { const value = req.params[name]; if (typeof value !== 'string' || !value) throw new ApiError(400, `${name} is required`); return value; }
 function parseDate(value: unknown, field: string) { const result = new Date(String(value)); if (Number.isNaN(result.getTime())) throw new ApiError(400, `${field} must be a valid date`); return result; }
 function positive(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result <= 0) throw new ApiError(400, 'amount must be a positive number'); return result; }
 function nonNegative(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result < 0) throw new ApiError(400, 'value must be a non-negative number'); return result; }
 function validate<T extends readonly string[]>(value: unknown, values: T, field: string) { const result = requiredText(value, field); if (!values.includes(result)) throw new ApiError(400, `${field} is invalid`); return result; }
+async function nextInvoiceNumber(tx: Prisma.TransactionClient) {
+  while (true) {
+    const [{ number }] = await tx.$queryRaw<Array<{ number: bigint }>>`SELECT nextval('invoice_number_seq') AS number`;
+    const invoiceNumber = `INV-${number}`;
+    if (!(await tx.invoice.findUnique({ where: { invoiceNumber }, select: { id: true } }))) return invoiceNumber;
+  }
+}
 
 async function createInvoicePdf(invoice: {
   invoiceNumber: string;
@@ -226,6 +249,17 @@ async function createInvoicePdf(invoice: {
   customer: { firstName: string; lastName: string; phone: string | null; email: string | null; address: string | null } | null;
   job: { jobNumber: string; vehicle: { year: number | null; make: string | null; model: string | null; trim: string | null; bodyClass: string | null; vin: string | null; licensePlate: string | null; licenseState: string | null; color: string | null } | null } | null;
   claim: { claimNumber: string | null; customerClaimNumber: string | null; customerName: string | null; customerPhone: string | null; customerAddress: string | null; customerInsurance: string | null; customerPolicyNumber: string | null; vehicleYear: number | null; vehicleMake: string | null; vehicleModel: string | null; vehicleTrim: string | null; vehicleBodyClass: string | null; vehicleVin: string | null; vehicleLicensePlate: string | null; vehiclePlateState: string | null; vehicleColor: string | null; insuranceCompany: string | null; adjusterName: string | null; adjusterPhone: string | null } | null;
+  walkInCustomerName: string | null;
+  walkInCustomerAddress: string | null;
+  walkInCustomerPhone: string | null;
+  walkInCustomerEmail: string | null;
+  walkInVehicleYear: number | null;
+  walkInVehicleMake: string | null;
+  walkInVehicleModel: string | null;
+  walkInVehicleTrim: string | null;
+  walkInVehicleVin: string | null;
+  walkInVehicleLicense: string | null;
+  walkInVehicleState: string | null;
   lineItems: Array<{ description: string; quantity: number; unitPrice: number }>;
   payments: Array<{ date: Date; method: string; amount: number; notes: string | null }>;
 }) {
@@ -279,17 +313,17 @@ async function createInvoicePdf(invoice: {
     const boxHeight = 78;
     const half = pageWidth / 2;
     const rowHeight = boxHeight / 4;
-    const customerName = invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : invoice.customerName || claim?.customerName || 'Walk-in / counter sale';
+    const customerName = invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : invoice.walkInCustomerName || invoice.customerName || claim?.customerName || 'Walk-in / counter sale';
     field('Customer / insured', customerName, left, boxY, half, rowHeight);
     field('Claim number', claim?.claimNumber || claim?.customerClaimNumber, left + half, boxY, half, rowHeight);
-    field('Address', invoice.customer?.address || invoice.customerAddress || claim?.customerAddress, left, boxY + rowHeight, half, rowHeight);
-    field('Phone', invoice.customer?.phone || invoice.customerPhone || claim?.customerPhone, left + half, boxY + rowHeight, half, rowHeight);
-    field('Email', invoice.customer?.email || invoice.customerEmail, left, boxY + rowHeight * 2, half, rowHeight);
+    field('Address', invoice.customer?.address || invoice.walkInCustomerAddress || invoice.customerAddress || claim?.customerAddress, left, boxY + rowHeight, half, rowHeight);
+    field('Phone', invoice.customer?.phone || invoice.walkInCustomerPhone || invoice.customerPhone || claim?.customerPhone, left + half, boxY + rowHeight, half, rowHeight);
+    field('Email', invoice.customer?.email || invoice.walkInCustomerEmail || invoice.customerEmail, left, boxY + rowHeight * 2, half, rowHeight);
     field('Job / repair order', invoice.job?.jobNumber, left + half, boxY + rowHeight * 2, half, rowHeight);
-    const vehicleYear = vehicle?.year ?? claim?.vehicleYear;
-    const vehicleMake = vehicle?.make ?? claim?.vehicleMake;
-    const vehicleModel = vehicle?.model ?? claim?.vehicleModel;
-    const vehicleTrim = vehicle?.trim ?? claim?.vehicleTrim ?? vehicle?.bodyClass ?? claim?.vehicleBodyClass;
+    const vehicleYear = vehicle?.year ?? claim?.vehicleYear ?? invoice.walkInVehicleYear;
+    const vehicleMake = vehicle?.make ?? claim?.vehicleMake ?? invoice.walkInVehicleMake;
+    const vehicleModel = vehicle?.model ?? claim?.vehicleModel ?? invoice.walkInVehicleModel;
+    const vehicleTrim = vehicle?.trim ?? claim?.vehicleTrim ?? invoice.walkInVehicleTrim ?? vehicle?.bodyClass ?? claim?.vehicleBodyClass;
     field('Year / make / model', [vehicleYear, vehicleMake, vehicleModel].filter(Boolean).join(' '), left, boxY + rowHeight * 3, half, rowHeight);
     field('Style / color', [vehicleTrim, vehicle?.color ?? claim?.vehicleColor].filter(Boolean).join(' / '), left + half, boxY + rowHeight * 3, half, rowHeight);
 
@@ -298,8 +332,8 @@ async function createInvoicePdf(invoice: {
     const widths = [145, 115, 140, 140];
     const insurance = claim?.insuranceCompany || claim?.customerInsurance;
     const policy = claim?.customerPolicyNumber;
-    const plate = [vehicle?.licensePlate ?? claim?.vehicleLicensePlate, vehicle?.licenseState ?? claim?.vehiclePlateState].filter(Boolean).join(' / ');
-    field('VIN', vehicle?.vin ?? claim?.vehicleVin, left, detailsY, widths[0], detailHeight);
+    const plate = [vehicle?.licensePlate ?? claim?.vehicleLicensePlate ?? invoice.walkInVehicleLicense, vehicle?.licenseState ?? claim?.vehiclePlateState ?? invoice.walkInVehicleState].filter(Boolean).join(' / ');
+    field('VIN', vehicle?.vin ?? claim?.vehicleVin ?? invoice.walkInVehicleVin, left, detailsY, widths[0], detailHeight);
     field('License plate', plate, left + widths[0], detailsY, widths[1], detailHeight);
     field('Insurance company', insurance, left + widths[0] + widths[1], detailsY, widths[2], detailHeight);
     field('Insurance / policy no.', policy, left + widths[0] + widths[1] + widths[2], detailsY, widths[3], detailHeight);

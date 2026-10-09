@@ -1,11 +1,6 @@
 import React from "react";
+import { downloadMonthlyStatement } from "./monthlyStatement";
 
-type JobOption = { id: string; jobNumber: string };
-type ClaimOption = {
-  id: string;
-  claimNumber: string | null;
-  customer: { firstName: string; lastName: string };
-};
 type FinanceEntry = {
   id: string;
   type: "income" | "expense";
@@ -15,9 +10,6 @@ type FinanceEntry = {
   paymentMethod: string | null;
   entryDate: string;
   notes: string | null;
-  sourceReference?: string | null;
-  job?: { id: string; jobNumber: string } | null;
-  claim?: { id: string; claimNumber: string | null } | null;
   documents: FinanceEntryDocument[];
 };
 type FinanceEntryDocument = { id: string; fileName: string; createdAt: string };
@@ -28,8 +20,12 @@ type RecurringExpense = {
   category: string | null;
   frequency: "weekly" | "monthly" | "yearly";
   startDate: string;
+  endDate: string | null;
   active: boolean;
+  notes?: string | null;
+  payments: RecurringExpensePayment[];
 };
+type RecurringExpensePayment = { id: string; period: string; amount: number; paidAt: string };
 type FinanceSummary = {
   income: number;
   generalExpenses: number;
@@ -43,7 +39,7 @@ type BankBalance = {
   expenses: number;
   currentBalance: number;
 };
-type RollingSummary = { months: number; income: number; expenses: number; net: number };
+type RollingSummary = { months: number; income: number; generalExpenses: number; jobExpenses: number; expenses: number; net: number };
 type Employee = { id: string; name: string; phone: string | null; email: string | null; role: string | null; weeklyRate: number; startDate: string; active: boolean; payments: PayrollPayment[]; expectedToDate?: number; paidToDate?: number; balanceDue?: number };
 type PayrollPayment = { id: string; amount: number; paymentDate: string; paymentMethod: string | null; notes: string | null };
 type RentalTenant = { id: string; name: string; phone: string | null; email: string | null; space: string; shift: string; rentAmount: number; rentFrequency: string; startDate: string; active: boolean; payments: RentalPayment[]; expectedRentToDate?: number; rentCollected?: number; sharedExpensesCollected?: number; totalCollected?: number; netCollected?: number };
@@ -68,7 +64,10 @@ const categories = [
   "Parts",
   "Labor",
   "Payroll",
+  "Payroll & Wages",
   "Rent",
+  "Rent / Lease",
+  "Phone & Internet",
   "Utilities",
   "Insurance",
   "Marketing",
@@ -82,6 +81,42 @@ const dateValue = (value: string) =>
     day: "numeric",
     year: "numeric",
   });
+const monthValue = (value: string) =>
+  new Date(`${value}-15T12:00:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+const adjacentMonth = (value: string, amount: number) => {
+  const [year, month] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1 + amount, 1));
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+};
+const recurringAmountInMonth = (item: RecurringExpense, period: string) => {
+  const [year, month] = period.split("-").map(Number);
+  const monthStart = Date.UTC(year, month - 1, 1);
+  const monthEnd = Date.UTC(year, month, 0);
+  const startDate = new Date(item.startDate);
+  const start = Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth(), startDate.getUTCDate());
+  const endDate = item.endDate ? new Date(item.endDate) : null;
+  const end = endDate ? Date.UTC(endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate()) : monthEnd;
+  const lowerBound = Math.max(monthStart, start);
+  const upperBound = Math.min(monthEnd, end);
+  if (lowerBound > upperBound) return 0;
+  if (item.frequency === "yearly") {
+    if (month - 1 !== startDate.getUTCMonth()) return 0;
+    const dueDate = Date.UTC(year, month - 1, Math.min(startDate.getUTCDate(), new Date(Date.UTC(year, month, 0)).getUTCDate()));
+    return dueDate >= lowerBound && dueDate <= upperBound ? item.amount : 0;
+  }
+  if (item.frequency === "monthly") {
+    const dueDate = Date.UTC(year, month - 1, Math.min(startDate.getUTCDate(), new Date(Date.UTC(year, month, 0)).getUTCDate()));
+    return dueDate >= lowerBound && dueDate <= upperBound ? item.amount : 0;
+  }
+  let dueDate = start;
+  if (dueDate < lowerBound) dueDate += Math.ceil((lowerBound - dueDate) / (7 * 24 * 60 * 60 * 1000)) * 7 * 24 * 60 * 60 * 1000;
+  let occurrences = 0;
+  while (dueDate <= upperBound) {
+    occurrences += 1;
+    dueDate += 7 * 24 * 60 * 60 * 1000;
+  }
+  return item.amount * occurrences;
+};
 const emptyEntry = {
   type: "income",
   description: "",
@@ -89,8 +124,6 @@ const emptyEntry = {
   amount: "",
   entryDate: new Date().toISOString().slice(0, 10),
   paymentMethod: "cash",
-  jobId: "",
-  claimId: "",
   notes: "",
 };
 const emptyRecurring = {
@@ -100,22 +133,25 @@ const emptyRecurring = {
   frequency: "monthly",
   startDate: new Date().toISOString().slice(0, 10),
   active: true,
+  notes: "",
 };
 
 export function BookkeepingView({
   data,
-  jobs,
-  claims,
   request,
   onChanged,
 }: {
   data: FinanceData | null;
-  jobs: JobOption[];
-  claims: ClaimOption[];
   request: Request;
   onChanged: () => void;
 }) {
   const [period, setPeriod] = React.useState("month");
+  const [ledgerMonth, setLedgerMonth] = React.useState("all");
+  const [ledgerYear, setLedgerYear] = React.useState(String(new Date().getFullYear()));
+  const [ledgerType, setLedgerType] = React.useState<"all" | FinanceEntry["type"]>("all");
+  const [selectedEntryIds, setSelectedEntryIds] = React.useState<string[]>([]);
+  const [recurringPeriod, setRecurringPeriod] = React.useState(() => new Date().toISOString().slice(0, 7));
+  const [chartYear, setChartYear] = React.useState(String(new Date().getFullYear()));
   const [rollingSummary, setRollingSummary] = React.useState<RollingSummary | null>(null);
   const [summary, setSummary] = React.useState<FinanceSummary | null>(
     data?.summary || null,
@@ -123,6 +159,7 @@ export function BookkeepingView({
   const [bankBalance, setBankBalance] = React.useState<BankBalance | null>(null);
   const [startingBalance, setStartingBalance] = React.useState("");
   const [activeTab, setActiveTab] = React.useState<"ledger" | "payroll" | "rentals">("ledger");
+  const [ledgerSearch, setLedgerSearch] = React.useState("");
   const [employees, setEmployees] = React.useState<Employee[]>([]);
   const [employeeOpen, setEmployeeOpen] = React.useState(false);
   const [paymentEmployee, setPaymentEmployee] = React.useState<Employee | null>(null);
@@ -140,6 +177,7 @@ export function BookkeepingView({
   const [entryOpen, setEntryOpen] = React.useState(false);
   const [editingEntryId, setEditingEntryId] = React.useState<string | null>(null);
   const [recurringOpen, setRecurringOpen] = React.useState(false);
+  const [editingRecurringId, setEditingRecurringId] = React.useState<string | null>(null);
   const [entry, setEntry] = React.useState(emptyEntry);
   const [recurring, setRecurring] = React.useState(emptyRecurring);
   const [saving, setSaving] = React.useState(false);
@@ -149,6 +187,40 @@ export function BookkeepingView({
   const receiptPreviewUrl = React.useRef<string | null>(null);
   const entries = data?.entries || [];
   const recurringItems = data?.recurring || [];
+  const editingFinanceEntry = entries.find((item) => item.id === editingEntryId) || null;
+  const availableYears = [...new Set([
+    String(new Date().getFullYear()),
+    ...entries.map((item) => item.entryDate.slice(0, 4)),
+  ])].sort((left, right) => Number(right) - Number(left));
+  const filteredEntries = entries.filter((item) => {
+    const [year, month] = item.entryDate.slice(0, 7).split("-");
+    if (year !== ledgerYear || (ledgerMonth !== "all" && month !== ledgerMonth)) return false;
+    if (ledgerType !== "all" && item.type !== ledgerType) return false;
+    const query = ledgerSearch.trim().toLocaleLowerCase();
+    if (!query) return true;
+    const searchableValues = [
+      item.description,
+      item.category,
+      item.paymentMethod,
+      item.entryDate.slice(0, 10),
+      dateValue(item.entryDate),
+      item.notes,
+      item.amount.toFixed(2),
+      ...item.documents.map((document) => document.fileName),
+    ];
+    return searchableValues.some((value) => value?.toLocaleLowerCase().includes(query));
+  });
+  const selectedEntries = filteredEntries.filter((item) => selectedEntryIds.includes(item.id));
+  const filteredIncomeTotal = filteredEntries.filter((item) => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
+  const filteredExpenseTotal = filteredEntries.filter((item) => item.type === "expense").reduce((sum, item) => sum + item.amount, 0);
+  const selectedIncomeTotal = selectedEntries.filter((item) => item.type === "income").reduce((sum, item) => sum + item.amount, 0);
+  const selectedExpenseTotal = selectedEntries.filter((item) => item.type === "expense").reduce((sum, item) => sum + item.amount, 0);
+  const recurringNextPeriod = adjacentMonth(recurringPeriod, 1);
+  const recurringCurrentItems = recurringItems.filter((item) => recurringAmountInMonth(item, recurringPeriod) > 0);
+  const recurringNextItems = recurringItems.filter((item) => recurringAmountInMonth(item, recurringNextPeriod) > 0);
+  const recurringCurrentTotal = recurringCurrentItems.filter((item) => item.active).reduce((sum, item) => sum + recurringAmountInMonth(item, recurringPeriod), 0);
+  const recurringCurrentPaid = recurringCurrentItems.filter((item) => item.active).reduce((sum, item) => sum + (item.payments.find((payment) => payment.period === recurringPeriod)?.amount || 0), 0);
+  const recurringNextTotal = recurringNextItems.filter((item) => item.active).reduce((sum, item) => sum + recurringAmountInMonth(item, recurringNextPeriod), 0);
   React.useEffect(() => {
     setSummary(data?.summary || null);
   }, [data]);
@@ -171,6 +243,7 @@ export function BookkeepingView({
   }, [request, data]);
   React.useEffect(() => {
     if (period.endsWith("m")) {
+      setRollingSummary(null);
       void request<RollingSummary>(`/finance/range?months=${period.slice(0, -1)}`)
         .then(setRollingSummary)
         .catch(() => undefined);
@@ -205,11 +278,27 @@ export function BookkeepingView({
       amount: String(item.amount),
       entryDate: new Date(item.entryDate).toISOString().slice(0, 10),
       paymentMethod: item.paymentMethod || "cash",
-      jobId: item.job?.id || "",
-      claimId: item.claim?.id || "",
       notes: item.notes || "",
     } : { ...emptyEntry });
     setEntryOpen(true);
+  }
+  function closeEntryForm() {
+    setEntryOpen(false);
+    setEditingEntryId(null);
+  }
+  function openRecurringForm(item?: RecurringExpense) {
+    setError("");
+    setEditingRecurringId(item?.id || null);
+    setRecurring(item ? {
+      name: item.name,
+      amount: String(item.amount),
+      category: item.category || "",
+      frequency: item.frequency,
+      startDate: new Date(item.startDate).toISOString().slice(0, 10),
+      active: item.active,
+      notes: item.notes || "",
+    } : { ...emptyRecurring });
+    setRecurringOpen(true);
   }
   async function saveEntry(event: React.FormEvent) {
     event.preventDefault();
@@ -222,8 +311,6 @@ export function BookkeepingView({
         body: JSON.stringify({
           ...entry,
           amount: Number(entry.amount),
-          jobId: entry.jobId || null,
-          claimId: entry.claimId || null,
           category: entry.category || null,
           notes: entry.notes || null,
         }),
@@ -341,8 +428,8 @@ export function BookkeepingView({
     setSaving(true);
     setError("");
     try {
-      await request("/finance/recurring", {
-        method: "POST",
+      await request(editingRecurringId ? `/finance/recurring/${editingRecurringId}` : "/finance/recurring", {
+        method: editingRecurringId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...recurring,
@@ -351,6 +438,7 @@ export function BookkeepingView({
         }),
       });
       setRecurring(emptyRecurring);
+      setEditingRecurringId(null);
       setRecurringOpen(false);
       onChanged();
     } catch (saveError) {
@@ -379,6 +467,59 @@ export function BookkeepingView({
       );
     }
   }
+  async function markRecurringPaid(item: RecurringExpense, paymentPeriod: string) {
+    setError("");
+    try {
+      await request(`/finance/recurring/${item.id}/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period: paymentPeriod }),
+      });
+      onChanged();
+    } catch (paymentError) {
+      setError(paymentError instanceof Error ? paymentError.message : "Unable to mark recurring expense paid");
+    }
+  }
+  async function unmarkRecurringPaid(item: RecurringExpense, payment: RecurringExpensePayment) {
+    setError("");
+    try {
+      await request(`/finance/recurring/${item.id}/payments/${payment.id}`, { method: "DELETE" });
+      onChanged();
+    } catch (paymentError) {
+      setError(paymentError instanceof Error ? paymentError.message : "Unable to undo recurring expense payment");
+    }
+  }
+  function renderRecurringRows(items: RecurringExpense[], paymentPeriod: string) {
+    if (!items.length) return <div className="empty-state">No recurring expenses scheduled for this month.</div>;
+    return items.map((item) => {
+      const payment = item.payments.find((record) => record.period === paymentPeriod);
+      return (
+        <div className="recurring-row" key={`${paymentPeriod}-${item.id}`}>
+          <div className="recurring-name">
+            <span className={payment ? "active-dot" : "inactive-dot"} />
+            <div>
+              <strong>{item.name}</strong>
+              <small>{item.category || "General"} · {item.frequency}</small>
+              {payment && <small>Paid {dateValue(payment.paidAt)}</small>}
+              {item.notes && <small>{item.notes}</small>}
+            </div>
+          </div>
+          <strong>{currency(payment?.amount ?? recurringAmountInMonth(item, paymentPeriod))}</strong>
+          <button
+            type="button"
+            className={payment ? "toggle-button recurring-paid" : "secondary-button"}
+            disabled={!item.active}
+            onClick={() => void (payment ? unmarkRecurringPaid(item, payment) : markRecurringPaid(item, paymentPeriod))}
+          >
+            {!item.active ? "Paused" : payment ? "Paid · undo" : "Mark paid"}
+          </button>
+          <button type="button" className="toggle-button" onClick={() => void toggleRecurring(item)}>{item.active ? "Active" : "Resume"}</button>
+          <button type="button" className="secondary-button" onClick={() => openRecurringForm(item)}>Edit</button>
+          <button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete recurring expense "${item.name}"?`)) return; setError(""); try { await request(`/finance/recurring/${item.id}`, { method: "DELETE" }); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete recurring expense"); } }}>Delete</button>
+        </div>
+      );
+    });
+  }
   const totals = summary || {
     income: 0,
     generalExpenses: 0,
@@ -387,15 +528,18 @@ export function BookkeepingView({
     net: 0,
   };
   const selectedTotals = rollingSummary || totals;
-  const trendMonths = period.endsWith("m") ? Number(period.slice(0, -1)) : 12;
-  const trend = Array.from({ length: trendMonths }, (_, index) => {
-    const date = new Date();
-    date.setDate(1);
-    date.setMonth(date.getMonth() - trendMonths + index + 1);
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  const selectedPeriodLabel = period === "month" ? "This month" : `Past ${period.slice(0, -1)} months`;
+  const trend = Array.from({ length: 12 }, (_, index) => {
+    const monthNumber = index + 1;
+    const key = `${chartYear}-${String(monthNumber).padStart(2, "0")}`;
     const monthEntries = entries.filter((entry) => entry.entryDate.startsWith(key));
-    return { label: date.toLocaleDateString(undefined, { month: "short" }), income: monthEntries.filter((entry) => entry.type === "income").reduce((sum, entry) => sum + entry.amount, 0), expenses: monthEntries.filter((entry) => entry.type === "expense").reduce((sum, entry) => sum + entry.amount, 0) };
+    return {
+      label: new Date(`${key}-15T12:00:00`).toLocaleDateString(undefined, { month: "short" }),
+      income: monthEntries.filter((entry) => entry.type === "income").reduce((sum, entry) => sum + entry.amount, 0),
+      expenses: monthEntries.filter((entry) => entry.type === "expense").reduce((sum, entry) => sum + entry.amount, 0),
+    };
   });
+  const maxTrendAmount = Math.max(1, ...trend.flatMap((month) => [month.income, month.expenses]));
   const annualRecurring = recurringItems
     .filter((item) => item.active)
     .reduce(
@@ -431,7 +575,6 @@ export function BookkeepingView({
             <option value="month">This month</option>
             <option value="3m">Past 3 months</option>
             <option value="6m">Past 6 months</option>
-            <option value="9m">Past 9 months</option>
             <option value="12m">Past 12 months</option>
           </select>
           <button className="orange-button" onClick={() => setEntryOpen(true)}>
@@ -456,16 +599,16 @@ export function BookkeepingView({
       <section className="surface bank-balance-panel">
         <div>
           <p className="eyebrow">Cash position</p>
-          <h2>Bank balance</h2>
-          <p className="subheading">Set the opening balance once. New income and expenses update the current balance automatically.</p>
+          <h2>Period cash flow</h2>
+          <p className="subheading">Net income after expenses for the selected period. The opening bank balance is tracked separately.</p>
         </div>
         <div className="bank-balance-current">
-          <span>Current balance</span>
-          <strong>{currency(bankBalance?.currentBalance || 0)}</strong>
-          <small>{currency(bankBalance?.income || 0)} income · {currency(bankBalance?.expenses || 0)} expenses</small>
+          <span>{period === "month" ? "Net this month" : `Net · ${selectedPeriodLabel}`}</span>
+          <strong>{currency(selectedTotals.net)}</strong>
+          <small>{currency(selectedTotals.income)} income · {currency(selectedTotals.expenses)} total expenses</small>
         </div>
         <form className="bank-balance-form" onSubmit={saveStartingBalance}>
-          <label>Starting balance<input required min="0" step="0.01" type="number" value={startingBalance} onChange={(event) => setStartingBalance(event.target.value)} /></label>
+          <label>Opening bank balance<input required min="0" step="0.01" type="number" value={startingBalance} onChange={(event) => setStartingBalance(event.target.value)} /></label>
           <button className="orange-button" disabled={saving}>{saving ? "Saving..." : "Save balance"}</button>
         </form>
       </section>
@@ -473,25 +616,19 @@ export function BookkeepingView({
         <Metric
           label="Income"
           value={currency(selectedTotals.income)}
-          note={period.endsWith("m") ? `Past ${period.slice(0, -1)} months` : "Current month"}
+          note={selectedPeriodLabel}
           tone="green"
         />
         <Metric
-          label="Job expenses"
-          value={currency(period.endsWith("m") ? 0 : totals.jobExpenses)}
-          note="Parts, labor, and job costs"
-          tone="blue"
-        />
-        <Metric
-          label="General expenses"
-          value={currency(period.endsWith("m") ? selectedTotals.expenses : totals.generalExpenses)}
-          note="Operating expenses"
+          label="Total expenses"
+          value={currency(selectedTotals.expenses)}
+          note={selectedPeriodLabel}
           tone="orange"
         />
         <Metric
-          label="Net"
+          label="Net balance"
           value={currency(selectedTotals.net)}
-          note={`${currency(selectedTotals.expenses)} total expenses`}
+          note={selectedPeriodLabel}
           tone={selectedTotals.net >= 0 ? "green" : "orange"}
         />
       </section>
@@ -500,44 +637,120 @@ export function BookkeepingView({
           <div className="surface-heading">
             <div>
               <h2>Ledger</h2>
-              <p>Income and expense activity</p>
+              <p>Income and expense activity · {filteredEntries.length} transactions shown</p>
             </div>
-            <button className="text-button" onClick={() => openEntryForm()}>
-              Add entry <span>+</span>
-            </button>
+            <div className="finance-ledger-controls">
+              <label className="finance-ledger-search">
+                Search
+                <input
+                  type="search"
+                  value={ledgerSearch}
+                  onChange={(event) => setLedgerSearch(event.target.value)}
+                  placeholder="Description, category, amount..."
+                  aria-label="Search ledger transactions"
+                />
+              </label>
+              <label>
+                Month
+                <select value={ledgerMonth} onChange={(event) => setLedgerMonth(event.target.value)}>
+                  <option value="all">All months</option>
+                  {Array.from({ length: 12 }, (_, index) => {
+                    const month = String(index + 1).padStart(2, "0");
+                    return <option value={month} key={month}>{new Date(`2026-${month}-15T12:00:00`).toLocaleDateString(undefined, { month: "long" })}</option>;
+                  })}
+                </select>
+              </label>
+              <label>
+                Year
+                <select value={ledgerYear} onChange={(event) => setLedgerYear(event.target.value)}>
+                  {availableYears.map((year) => <option value={year} key={year}>{year}</option>)}
+                </select>
+              </label>
+              <label>
+                Type
+                <select value={ledgerType} onChange={(event) => setLedgerType(event.target.value as "all" | FinanceEntry["type"])} aria-label="Filter ledger by transaction type">
+                  <option value="all">Income &amp; expenses</option>
+                  <option value="income">Income only</option>
+                  <option value="expense">Expenses only</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                className="secondary-button"
+                title={selectedEntries.length ? "Download selected filtered transactions" : "Download filtered transactions"}
+                onClick={() => downloadMonthlyStatement(selectedEntries.length ? selectedEntries : filteredEntries, ledgerYear, ledgerMonth, ledgerType)}
+              >
+                Download statement
+              </button>
+              <button className="text-button" onClick={() => openEntryForm()}>
+                Add entry <span>+</span>
+              </button>
+            </div>
           </div>
           <div className="finance-table-wrap">
             <table className="data-table finance-table">
               <thead>
                 <tr>
+                  <th className="ledger-select-cell">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all visible transactions"
+                      checked={filteredEntries.length > 0 && selectedEntries.length === filteredEntries.length}
+                      onChange={(event) => setSelectedEntryIds((current) => event.target.checked
+                        ? [...new Set([...current, ...filteredEntries.map((item) => item.id)])]
+                        : current.filter((id) => !filteredEntries.some((item) => item.id === id)))}
+                    />
+                  </th>
                   <th>Date</th>
+                  <th>Amount</th>
                   <th>Description</th>
                   <th>Category</th>
                   <th>Method</th>
-                  <th>Claim / job</th>
                   <th>Receipts</th>
-                  <th>Amount</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {entries.map((item) => (
-                  <tr key={item.id}>
-                    <td>{dateValue(item.entryDate)}</td>
-                    <td>
+                {filteredEntries.map((item) => (
+                  <tr
+                    key={item.id}
+                    className="finance-entry-row clickable-row"
+                    onClick={(event) => {
+                      if (event.target instanceof Element && event.target.closest("button, a, input, select, label")) return;
+                      openEntryForm(item);
+                    }}
+                    onKeyDown={(event) => {
+                      if (!(event.target instanceof Element && event.target.closest("button, a, input, select, label")) && (event.key === "Enter" || event.key === " ")) {
+                        event.preventDefault();
+                        openEntryForm(item);
+                      }
+                    }}
+                    tabIndex={0}
+                    aria-label={`Open ${item.type}: ${item.description}`}
+                  >
+                    <td className="ledger-select-cell" data-label="Select">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${item.type}: ${item.description}`}
+                        checked={selectedEntryIds.includes(item.id)}
+                        onChange={(event) => setSelectedEntryIds((current) => event.target.checked
+                          ? [...current, item.id]
+                          : current.filter((id) => id !== item.id))}
+                      />
+                    </td>
+                    <td data-label="Date">{dateValue(item.entryDate)}</td>
+                    <td className={`finance-amount ${item.type === "income" ? "finance-income" : "finance-expense"}`} data-label="Amount">
+                      <span>{item.type === "income" ? "+" : "-"}{currency(item.amount)}</span>
+                    </td>
+                    <td data-label="Description">
                       <strong>{item.description}</strong>
                       {item.notes && (
                         <small className="table-subtext">{item.notes}</small>
                       )}
                     </td>
-                    <td>{item.category || "Uncategorized"}</td>
-                    <td>{item.paymentMethod?.replace("_", " ") || "-"}</td>
-                    <td>
-                      {item.claim?.claimNumber
-                        ? `Claim ${item.claim.claimNumber}`
-                        : item.job?.jobNumber || "General"}
-                    </td>
-                    <td>
+                    <td data-label="Category">{item.category || "Uncategorized"}</td>
+                    <td data-label="Method">{item.paymentMethod?.replace("_", " ") || "-"}</td>
+                    <td data-label="Receipts">
                       <div className="ledger-receipts">
                         {item.documents.map((receipt) => (
                           <div className="ledger-receipt" key={receipt.id}>
@@ -557,33 +770,43 @@ export function BookkeepingView({
                         </label>}
                       </div>
                     </td>
-                    <td
-                      className={
-                        item.type === "income"
-                          ? "finance-income"
-                          : "finance-expense"
-                      }
-                    >
-                      <span>{item.type === "income" ? "+" : "-"}{currency(item.amount)}</span>
-                    </td>
-                    <td>{item.sourceReference ? <small className="table-subtext">Synced source · edit at source</small> : <div className="ledger-entry-actions"><button type="button" className="secondary-button" onClick={() => openEntryForm(item)}>Edit</button><button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete ledger entry "${item.description}"?`)) return; setError(""); try { await request(`/finance/entries/${item.id}`, { method: "DELETE" }); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete ledger entry"); } }}>Delete</button></div>}</td>
+                    <td data-label="Actions"><div className="ledger-entry-actions"><button type="button" className="secondary-button" onClick={() => openEntryForm(item)}>Edit</button><button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete ledger entry "${item.description}"?`)) return; setError(""); try { await request(`/finance/entries/${item.id}`, { method: "DELETE" }); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete ledger entry"); } }}>Delete</button></div></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {!entries.length && (
+          {!filteredEntries.length && (
             <div className="empty-state">
-              No bookkeeping entries for this workspace yet.
+              {ledgerSearch.trim()
+                ? "No ledger transactions match this search."
+                : `No ${ledgerType === "income" ? "income" : ledgerType === "expense" ? "expense" : "bookkeeping"} entries for this month and year.`}
             </div>
           )}
+          <div className="ledger-totals">
+            <div><span>Filtered income</span><strong className="finance-income">{currency(filteredIncomeTotal)}</strong></div>
+            <div><span>Filtered expenses</span><strong className="finance-expense">{currency(filteredExpenseTotal)}</strong></div>
+            <div><span>Net</span><strong className={filteredIncomeTotal >= filteredExpenseTotal ? "finance-income" : "finance-expense"}>{currency(filteredIncomeTotal - filteredExpenseTotal)}</strong></div>
+            {selectedEntries.length > 0 && (
+              <div className="ledger-selected-total">
+                <span>{selectedEntries.length} selected · {currency(selectedIncomeTotal)} income · {currency(selectedExpenseTotal)} expenses</span>
+                <strong>Selected net: {currency(selectedIncomeTotal - selectedExpenseTotal)}</strong>
+              </div>
+            )}
+          </div>
         </section>
         <section className="surface finance-chart">
           <div className="surface-heading">
             <div>
               <h2>Income vs expenses</h2>
-              <p>{period.endsWith("m") ? `Month by month · past ${period.slice(0, -1)} months` : "Current month"}</p>
+              <p>Month-by-month comparison · {chartYear}</p>
             </div>
+            <label className="finance-chart-year">
+              Chart year
+              <select value={chartYear} onChange={(event) => setChartYear(event.target.value)}>
+                {availableYears.map((year) => <option value={year} key={year}>{year}</option>)}
+              </select>
+            </label>
           </div>
           <div className="bar-chart">
             <div className="bar-group">
@@ -615,65 +838,60 @@ export function BookkeepingView({
               <i className="legend-expense" /> Expenses
             </span>
           </div>
-          {period.endsWith("m") && <div className="monthly-trend">
+          <div className="yearly-month-chart" role="img" aria-label={`Monthly income and expense comparison for ${chartYear}`}>
+            {trend.map((month) => <div className="yearly-month-column" key={`${chartYear}-${month.label}`}>
+              <div className="yearly-month-bars">
+                <span className="yearly-income-bar" title={`Income: ${currency(month.income)}`} style={{ height: `${month.income ? Math.max(2, month.income / maxTrendAmount * 100) : 0}%` }} />
+                <span className="yearly-expense-bar" title={`Expenses: ${currency(month.expenses)}`} style={{ height: `${month.expenses ? Math.max(2, month.expenses / maxTrendAmount * 100) : 0}%` }} />
+              </div>
+              <span>{month.label}</span>
+            </div>)}
+          </div>
+          <div className="monthly-trend-scroll">
+          <div className="monthly-trend">
             {trend.map((month) => <div className="monthly-trend-row" key={`${month.label}-${month.income}-${month.expenses}`}><strong>{month.label}</strong><span className="trend-income">{currency(month.income)}</span><span className="trend-expense">{currency(month.expenses)}</span><b className={month.income - month.expenses >= 0 ? "trend-positive" : "trend-negative"}>{currency(month.income - month.expenses)}</b></div>)}
             <div className="monthly-trend-labels"><span>Month</span><span>Income</span><span>Expenses</span><span>Net</span></div>
-          </div>}
+          </div>
+          </div>
         </section>
       </div>
       <section className="surface recurring-panel">
         <div className="surface-heading">
           <div>
             <h2>Recurring expenses</h2>
-            <p>Fixed commitments used in the annual forecast</p>
+            <p>Track each month’s scheduled payments and balances</p>
           </div>
-          <button
-            className="orange-button"
-            onClick={() => setRecurringOpen(true)}
-          >
-            Add recurring
-          </button>
+          <div className="recurring-heading-actions">
+            <label>
+              Payment month
+              <input type="month" value={recurringPeriod} onChange={(event) => setRecurringPeriod(event.target.value)} />
+            </label>
+            <button className="orange-button" onClick={() => openRecurringForm()}>Add recurring</button>
+          </div>
         </div>
-        <div className="recurring-list">
-          {recurringItems.map((item) => (
-            <div className="recurring-row" key={item.id}>
-              <div className="recurring-name">
-                <span className={item.active ? "active-dot" : "inactive-dot"} />
-                <div>
-                  <strong>{item.name}</strong>
-                  <small>
-                    {item.category || "General"} · Starts{" "}
-                    {dateValue(item.startDate)}
-                  </small>
-                </div>
-              </div>
-              <span className="frequency-pill">{item.frequency}</span>
-              <strong>
-                {currency(item.amount)}
-                <small>
-                  per{" "}
-                  {item.frequency === "yearly"
-                    ? "year"
-                    : item.frequency === "monthly"
-                      ? "month"
-                      : "week"}
-                </small>
-              </strong>
-              <button
-                className="toggle-button"
-                onClick={() => void toggleRecurring(item)}
-              >
-                {item.active ? "Active" : "Paused"}
-              </button>
-              <button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete recurring expense "${item.name}"?`)) return; setError(""); try { await request(`/finance/recurring/${item.id}`, { method: "DELETE" }); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete recurring expense"); } }}>Delete</button>
+        <div className="recurring-period-grid">
+          <section className="recurring-period">
+            <div className="recurring-period-heading">
+              <h3>This month · {monthValue(recurringPeriod)}</h3>
+              <span>{currency(recurringCurrentTotal - recurringCurrentPaid)} remaining</span>
             </div>
-          ))}
+            <div className="recurring-list">{renderRecurringRows(recurringCurrentItems, recurringPeriod)}</div>
+          </section>
+          <section className="recurring-period">
+            <div className="recurring-period-heading">
+              <h3>Next month · {monthValue(recurringNextPeriod)}</h3>
+              <span>{currency(recurringNextTotal)} scheduled</span>
+            </div>
+            <div className="recurring-list">{renderRecurringRows(recurringNextItems, recurringNextPeriod)}</div>
+          </section>
         </div>
-        {!recurringItems.length && (
-          <div className="empty-state">
-            Add rent, utilities, insurance, or other fixed costs.
-          </div>
-        )}
+        {!recurringItems.length && <div className="empty-state">Add rent, utilities, insurance, or other fixed costs.</div>}
+        <div className="recurring-totals">
+          <div><span>{monthValue(recurringPeriod)} scheduled</span><strong>{currency(recurringCurrentTotal)}</strong></div>
+          <div><span>{monthValue(recurringPeriod)} paid</span><strong className="finance-income">{currency(recurringCurrentPaid)}</strong></div>
+          <div><span>{monthValue(recurringPeriod)} remaining</span><strong className="finance-expense">{currency(Math.max(0, recurringCurrentTotal - recurringCurrentPaid))}</strong></div>
+          <div><span>{monthValue(recurringNextPeriod)} scheduled</span><strong>{currency(recurringNextTotal)}</strong></div>
+        </div>
       </section>
       <section className="forecast-grid">
         <div className="surface">
@@ -745,7 +963,7 @@ export function BookkeepingView({
               <button
                 type="button"
                 className="close-button"
-                onClick={() => setEntryOpen(false)}
+                onClick={closeEntryForm}
               >
                 ×
               </button>
@@ -778,23 +996,6 @@ export function BookkeepingView({
                     setEntry({ ...entry, amount: event.target.value })
                   }
                 />
-              </label>
-              <label>
-                Linked claim
-                <select
-                  value={entry.claimId}
-                  onChange={(event) =>
-                    setEntry({ ...entry, claimId: event.target.value })
-                  }
-                >
-                  <option value="">No linked claim</option>
-                  {claims.map((claim) => (
-                    <option key={claim.id} value={claim.id}>
-                      {claim.claimNumber || "Unnumbered claim"} ·{" "}
-                      {claim.customer.firstName} {claim.customer.lastName}
-                    </option>
-                  ))}
-                </select>
               </label>
               <label>
                 Description
@@ -846,22 +1047,6 @@ export function BookkeepingView({
                   ))}
                 </select>
               </label>
-              <label>
-                Linked job
-                <select
-                  value={entry.jobId}
-                  onChange={(event) =>
-                    setEntry({ ...entry, jobId: event.target.value })
-                  }
-                >
-                  <option value="">General shop expense</option>
-                  {jobs.map((job) => (
-                    <option key={job.id} value={job.id}>
-                      {job.jobNumber}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <label className="finance-notes">
                 Notes
                 <textarea
@@ -872,6 +1057,30 @@ export function BookkeepingView({
                 />
               </label>
             </div>
+            {editingFinanceEntry?.type === "expense" && (
+              <section className="finance-entry-receipts">
+                <h3>Receipts</h3>
+                <div className="ledger-receipts">
+                  {editingFinanceEntry.documents.map((receipt) => (
+                    <div className="ledger-receipt" key={receipt.id}>
+                      <span>{receipt.fileName}</span>
+                      <button type="button" onClick={() => void accessEntryReceipt(editingFinanceEntry.id, receipt, false)}>Preview</button>
+                      <button type="button" onClick={() => void accessEntryReceipt(editingFinanceEntry.id, receipt, true)}>Download</button>
+                      <button type="button" className="danger-button compact-danger" onClick={() => void deleteEntryReceipt(editingFinanceEntry.id, receipt)}>Delete</button>
+                    </div>
+                  ))}
+                  {!editingFinanceEntry.documents.length && <p className="records-muted">No receipt attached yet.</p>}
+                  <label className="ledger-receipt-upload">
+                    {uploadingReceiptFor === editingFinanceEntry.id ? "Uploading..." : "Attach receipt"}
+                    <input type="file" disabled={uploadingReceiptFor === editingFinanceEntry.id} onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      event.currentTarget.value = "";
+                      if (file) void uploadEntryReceipt(editingFinanceEntry.id, file);
+                    }} />
+                  </label>
+                </div>
+              </section>
+            )}
             <button className="orange-button submit-button" disabled={saving}>
               {saving ? "Saving..." : editingEntryId ? "Save changes" : "Save entry"}
             </button>
@@ -907,12 +1116,12 @@ export function BookkeepingView({
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Fixed cost</p>
-                <h2>Add recurring expense</h2>
+                <h2>{editingRecurringId ? "Edit recurring expense" : "Add recurring expense"}</h2>
               </div>
               <button
                 type="button"
                 className="close-button"
-                onClick={() => setRecurringOpen(false)}
+                onClick={() => { setRecurringOpen(false); setEditingRecurringId(null); }}
               >
                 ×
               </button>
@@ -986,9 +1195,18 @@ export function BookkeepingView({
                   }
                 />
               </label>
+              <label className="finance-notes">
+                Notes
+                <textarea
+                  value={recurring.notes}
+                  onChange={(event) =>
+                    setRecurring({ ...recurring, notes: event.target.value })
+                  }
+                />
+              </label>
             </div>
             <button className="orange-button submit-button" disabled={saving}>
-              {saving ? "Saving..." : "Save recurring expense"}
+              {saving ? "Saving..." : editingRecurringId ? "Save changes" : "Save recurring expense"}
             </button>
           </form>
         </div>

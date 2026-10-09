@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import PDFDocument from 'pdfkit';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
 import { optionalBoolean, optionalDate, optionalInteger, optionalText, requiredText } from '../validation.js';
 
@@ -10,6 +10,29 @@ const inspectionSelect = {
   claim: { select: { id: true, claimNumber: true, insuranceCompany: true, vehicle: true } },
   job: { select: { id: true, jobNumber: true, status: true, vehicle: true } },
 } as const;
+
+const isMiscellaneousEstimateLine = (section: string | null | undefined) =>
+  ['shop & misc', 'miscellaneous'].includes((section || '').trim().toLowerCase());
+const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+const displayEstimateDate = (value: string | null | undefined) =>
+  value ? new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString('en-US') : '—';
+const estimateFeatureGroups = [
+  ['TRANSMISSION', ['Automatic transmission', 'Manual transmission', 'Overdrive', 'Intermittent wipers']],
+  ['POWER', ['Power steering', 'Power brakes', 'Power windows', 'Power locks', 'Power mirrors', 'Power driver seat', 'Power passenger seat', 'Heated mirrors']],
+  ['CONVENIENCE & DECOR', ['Air conditioning', 'Cruise control', 'Keyless entry', 'Alarm', 'Tilt wheel', 'Telescopic wheel', 'Dual mirrors', 'Tinted glass', 'Remote start', 'Backup camera', 'Parking sensors', 'Navigation system']],
+  ['SAFETY', ['Driver air bag', 'Passenger air bag', 'Side impact air bags', 'Anti-lock brakes', 'Traction control', 'Stability control', 'Blind spot detection', 'Lane departure warning', 'Adaptive cruise control']],
+  ['WHEELS', ['Steel wheels', 'Aluminum/alloy wheels', 'Four-wheel disc brakes']],
+  ['PAINT & ROOF', ['Clear coat paint', 'Pearl/tri-coat paint', 'Sunroof', 'Panoramic roof']],
+  ['AUDIO & SEATING', ['AM/FM radio', 'Premium radio', 'Bluetooth/audio connection', 'Leather seats', 'Heated seats', 'Ventilated seats', 'Rear heated seats']],
+] as const;
+const mastercraftFacilityName = 'Mastercraft Auto Repair & Collision LLC';
+const mastercraftFacilityDetails = [
+  mastercraftFacilityName,
+  '(646) 203-1122 Business',
+  '38-21 23rd St',
+  'LONG ISLAND CITY, NY 11101-0000',
+  '(718) 578-4563',
+];
 
 export function createWorkflowsRouter(prisma: PrismaClient) {
   const workflowsRouter = Router();
@@ -98,6 +121,14 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
       select: inspectionSelect,
     });
     res.json(inspection);
+  }));
+
+  workflowsRouter.delete('/inspections/:inspectionId', asyncHandler(async (req, res) => {
+    const inspectionId = routeParam(req, 'inspectionId');
+    const existing = await prisma.inspection.findUnique({ where: { id: inspectionId }, select: { id: true } });
+    if (!existing) throw new ApiError(404, 'Inspection not found');
+    await prisma.inspection.delete({ where: { id: inspectionId } });
+    res.status(204).send();
   }));
 
   workflowsRouter.get('/vehicles', asyncHandler(async (req, res) => {
@@ -241,51 +272,584 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
       orderBy: { updatedAt: 'desc' },
       include: {
         job: { include: { customer: true, vehicle: true } },
-        lineItems: true,
+        lineItems: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
       },
     });
     res.json(estimates);
   }));
 
+  workflowsRouter.get('/estimates/:estimateId', asyncHandler(async (req, res) => {
+    const estimate = await prisma.estimate.findUnique({
+      where: { id: routeParam(req, 'estimateId') },
+      include: {
+        job: { include: { customer: true, vehicle: true, claim: true } },
+        lineItems: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] },
+      },
+    });
+    if (!estimate) throw new ApiError(404, 'Estimate not found');
+    res.json(estimate);
+  }));
+
   workflowsRouter.post('/estimates/:estimateId/pdf', asyncHandler(async (req, res) => {
-    const estimate = await prisma.estimate.findUnique({ where: { id: routeParam(req, 'estimateId') }, include: { job: { include: { customer: true, vehicle: true, claim: true } }, lineItems: { orderBy: { createdAt: 'asc' } } } });
+    const estimate = await prisma.estimate.findUnique({ where: { id: routeParam(req, 'estimateId') }, include: { job: { include: { customer: true, vehicle: true, claim: true } }, lineItems: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] } } });
     if (!estimate) throw new ApiError(404, 'Estimate not found');
     const fileName = `estimate-${(estimate.estimateNumber || estimate.id).replace(/[^a-zA-Z0-9_-]+/g, '_')}.pdf`;
     res.type('application/pdf').set('Content-Disposition', `attachment; filename="${fileName}"`);
-    const doc = new PDFDocument({ size: 'LETTER', margin: 36 });
+    const doc = new PDFDocument({ size: 'LETTER', margin: 36, bufferPages: true });
     doc.pipe(res);
     const width = 540;
     const money = (value: number) => `$${value.toFixed(2)}`;
     const text = (value: string, x: number, y: number, options: { size?: number; bold?: boolean; color?: string; width?: number; align?: 'left' | 'right' | 'center' } = {}) => doc.font(options.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(options.size || 9).fillColor(options.color || '#171717').text(value, x, y, { width: options.width, align: options.align || 'left' });
-    doc.rect(36, 36, width, 76).fill('#292929'); text('MASTERCRAFT AUTO REPAIR & COLLISION', 50, 51, { size: 17, bold: true, color: '#ffffff' }); text('38-21 23rd Street, Long Island City, NY 11101', 50, 76, { size: 8.5, color: '#eeeeee' }); text('Tel: 718-578-4563 | 718-603-0412 | shop@mastercraftautony.com', 50, 90, { size: 8.5, color: '#eeeeee' }); text('www.mastercraftautony.com | Recognized By All Insurance Companies', 50, 104, { size: 8, color: '#f1c232' });
-    doc.rect(36, 126, width, 34).fill('#c90000'); text('ESTIMATE OF RECORD', 36, 136, { size: 15, bold: true, color: '#ffffff', width, align: 'center' });
-    doc.rect(36, 174, width, 25).lineWidth(.6).stroke('#bdbdbd'); text(`Estimate No: ${estimate.estimateNumber || 'DRAFT'}`, 45, 182, { size: 8.5, bold: true }); text(`Date Issued: ${estimate.createdAt.toLocaleDateString('en-US')}`, 350, 182, { size: 8.5, bold: true, width: 215, align: 'right' });
-    doc.rect(36, 216, width, 78).lineWidth(.6).stroke('#bdbdbd'); doc.moveTo(306, 216).lineTo(306, 294).stroke('#bdbdbd'); const customer = estimate.job.customer; const vehicle = estimate.job.vehicle; text('CUSTOMER', 45, 226, { size: 10, bold: true }); text(`${customer.firstName} ${customer.lastName}`, 45, 243, { size: 10 }); text(`Address: ${customer.address || 'N/A'}`, 45, 260, { size: 8.5 }); text(`Phone: ${customer.phone || 'N/A'}    Email: ${customer.email || 'N/A'}`, 45, 275, { size: 8.5 }); text('VEHICLE', 315, 226, { size: 10, bold: true }); text(vehicle ? [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(' ') : 'Not specified', 315, 243, { size: 9 }); text(`VIN: ${vehicle?.vin || 'N/A'}`, 315, 260, { size: 8.5 }); text(`License: ${vehicle?.licensePlate || 'N/A'}${vehicle?.licenseState ? ` (${vehicle.licenseState})` : ''}`, 315, 275, { size: 8.5 }); text(`Job: ${estimate.job.jobNumber}   Claim: ${estimate.job.claim?.claimNumber || 'N/A'}`, 315, 287, { size: 7.5 });
-    text('REPAIR OPERATIONS', 36, 316, { size: 10, bold: true, color: '#ffffff', width }); doc.rect(36, 312, width, 20).fill('#292929'); text('REPAIR OPERATIONS', 45, 318, { size: 10, bold: true, color: '#ffffff' }); let y = 332; const columns = [36, 345, 400, 476, 576]; doc.rect(36, y, width, 22).fill('#c90000'); ['Description', 'Qty', 'Price $', 'Amount'].forEach((label, index) => text(label, columns[index] + 5, y + 7, { size: 8, bold: true, color: '#ffffff', width: columns[index + 1] - columns[index] - 10, align: index ? 'right' : 'left' })); y += 22;
-    for (const [index, item] of estimate.lineItems.entries()) { if (y > 700) { doc.addPage(); y = 45; } if (index % 2 === 0) doc.rect(36, y, width, 24).fill('#eeeeee'); text([item.section, item.operation, item.description].filter(Boolean).join(' · '), 42, y + 7, { size: 8, width: 298 }); text(String(item.quantity), 350, y + 7, { size: 8, width: 45, align: 'right' }); text(money(item.unitPrice), 405, y + 7, { size: 8, width: 66, align: 'right' }); text(money(item.quantity * item.unitPrice), 481, y + 7, { size: 8, width: 86, align: 'right' }); doc.rect(36, y, width, 24).lineWidth(.3).stroke('#cccccc'); y += 24; }
-    y += 12; const totals = (label: string, value: number, bold = false) => { text(label, 350, y, { size: bold ? 10 : 9, bold, width: 135, align: 'right' }); text(money(value), 490, y, { size: bold ? 10 : 9, bold, width: 86, align: 'right' }); y += bold ? 24 : 18; }; totals('SUBTOTAL', estimate.totalAmount, true); totals('SALES TAX', 0); totals('TOTAL COST OF REPAIRS', estimate.totalAmount, true); y += 14; text('This is an estimate only. Final charges may vary based on additional damage found during teardown, parts availability, or supplemental findings. This estimate is valid for 30 days from the date above.', 36, y, { size: 8, color: '#555555', width }); y += 42; text('Customer Signature: ______________________________    Date: ______________', 36, y, { size: 8.5 }); y += 24; doc.moveTo(36, y).lineTo(576, y).stroke('#222222'); y += 10; text('MASTERCRAFT AUTO REPAIR & COLLISION  •  38-21 23rd Street, Long Island City, NY 11101  •  718-578-4563  •  www.mastercraftautony.com', 36, y, { size: 7, color: '#666666', width, align: 'center' }); doc.end();
+    const summaryText = (value: string, x: number, y: number, maxWidth: number) => {
+      doc.font('Helvetica').fontSize(7.5);
+      let fitted = value;
+      while (fitted.length && doc.widthOfString(`${fitted.trimEnd()}...`) > maxWidth) {
+        fitted = fitted.slice(0, -1);
+      }
+      if (fitted !== value) fitted = `${fitted.trimEnd()}...`;
+      text(fitted, x, y, { size: 7.5, width: maxWidth });
+    };
+    const customer = estimate.job?.customer;
+    const vehicle = estimate.job?.vehicle;
+    const claim = estimate.job?.claim;
+    const customerName = customer
+      ? `${customer.firstName} ${customer.lastName}`
+      : estimate.walkInCustomerName || estimate.ownerName || 'Walk-in customer';
+    const claimNumber = estimate.claimNumber || claim?.claimNumber || '';
+    const vehicleName = [
+      vehicle?.year ?? estimate.walkInVehicleYear,
+      vehicle?.make ?? estimate.walkInVehicleMake,
+      vehicle?.model ?? estimate.walkInVehicleModel,
+      vehicle?.trim ?? estimate.walkInVehicleTrim,
+      estimate.engine,
+    ].filter(Boolean).join(' ') || 'Vehicle not specified';
+    const jobNumber = estimate.job?.jobNumber || 'WALK-IN';
+    const dateOfLoss = estimate.dateOfLoss
+      ? displayEstimateDate(estimate.dateOfLoss)
+      : claim?.incidentDate?.toLocaleDateString('en-US') || '—';
+    const bodyLabor = estimate.lineItems.reduce((sum, item) => sum + item.laborHours * estimate.bodyRate, 0);
+    const mechanicLabor = estimate.lineItems.reduce((sum, item) => sum + item.mechanicHours * estimate.mechanicRate, 0);
+    const paintLabor = estimate.lineItems.reduce((sum, item) => sum + item.paintHours * estimate.paintRate, 0);
+    const paintSupplies = estimate.lineItems.reduce((sum, item) => sum + item.paintHours * estimate.supplyRate, 0);
+    const partsTotal = estimate.lineItems.reduce((sum, item) => sum + (isMiscellaneousEstimateLine(item.section) ? 0 : item.quantity * item.unitPrice), 0);
+    const miscellaneous = estimate.lineItems.reduce((sum, item) => sum + (isMiscellaneousEstimateLine(item.section) ? item.quantity * item.unitPrice : 0), 0);
+    const taxableSubtotal = partsTotal + bodyLabor + mechanicLabor + paintLabor + paintSupplies;
+    const subtotal = taxableSubtotal + miscellaneous;
+    const tax = roundCurrency(taxableSubtotal * estimate.taxRate / 100);
+    const total = roundCurrency(subtotal + tax);
+    const columns = [
+      { title: '#', width: 24, align: 'right' as const },
+      { title: 'Oper', width: 34, align: 'left' as const },
+      { title: 'Description', width: 280, align: 'left' as const },
+      { title: 'Qty', width: 34, align: 'right' as const },
+      { title: 'Parts $', width: 58, align: 'right' as const },
+      { title: 'Labor', width: 56, align: 'right' as const },
+      { title: 'Paint', width: 54, align: 'right' as const },
+    ];
+    const drawTableHeading = (y: number) => {
+      doc.moveTo(36, y).lineTo(576, y).lineWidth(.7).stroke('#555555');
+      let x = 36;
+      for (const column of columns) {
+        text(column.title, x + 3, y + 3, { size: 9, bold: true, color: '#171717', width: column.width - 6, align: column.align });
+        x += column.width;
+      }
+      doc.moveTo(36, y + 18).lineTo(576, y + 18).lineWidth(.8).stroke('#555555');
+      return y + 18;
+    };
+    const drawPageHeader = (continued: boolean) => {
+      text('Mastercraft Auto Repair & Collision', 36, 36, { size: 14, bold: true, width: 340 });
+      text('ESTIMATE OF RECORD', 376, 38, { size: 12, bold: true, width: 200, align: 'right' });
+      text('38-21 23rd Street, Long Island City, NY 11101  |  (718) 578-4563', 36, 54, { size: 8, width: 340 });
+      if (estimate.estimateNumber) {
+        text(estimate.estimateNumber, 376, 55, { size: 8, width: 200, align: 'right' });
+      }
+      doc.moveTo(36, 70).lineTo(576, 70).lineWidth(.6).stroke('#555555');
+      summaryText(`Owner: ${estimate.ownerName || customerName}`, 36, 76, 154);
+      summaryText(`Job: ${jobNumber}`, 194, 76, 78);
+      summaryText(`Vehicle: ${vehicleName}`, 276, 76, 205);
+      summaryText(`Date of loss: ${dateOfLoss}`, 485, 76, 91);
+      if (continued) {
+        return drawTableHeading(94);
+      }
+      const cell = (label: string, value: string, x: number, y: number, w: number, h = 20) => {
+        text(`${label}: ${value || '—'}`, x + 4, y + 3, { size: 6.8, width: w - 8 });
+        doc.rect(x, y, w, h).lineWidth(.35).stroke('#999999');
+      };
+      const detailsY = 100;
+      const writtenBy = [estimate.writtenBy, estimate.nyAdjusterLicense].filter(Boolean).join(', ') || '—';
+      const adjuster = [estimate.insuranceAdjuster || claim?.adjusterName || '', estimate.insuranceAdjusterPhone || claim?.adjusterPhone || ''].filter(Boolean).join(' · ') || '—';
+      text(`Written By: ${writtenBy}`, 36, detailsY + 17, { size: 7, width, align: 'center' });
+      text(`Adjuster: ${adjuster}`, 36, detailsY + 28, { size: 7, width, align: 'center' });
+      const leftInfo: Array<[string, string]> = [
+        ['Insured', estimate.insuredName || claim?.customerName || customerName],
+        ['Type of Loss', estimate.lossType || '—'],
+        ['Point of Impact', estimate.pointOfImpact || '—'],
+      ];
+      const rightInfo: Array<[string, string]> = [
+        ['Policy #', estimate.policyNumber || claim?.customerPolicyNumber || '—'],
+        ['Date of Loss', dateOfLoss],
+        ['Days to Repair', estimate.daysToRepair || '—'],
+      ];
+      const claimInfo: Array<[string, string]> = [
+        ['Claim #', claimNumber || '—'],
+        ['Workfile ID', estimate.workfileId || '—'],
+      ];
+      const infoTop = detailsY + 43;
+      const infoRowHeight = 14;
+      const columnWidth = width / 3;
+      for (let index = 0; index < Math.max(leftInfo.length, rightInfo.length, claimInfo.length); index += 1) {
+        const rowY = infoTop + index * infoRowHeight;
+        if (leftInfo[index]) text(`${leftInfo[index][0]}: ${leftInfo[index][1]}`, 36, rowY, { size: 8, width: columnWidth - 8 });
+        if (rightInfo[index]) text(`${rightInfo[index][0]}: ${rightInfo[index][1]}`, 36 + columnWidth, rowY, { size: 8, width: columnWidth - 8 });
+        if (claimInfo[index]) text(`${claimInfo[index][0]}: ${claimInfo[index][1]}`, 36 + columnWidth * 2, rowY, { size: 8, width: columnWidth - 8 });
+      };
+      const facilityTop = infoTop + Math.max(leftInfo.length, rightInfo.length, claimInfo.length) * infoRowHeight + 7;
+      const facilityColumns = [
+        {
+          heading: 'Owner:',
+          lines: [
+            estimate.ownerName || customerName,
+            customer?.address || estimate.walkInCustomerAddress || '',
+            customer?.phone || estimate.walkInCustomerPhone || '',
+          ].filter(Boolean),
+        },
+        {
+          heading: 'Inspection Location:',
+          lines: estimate.inspectionLocation === mastercraftFacilityName
+            ? mastercraftFacilityDetails.slice(0, 4)
+            : (estimate.inspectionLocation || '').split('\n').filter(Boolean),
+        },
+        {
+          heading: 'Repair Facility:',
+          lines: estimate.repairFacility === mastercraftFacilityName ? mastercraftFacilityDetails : [],
+        },
+      ];
+      facilityColumns.forEach((column, index) => {
+        if (!column.lines.length) return;
+        const x = 36 + index * columnWidth;
+        text(column.heading, x, facilityTop, { size: 7, bold: true, width: columnWidth - 8 });
+        column.lines.forEach((line, lineIndex) => text(line, x, facilityTop + 12 + lineIndex * 11, { size: 6.8, width: columnWidth - 8 }));
+      });
+      const facilityLineCount = Math.max(...facilityColumns.map((column) => column.lines.length));
+      const vehicleTop = facilityTop + 20 + facilityLineCount * 11;
+      doc.moveTo(36, vehicleTop).lineTo(576, vehicleTop).lineWidth(.6).stroke('#666666');
+      text('VEHICLE', 36, vehicleTop + 8, { size: 10, bold: true, width, align: 'center' });
+      text([vehicleName, estimate.engine].filter(Boolean).join(' · '), 36, vehicleTop + 26, { size: 9, width });
+      const vehicleGridTop = vehicleTop + 44;
+      const vehicleFacts: Array<[string, string]> = [
+        ['VIN', vehicle?.vin || estimate.walkInVehicleVin || '—'],
+        ['License', vehicle?.licensePlate || estimate.walkInVehicleLicense || '—'],
+        ['State', vehicle?.licenseState || estimate.walkInVehicleState || '—'],
+        ['Production Date', estimate.productionDate || '—'],
+        ['Odometer', estimate.odometer || '—'],
+        ['Condition', estimate.vehicleCondition || '—'],
+        ['Interior Color', estimate.interiorColor || '—'],
+        ['Exterior Color', estimate.exteriorColor || vehicle?.color || '—'],
+      ];
+      const factWidth = width / 3;
+      vehicleFacts.forEach(([label, value], index) => {
+        const row = Math.floor(index / 3);
+        const column = index % 3;
+        const x = 36 + column * factWidth;
+        const y = vehicleGridTop + row * 13;
+        text(`${label}:`, x, y, { size: 8, width: 65 });
+        text(value, x + 67, y, { size: 8, width: factWidth - 72 });
+      });
+      const featureTop = vehicleGridTop + 48;
+      const featureColumnWidth = width / 3;
+      const checkedFeatures = estimateFeatureGroups.flatMap(([category, groupFeatures]) =>
+        groupFeatures.filter((feature) => estimate.vehicleFeatures.includes(feature)),
+      );
+      if (checkedFeatures.length) {
+        text('VEHICLE OPTIONS', 36, featureTop, { size: 8, bold: true, width });
+      }
+      checkedFeatures.forEach((feature, index) => {
+        const column = index % 3;
+        const x = 36 + column * featureColumnWidth;
+        const row = Math.floor(index / 3);
+        const itemY = featureTop + 10 + row * 11;
+        doc.moveTo(x + 4, itemY + 5).lineTo(x + 7, itemY + 8).lineTo(x + 12, itemY + 1).lineWidth(1).stroke('#171717');
+        text(feature, x + 15, itemY, { size: 8, width: featureColumnWidth - 18 });
+      });
+      const damageTop = featureTop + (checkedFeatures.length ? 10 + Math.ceil(checkedFeatures.length / 3) * 11 : 12);
+      if (estimate.damageSummary) {
+        cell('Damage Summary', estimate.damageSummary, 36, damageTop, width, 24);
+      }
+      text('REPAIR OPERATIONS', 36, damageTop + 18, { size: 10, bold: true });
+      return drawTableHeading(damageTop + 30);
+    };
+    let y = drawPageHeader(false);
+    let previousSection = '';
+    for (const [index, item] of estimate.lineItems.entries()) {
+      const operation = item.description || '';
+      const description = item.partNumber ? `${operation} · Part ${item.partNumber}` : operation;
+      doc.font('Helvetica').fontSize(9);
+      const operationHeight = doc.heightOfString(description, { width: columns[2].width - 10 });
+      const noteHeight = item.note ? doc.heightOfString(`Note: ${item.note}`, { width: width - 34 }) + 5 : 0;
+      const operationRowHeight = Math.max(11, operationHeight);
+      const rowHeight = operationRowHeight + noteHeight;
+      const section = item.section || 'REPAIR OPERATIONS';
+      const sectionChanged = !item.parentLineId && section !== previousSection;
+      const sectionHeight = sectionChanged ? 15 : 0;
+      if (y + rowHeight + sectionHeight > 720) {
+        doc.addPage();
+        y = drawPageHeader(true);
+        previousSection = '';
+      }
+      if (!item.parentLineId && section !== previousSection) {
+        doc.rect(36, y, width, 14).fill('#d0d0d0');
+        text(section.toUpperCase(), 41, y + 2, { size: 10, bold: true });
+        y += 16;
+        previousSection = section;
+      }
+      const labor = [
+        item.laborHours ? `${item.laborHours.toFixed(1)} B` : '',
+        item.mechanicHours ? `${item.mechanicHours.toFixed(1)} M` : '',
+      ].filter(Boolean).join(' / ') || '—';
+      const values = [
+        { value: String(index + 1), align: 'right' as const },
+        { value: item.operation || (item.parentLineId ? '' : '—'), align: 'left' as const },
+        { value: description, align: 'left' as const },
+        { value: item.parentLineId ? '' : String(item.quantity), align: 'right' as const },
+        { value: item.parentLineId && !item.unitPrice ? '' : money(item.quantity * item.unitPrice), align: 'right' as const },
+        { value: labor, align: 'right' as const },
+        { value: item.paintHours ? item.paintHours.toFixed(1) : '—', align: 'right' as const },
+      ];
+      let x = 36;
+      for (const [columnIndex, column] of columns.entries()) {
+        const descriptionIndent = columnIndex === 2 && item.parentLineId ? 14 : 4;
+        text(values[columnIndex].value, x + descriptionIndent, y, { size: 9, width: column.width - descriptionIndent - 4, align: values[columnIndex].align });
+        x += column.width;
+      }
+      if (item.note) {
+        text(`Note: ${item.note}`, 52, y + operationRowHeight, { size: 8, color: '#555555', width: width - 24 });
+        doc.moveTo(36, y + rowHeight).lineTo(576, y + rowHeight).lineWidth(.3).stroke('#d5dadd');
+      }
+      y += rowHeight;
+    }
+    y += 10;
+    const totalsAndClosingHeight = 335;
+    if (y + totalsAndClosingHeight > 720) {
+      doc.addPage();
+      y = drawPageHeader(true);
+    }
+    const totals = [
+      ['Parts', 'Parts', '—', partsTotal, false],
+      ['Body Labor', `${estimate.lineItems.reduce((sum, item) => sum + item.laborHours, 0).toFixed(1)} hrs`, `${money(estimate.bodyRate)} / hr`, bodyLabor, false],
+      ['Paint Labor', `${estimate.lineItems.reduce((sum, item) => sum + item.paintHours, 0).toFixed(1)} hrs`, `${money(estimate.paintRate)} / hr`, paintLabor, false],
+      ['Mechanical Labor', `${estimate.lineItems.reduce((sum, item) => sum + item.mechanicHours, 0).toFixed(1)} hrs`, `${money(estimate.mechanicRate)} / hr`, mechanicLabor, false],
+      ['Paint Supplies', `${estimate.lineItems.reduce((sum, item) => sum + item.paintHours, 0).toFixed(1)} hrs`, `${money(estimate.supplyRate)} / hr`, paintSupplies, false],
+      ['Miscellaneous', 'Charges', '—', miscellaneous, false],
+      ['Subtotal', '', '', subtotal, true],
+      ['Sales Tax', money(taxableSubtotal), `${estimate.taxRate}%`, tax, false],
+      ['TOTAL COST OF REPAIRS', '', '', total, true],
+    ] as const;
+    const totalsX = 267;
+    const totalWidths = [120, 64, 67, 58];
+    const totalHeadings = ['Category', 'Basis', 'Rate', 'Cost $'];
+    const totalsWidth = totalWidths.reduce((sum, item) => sum + item, 0);
+    text('ESTIMATE TOTALS', totalsX, y, { size: 10, bold: true, width: totalsWidth, align: 'right' });
+    y += 22;
+    doc.rect(totalsX, y, totalsWidth, 20).fill('#e5e5e5');
+    doc.rect(totalsX, y, totalsWidth, 20).lineWidth(.5).stroke('#777777');
+    let totalX = totalsX;
+    totalHeadings.forEach((heading, index) => {
+      text(heading, totalX + 3, y + 5, { size: 8, bold: true, width: totalWidths[index] - 6, align: index ? 'right' : 'left' });
+      totalX += totalWidths[index];
+    });
+    y += 20;
+    for (const [label, basis, rate, amount, emphasized] of totals) {
+      if (label === 'TOTAL COST OF REPAIRS') {
+        doc.moveTo(totalsX, y - 4).lineTo(totalsX + totalsWidth, y - 4).lineWidth(1).stroke('#444444');
+      }
+      totalX = totalsX;
+      [label, basis, rate, money(amount)].forEach((value, index) => {
+        text(value, totalX + 3, y + 4, { size: emphasized ? 9 : 8.5, bold: emphasized, width: totalWidths[index] - 6, align: index ? 'right' : 'left' });
+        doc.rect(totalX, y, totalWidths[index], 20).lineWidth(.3).stroke('#aaaaaa');
+        totalX += totalWidths[index];
+      });
+      y += 20;
+    }
+    y += 16;
+    text('Labor key: B = Body labor hours   M = Mechanical labor hours   P = Paint hours', 36, y, { size: 8 });
+    y += 14;
+    text('This is an estimate only. Final charges may vary based on additional damage found during teardown, parts availability, or supplemental findings. This estimate is valid for 30 days from the date above.', 36, y, { size: 7, color: '#555555', width });
+    y += 34;
+    if (y > 735) {
+      doc.addPage();
+      y = drawPageHeader(true);
+    }
+    text('Customer Signature: ______________________________    Date: ______________', 36, y, { size: 8 });
+    const pageRange = doc.bufferedPageRange();
+    for (let pageIndex = pageRange.start; pageIndex < pageRange.start + pageRange.count; pageIndex += 1) {
+      doc.switchToPage(pageIndex);
+      doc.moveTo(36, 738).lineTo(576, 738).lineWidth(.4).stroke('#777777');
+      text('Estimate valid 30 days from the date above.', 36, 744, { size: 8, width: 270 });
+      text(`Page ${pageIndex + 1} of ${pageRange.count}`, 306, 744, { size: 8, width: 270, align: 'right' });
+    }
+    doc.end();
   }));
 
   workflowsRouter.post('/estimates', asyncHandler(async (req, res) => {
-    const jobId = requiredText(req.body.jobId, 'jobId');
-    const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
-    if (!job) throw new ApiError(404, 'Job not found');
+    const jobId = optionalText(req.body.jobId, 'jobId');
+    const walkIn = req.body.walkIn;
+    if (walkIn !== undefined && walkIn !== null &&
+      (typeof walkIn !== 'object' || Array.isArray(walkIn))) {
+      throw new ApiError(400, 'walkIn must be an object');
+    }
+    if (jobId && walkIn) throw new ApiError(400, 'Choose either a repair job or walk-in details');
+    if (!jobId && !walkIn) throw new ApiError(400, 'Select a repair job or provide walk-in details');
+    if (jobId) {
+      const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
+      if (!job) throw new ApiError(404, 'Job not found');
+    }
+    const walkInYearValue = walkIn?.vehicleYear;
+    const walkInVehicleYear = walkInYearValue === undefined || walkInYearValue === null || walkInYearValue === ''
+      ? null
+      : Number(walkInYearValue);
+    if (walkInVehicleYear !== null && !Number.isInteger(walkInVehicleYear)) {
+      throw new ApiError(400, 'walkIn.vehicleYear must be an integer');
+    }
+    const walkInCustomerName = walkIn ? requiredText(walkIn.customerName, 'walkIn.customerName') : undefined;
     const lineItems = Array.isArray(req.body.lineItems) ? req.body.lineItems : [];
     if (!lineItems.length) throw new ApiError(400, 'At least one line item is required');
     const taxRate = req.body.taxRate === undefined ? 8.875 : Number(req.body.taxRate);
     if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) throw new ApiError(400, 'taxRate must be between 0 and 100');
-    const bodyRate = Number(req.body.bodyRate ?? 65);
-    const paintRate = Number(req.body.paintRate ?? 65);
-    const supplyRate = Number(req.body.supplyRate ?? 38);
-    if (![bodyRate, paintRate, supplyRate].every((rate) => Number.isFinite(rate) && rate >= 0)) throw new ApiError(400, 'labor rates must be non-negative numbers');
+    const bodyRate = Number(req.body.bodyRate ?? 63);
+    const paintRate = Number(req.body.paintRate ?? 63);
+    const supplyRate = Number(req.body.supplyRate ?? 41);
+    const mechanicRate = Number(req.body.mechanicRate ?? 80);
+    if (![bodyRate, paintRate, supplyRate, mechanicRate].every((rate) => Number.isFinite(rate) && rate >= 0)) throw new ApiError(400, 'labor rates must be non-negative numbers');
+    const vehicleFeatures = req.body.vehicleFeatures ?? [];
+    if (!Array.isArray(vehicleFeatures) || vehicleFeatures.some((feature: unknown) => typeof feature !== 'string')) {
+      throw new ApiError(400, 'vehicleFeatures must be an array of strings');
+    }
     const estimate = await prisma.$transaction(async (tx) => {
-      const created = await tx.estimate.create({ data: { jobId, estimateNumber: optionalText(req.body.estimateNumber, 'estimateNumber'), taxRate, damageSummary: optionalText(req.body.damageSummary, 'damageSummary'), notes: optionalText(req.body.notes, 'notes') } });
-      await tx.estimateLineItem.createMany({ data: lineItems.map((item: Record<string, unknown>) => ({ estimateId: created.id, section: optionalText(item.section, 'section'), operation: optionalText(item.operation, 'operation'), description: requiredText(item.description, 'description'), partNumber: optionalText(item.partNumber, 'partNumber'), quantity: Number(item.quantity ?? 1), unitPrice: Number(item.unitPrice ?? 0), laborHours: Number(item.laborHours ?? 0), paintHours: Number(item.paintHours ?? 0) })) });
-      const savedLines = await tx.estimateLineItem.findMany({ where: { estimateId: created.id } });
-      const subtotal = savedLines.reduce((sum, line) => sum + line.quantity * line.unitPrice + line.laborHours * bodyRate + line.paintHours * (paintRate + supplyRate), 0);
-      return tx.estimate.update({ where: { id: created.id }, data: { totalAmount: subtotal * (1 + taxRate / 100) }, include: { job: { include: { customer: true, vehicle: true } }, lineItems: true } });
+      const estimateNumber = await nextEstimateIdentifier(tx, 'estimateNumber');
+      const workfileId = await nextEstimateIdentifier(tx, 'workfileId');
+      const created = await tx.estimate.create({
+        data: {
+          jobId,
+          estimateNumber,
+          workfileId,
+          walkInCustomerName: walkIn ? walkInCustomerName : null,
+          walkInCustomerAddress: walkIn ? optionalText(walkIn.address, 'walkIn.address') : null,
+          walkInCustomerPhone: walkIn ? optionalText(walkIn.phone, 'walkIn.phone') : null,
+          walkInVehicleYear: walkIn ? walkInVehicleYear : null,
+          walkInVehicleMake: walkIn ? optionalText(walkIn.vehicleMake, 'walkIn.vehicleMake') : null,
+          walkInVehicleModel: walkIn ? optionalText(walkIn.vehicleModel, 'walkIn.vehicleModel') : null,
+          walkInVehicleTrim: walkIn ? optionalText(walkIn.vehicleTrim, 'walkIn.vehicleTrim') : null,
+          walkInVehicleBodyClass: walkIn ? optionalText(walkIn.vehicleBodyClass, 'walkIn.vehicleBodyClass') : null,
+          walkInVehicleVin: walkIn ? optionalText(walkIn.vin, 'walkIn.vin') : null,
+          walkInVehicleLicense: walkIn ? optionalText(walkIn.license, 'walkIn.license') : null,
+          walkInVehicleState: walkIn ? optionalText(walkIn.vehicleState, 'walkIn.vehicleState') : null,
+          taxRate, bodyRate, paintRate, supplyRate, mechanicRate,
+          damageSummary: optionalText(req.body.damageSummary, 'damageSummary'),
+          carrier: optionalText(req.body.carrier, 'carrier'),
+          appraisalCompanyName: optionalText(req.body.appraisalCompanyName, 'appraisalCompanyName'),
+          ownerName: optionalText(req.body.ownerName, 'ownerName'),
+          insuredName: optionalText(req.body.insuredName, 'insuredName'),
+          policyNumber: optionalText(req.body.policyNumber, 'policyNumber'),
+          claimNumber: optionalText(req.body.claimNumber, 'claimNumber'),
+          lossType: optionalText(req.body.lossType, 'lossType'),
+          dateOfLoss: optionalText(req.body.dateOfLoss, 'dateOfLoss'),
+          pointOfImpact: optionalText(req.body.pointOfImpact, 'pointOfImpact'),
+          daysToRepair: optionalText(req.body.daysToRepair, 'daysToRepair'),
+          writtenBy: optionalText(req.body.writtenBy, 'writtenBy'),
+          nyAdjusterLicense: optionalText(req.body.nyAdjusterLicense, 'nyAdjusterLicense'),
+          writtenByPhone: optionalText(req.body.writtenByPhone, 'writtenByPhone'),
+          insuranceAdjuster: optionalText(req.body.insuranceAdjuster, 'insuranceAdjuster'),
+          insuranceAdjusterPhone: optionalText(req.body.insuranceAdjusterPhone, 'insuranceAdjusterPhone'),
+          inspectionLocation: optionalText(req.body.inspectionLocation, 'inspectionLocation'),
+          repairFacility: optionalText(req.body.repairFacility, 'repairFacility'),
+          odometer: optionalText(req.body.odometer, 'odometer'),
+          exteriorColor: optionalText(req.body.exteriorColor, 'exteriorColor'),
+          interiorColor: optionalText(req.body.interiorColor, 'interiorColor'),
+          engine: optionalText(req.body.engine, 'engine'),
+          productionDate: optionalText(req.body.productionDate, 'productionDate'),
+          vehicleCondition: optionalText(req.body.vehicleCondition, 'vehicleCondition'),
+          vehicleFeatures,
+          notes: optionalText(req.body.notes, 'notes'),
+        },
+      });
+      const createdLineIds: string[] = [];
+      for (const [index, item] of lineItems.entries()) {
+        const parentIndex = item.parentIndex;
+        if (parentIndex !== undefined && parentIndex !== null &&
+          (typeof parentIndex !== 'number' || !Number.isInteger(parentIndex) || parentIndex < 0 || parentIndex >= index ||
+            lineItems[parentIndex]?.parentIndex !== undefined && lineItems[parentIndex]?.parentIndex !== null)) {
+          throw new ApiError(400, 'Each sub-line item must reference an earlier main line item');
+        }
+        const line = await tx.estimateLineItem.create({
+          data: {
+            estimateId: created.id,
+            parentLineId: typeof parentIndex === 'number' ? createdLineIds[parentIndex] : null,
+            sortOrder: index,
+            section: optionalText(item.section, 'section'),
+            operation: optionalText(item.operation, 'operation'),
+            description: requiredText(item.description, 'description'),
+            partNumber: optionalText(item.partNumber, 'partNumber'),
+            quantity: Number(item.quantity ?? 1),
+            unitPrice: Number(item.unitPrice ?? 0),
+            laborHours: Number(item.laborHours ?? 0),
+            mechanicHours: Number(item.mechanicHours ?? 0),
+            paintHours: Number(item.paintHours ?? 0),
+            note: optionalText(item.note, 'note'),
+          },
+        });
+        createdLineIds.push(line.id);
+      }
+      const savedLines = await tx.estimateLineItem.findMany({ where: { estimateId: created.id }, orderBy: { sortOrder: 'asc' } });
+      const partsTotal = savedLines.reduce((sum, line) => sum + (isMiscellaneousEstimateLine(line.section) ? 0 : line.quantity * line.unitPrice), 0);
+      const miscellaneous = savedLines.reduce((sum, line) => sum + (isMiscellaneousEstimateLine(line.section) ? line.quantity * line.unitPrice : 0), 0);
+      const taxableSubtotal = savedLines.reduce((sum, line) => sum + line.laborHours * bodyRate + line.mechanicHours * mechanicRate + line.paintHours * (paintRate + supplyRate), partsTotal);
+      const totalAmount = roundCurrency(taxableSubtotal + roundCurrency(taxableSubtotal * taxRate / 100) + miscellaneous);
+      return tx.estimate.update({ where: { id: created.id }, data: { totalAmount }, include: { job: { include: { customer: true, vehicle: true } }, lineItems: { orderBy: { sortOrder: 'asc' } } } });
     });
     res.status(201).json(estimate);
+  }));
+
+  workflowsRouter.put('/estimates/:estimateId', asyncHandler(async (req, res) => {
+    const estimateId = routeParam(req, 'estimateId');
+    const existingEstimate = await prisma.estimate.findUnique({
+      where: { id: estimateId },
+      select: { id: true, estimateNumber: true, workfileId: true },
+    });
+    if (!existingEstimate) throw new ApiError(404, 'Estimate not found');
+
+    const jobId = optionalText(req.body.jobId, 'jobId');
+    const walkIn = req.body.walkIn;
+    if (walkIn !== undefined && walkIn !== null &&
+      (typeof walkIn !== 'object' || Array.isArray(walkIn))) {
+      throw new ApiError(400, 'walkIn must be an object');
+    }
+    if (jobId && walkIn) throw new ApiError(400, 'Choose either a repair job or walk-in details');
+    if (!jobId && !walkIn) throw new ApiError(400, 'Select a repair job or provide walk-in details');
+    if (jobId) {
+      const job = await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } });
+      if (!job) throw new ApiError(404, 'Job not found');
+    }
+    const walkInYearValue = walkIn?.vehicleYear;
+    const walkInVehicleYear = walkInYearValue === undefined || walkInYearValue === null || walkInYearValue === ''
+      ? null
+      : Number(walkInYearValue);
+    if (walkInVehicleYear !== null && !Number.isInteger(walkInVehicleYear)) {
+      throw new ApiError(400, 'walkIn.vehicleYear must be an integer');
+    }
+    const walkInCustomerName = walkIn ? requiredText(walkIn.customerName, 'walkIn.customerName') : undefined;
+    const lineItems = Array.isArray(req.body.lineItems) ? req.body.lineItems : [];
+    if (!lineItems.length) throw new ApiError(400, 'At least one line item is required');
+    const taxRate = req.body.taxRate === undefined ? 8.875 : Number(req.body.taxRate);
+    if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) throw new ApiError(400, 'taxRate must be between 0 and 100');
+    const bodyRate = Number(req.body.bodyRate ?? 63);
+    const paintRate = Number(req.body.paintRate ?? 63);
+    const supplyRate = Number(req.body.supplyRate ?? 41);
+    const mechanicRate = Number(req.body.mechanicRate ?? 80);
+    if (![bodyRate, paintRate, supplyRate, mechanicRate].every((rate) => Number.isFinite(rate) && rate >= 0)) throw new ApiError(400, 'labor rates must be non-negative numbers');
+    const vehicleFeatures = req.body.vehicleFeatures ?? [];
+    if (!Array.isArray(vehicleFeatures) || vehicleFeatures.some((feature: unknown) => typeof feature !== 'string')) {
+      throw new ApiError(400, 'vehicleFeatures must be an array of strings');
+    }
+
+    const estimate = await prisma.$transaction(async (tx) => {
+      await tx.estimate.update({
+        where: { id: estimateId },
+        data: {
+          jobId,
+          estimateNumber: existingEstimate.estimateNumber || await nextEstimateIdentifier(tx, 'estimateNumber'),
+          workfileId: existingEstimate.workfileId || await nextEstimateIdentifier(tx, 'workfileId'),
+          walkInCustomerName: walkIn ? walkInCustomerName : null,
+          walkInCustomerAddress: walkIn ? optionalText(walkIn.address, 'walkIn.address') : null,
+          walkInCustomerPhone: walkIn ? optionalText(walkIn.phone, 'walkIn.phone') : null,
+          walkInVehicleYear: walkIn ? walkInVehicleYear : null,
+          walkInVehicleMake: walkIn ? optionalText(walkIn.vehicleMake, 'walkIn.vehicleMake') : null,
+          walkInVehicleModel: walkIn ? optionalText(walkIn.vehicleModel, 'walkIn.vehicleModel') : null,
+          walkInVehicleTrim: walkIn ? optionalText(walkIn.vehicleTrim, 'walkIn.vehicleTrim') : null,
+          walkInVehicleBodyClass: walkIn ? optionalText(walkIn.vehicleBodyClass, 'walkIn.vehicleBodyClass') : null,
+          walkInVehicleVin: walkIn ? optionalText(walkIn.vin, 'walkIn.vin') : null,
+          walkInVehicleLicense: walkIn ? optionalText(walkIn.license, 'walkIn.license') : null,
+          walkInVehicleState: walkIn ? optionalText(walkIn.vehicleState, 'walkIn.vehicleState') : null,
+          taxRate, bodyRate, paintRate, supplyRate, mechanicRate,
+          damageSummary: optionalText(req.body.damageSummary, 'damageSummary'),
+          carrier: optionalText(req.body.carrier, 'carrier'),
+          appraisalCompanyName: optionalText(req.body.appraisalCompanyName, 'appraisalCompanyName'),
+          ownerName: optionalText(req.body.ownerName, 'ownerName'),
+          insuredName: optionalText(req.body.insuredName, 'insuredName'),
+          policyNumber: optionalText(req.body.policyNumber, 'policyNumber'),
+          claimNumber: optionalText(req.body.claimNumber, 'claimNumber'),
+          lossType: optionalText(req.body.lossType, 'lossType'),
+          dateOfLoss: optionalText(req.body.dateOfLoss, 'dateOfLoss'),
+          pointOfImpact: optionalText(req.body.pointOfImpact, 'pointOfImpact'),
+          daysToRepair: optionalText(req.body.daysToRepair, 'daysToRepair'),
+          writtenBy: optionalText(req.body.writtenBy, 'writtenBy'),
+          nyAdjusterLicense: optionalText(req.body.nyAdjusterLicense, 'nyAdjusterLicense'),
+          writtenByPhone: optionalText(req.body.writtenByPhone, 'writtenByPhone'),
+          insuranceAdjuster: optionalText(req.body.insuranceAdjuster, 'insuranceAdjuster'),
+          insuranceAdjusterPhone: optionalText(req.body.insuranceAdjusterPhone, 'insuranceAdjusterPhone'),
+          inspectionLocation: optionalText(req.body.inspectionLocation, 'inspectionLocation'),
+          repairFacility: optionalText(req.body.repairFacility, 'repairFacility'),
+          odometer: optionalText(req.body.odometer, 'odometer'),
+          exteriorColor: optionalText(req.body.exteriorColor, 'exteriorColor'),
+          interiorColor: optionalText(req.body.interiorColor, 'interiorColor'),
+          engine: optionalText(req.body.engine, 'engine'),
+          productionDate: optionalText(req.body.productionDate, 'productionDate'),
+          vehicleCondition: optionalText(req.body.vehicleCondition, 'vehicleCondition'),
+          vehicleFeatures,
+          notes: optionalText(req.body.notes, 'notes'),
+        },
+      });
+      await tx.estimateLineItem.deleteMany({ where: { estimateId } });
+      const lineIds: string[] = [];
+      for (const [index, item] of lineItems.entries()) {
+        const parentIndex = item.parentIndex;
+        if (parentIndex !== undefined && parentIndex !== null &&
+          (typeof parentIndex !== 'number' || !Number.isInteger(parentIndex) || parentIndex < 0 || parentIndex >= index ||
+            lineItems[parentIndex]?.parentIndex !== undefined && lineItems[parentIndex]?.parentIndex !== null)) {
+          throw new ApiError(400, 'Each sub-line item must reference an earlier main line item');
+        }
+        const line = await tx.estimateLineItem.create({
+          data: {
+            estimateId,
+            parentLineId: typeof parentIndex === 'number' ? lineIds[parentIndex] : null,
+            sortOrder: index,
+            section: optionalText(item.section, 'section'),
+            operation: optionalText(item.operation, 'operation'),
+            description: requiredText(item.description, 'description'),
+            partNumber: optionalText(item.partNumber, 'partNumber'),
+            quantity: Number(item.quantity ?? 1),
+            unitPrice: Number(item.unitPrice ?? 0),
+            laborHours: Number(item.laborHours ?? 0),
+            mechanicHours: Number(item.mechanicHours ?? 0),
+            paintHours: Number(item.paintHours ?? 0),
+            note: optionalText(item.note, 'note'),
+          },
+        });
+        lineIds.push(line.id);
+      }
+      const savedLines = await tx.estimateLineItem.findMany({
+        where: { estimateId },
+        orderBy: { sortOrder: 'asc' },
+      });
+      const partsTotal = savedLines.reduce((sum, line) =>
+        sum + (isMiscellaneousEstimateLine(line.section) ? 0 : line.quantity * line.unitPrice), 0);
+      const miscellaneous = savedLines.reduce((sum, line) =>
+        sum + (isMiscellaneousEstimateLine(line.section) ? line.quantity * line.unitPrice : 0), 0);
+      const taxableSubtotal = savedLines.reduce((sum, line) =>
+        sum + line.laborHours * bodyRate + line.mechanicHours * mechanicRate +
+          line.paintHours * (paintRate + supplyRate), partsTotal);
+      const totalAmount = roundCurrency(
+        taxableSubtotal + roundCurrency(taxableSubtotal * taxRate / 100) + miscellaneous,
+      );
+      return tx.estimate.update({
+        where: { id: estimateId },
+        data: { totalAmount },
+        include: {
+          job: { include: { customer: true, vehicle: true, claim: true } },
+          lineItems: { orderBy: { sortOrder: 'asc' } },
+        },
+      });
+    });
+    res.json(estimate);
   }));
 
   workflowsRouter.delete('/estimates/:estimateId', asyncHandler(async (req, res) => {
@@ -326,7 +890,7 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
 
   workflowsRouter.post('/jobs', asyncHandler(async (req, res) => {
     const customerId = requiredText(req.body.customerId, 'customerId');
-    const jobNumber = requiredText(req.body.jobNumber, 'jobNumber');
+    const requestedJobNumber = optionalText(req.body.jobNumber, 'jobNumber');
     const vehicleId = optionalText(req.body.vehicleId, 'vehicleId');
     const claimId = optionalText(req.body.claimId, 'claimId');
     await ensureCustomer(prisma, customerId);
@@ -336,9 +900,12 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
       const claim = await prisma.claim.findUnique({ where: { id: claimId }, select: { vehicleId: true } });
       if (claim?.vehicleId && claim.vehicleId !== vehicleId) throw new ApiError(400, 'vehicleId must match the vehicle on claimId');
     }
-    const job = await prisma.job.create({
-      data: { customerId, jobNumber, vehicleId, claimId, status: optionalText(req.body.status, 'status') || 'new', notes: optionalText(req.body.notes, 'notes') },
-      include: { customer: true, vehicle: true, claim: true },
+    const job = await prisma.$transaction(async (tx) => {
+      const jobNumber = requestedJobNumber || `JOB-${String((await tx.$queryRaw<Array<{ number: bigint }>>`SELECT nextval('job_number_seq') AS number`)[0].number).padStart(3, '0')}`;
+      return tx.job.create({
+        data: { customerId, jobNumber, vehicleId, claimId, status: optionalText(req.body.status, 'status') || 'new', notes: optionalText(req.body.notes, 'notes') },
+        include: { customer: true, vehicle: true, claim: true },
+      });
     });
     res.status(201).json(job);
   }));
@@ -460,6 +1027,13 @@ function buildClaimData(body: Record<string, unknown>, customerId: string, vehic
     adjusterEmail: optionalText(body.adjusterEmail, 'adjusterEmail'), claimStatus: optionalText(body.status ?? body.claimStatus, 'status') || undefined, dateSubmitted: optionalDate(body.dateSubmitted, 'dateSubmitted'), notes: optionalText(body.notes, 'notes'),
     adjusterVisitAt: optionalDate(body.adjusterVisitAt, 'adjusterVisitAt'),
   };
+}
+
+async function nextEstimateIdentifier(tx: Prisma.TransactionClient, field: 'estimateNumber' | 'workfileId') {
+  const sequenceValue = field === 'estimateNumber'
+    ? (await tx.$queryRaw<Array<{ number: bigint }>>`SELECT nextval('estimate_number_seq') AS number`)[0].number
+    : (await tx.$queryRaw<Array<{ number: bigint }>>`SELECT nextval('workfile_id_seq') AS number`)[0].number;
+  return `${field === 'estimateNumber' ? 'EST' : 'WF'}-${String(sequenceValue).padStart(6, '0')}`;
 }
 
 function routeParam(req: { params: Record<string, string | string[]> }, name: string) {

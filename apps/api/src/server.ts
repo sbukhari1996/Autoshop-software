@@ -9,6 +9,7 @@ import { createAuthRouter } from './routes/auth.js';
 import { createOperationsRouter } from './routes/operations.js';
 import { createFinanceRouter } from './routes/finance.js';
 import { createInvoicesRouter } from './routes/invoices.js';
+import { createTodosRouter } from './routes/todos.js';
 import { protectMutations } from './auth.js';
 import { errorHandler } from './errors.js';
 import { ensureDefaultAdmin } from './seed.js';
@@ -27,6 +28,7 @@ app.use('/api', createWorkflowsRouter(prisma));
 app.use('/api', createOperationsRouter(prisma));
 app.use('/api/finance', createFinanceRouter(prisma));
 app.use('/api/invoices', createInvoicesRouter(prisma));
+app.use('/api/todos', createTodosRouter(prisma));
 
 app.get('/api/health', (_req, res) => {
   res.json({

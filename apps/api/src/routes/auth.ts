@@ -24,6 +24,18 @@ export function createAuthRouter(prisma: PrismaClient) {
     res.json({ user: publicUser(user), token: signToken({ sub: user.id, email: user.email, role: user.role }) });
   }));
 
+  router.post('/change-password', requireAuth, asyncHandler(async (req, res) => {
+    const authUser = res.locals.user as AuthUser;
+    const currentPassword = requiredText(req.body.currentPassword, 'currentPassword');
+    const newPassword = requiredText(req.body.newPassword, 'newPassword');
+    if (newPassword.length < 8) throw new ApiError(400, 'New password must be at least 8 characters');
+    const user = await prisma.user.findUnique({ where: { id: authUser.sub } });
+    if (!user) throw new ApiError(401, 'Authentication required');
+    if (!(await verifyPassword(currentPassword, user.password))) throw new ApiError(400, 'Current password is incorrect');
+    await prisma.user.update({ where: { id: user.id }, data: { password: await hashPassword(newPassword) } });
+    res.json({ message: 'Password changed successfully' });
+  }));
+
   router.get('/session', requireAuth, asyncHandler(async (_req, res) => {
     const authUser = res.locals.user as AuthUser;
     const user = await prisma.user.findUnique({ where: { id: authUser.sub } });

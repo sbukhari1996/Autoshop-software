@@ -52,6 +52,23 @@ export function createCustomersRouter(prisma: PrismaClient) {
       res.json(customer);
   }));
 
+  customersRouter.patch('/:id', asyncHandler(async (req, res) => {
+    const customerId = requiredText(req.params.id, 'id');
+    const existing = await prisma.customer.findUnique({ where: { id: customerId }, select: { id: true } });
+    if (!existing) throw new ApiError(404, 'Customer not found');
+    const customer = await prisma.customer.update({
+      where: { id: customerId },
+      data: {
+        firstName: req.body.firstName === undefined ? undefined : requiredText(req.body.firstName, 'firstName'),
+        lastName: req.body.lastName === undefined ? undefined : requiredText(req.body.lastName, 'lastName'),
+        phone: req.body.phone === undefined ? undefined : optionalText(req.body.phone, 'phone'),
+        email: req.body.email === undefined ? undefined : optionalText(req.body.email, 'email'),
+        address: req.body.address === undefined ? undefined : optionalText(req.body.address, 'address'),
+      },
+    });
+    res.json(customer);
+  }));
+
   customersRouter.delete('/:id', asyncHandler(async (req, res) => {
     const customerId = requiredText(req.params.id, 'id');
     const customer = await prisma.customer.findUnique({

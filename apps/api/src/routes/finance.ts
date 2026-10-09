@@ -46,17 +46,13 @@ export function createFinanceRouter(prisma: PrismaClient) {
       const employee = await transaction.employee.findUnique({ where: { id: employeeId } });
       if (!employee) throw new ApiError(404, 'Employee not found');
       const createdPayment = await transaction.payrollPayment.create({ data: { employeeId, amount, paymentDate, paymentMethod: optionalText(req.body.paymentMethod, 'paymentMethod'), notes: optionalText(req.body.notes, 'notes') } });
-      await transaction.financeEntry.create({ data: { type: 'expense', amount, description: `Payroll payment - ${employee.name}`, category: 'Payroll & Wages', sourceReference: `payroll-payment:${createdPayment.id}`, notes: createdPayment.notes, paymentMethod: createdPayment.paymentMethod, entryDate: paymentDate } });
       return createdPayment;
     });
     res.status(201).json(payment);
   }));
   router.delete('/payments/:id', asyncHandler(async (req, res) => {
     const id = requiredText(req.params.id, 'id');
-    await prisma.$transaction(async (transaction) => {
-      await transaction.financeEntry.deleteMany({ where: { sourceReference: `payroll-payment:${id}` } });
-      await transaction.payrollPayment.delete({ where: { id } });
-    });
+    await prisma.payrollPayment.delete({ where: { id } });
     res.status(204).send();
   }));
   router.get('/rentals', asyncHandler(async (_req, res) => {
@@ -94,41 +90,29 @@ export function createFinanceRouter(prisma: PrismaClient) {
       const tenant = await transaction.rentalTenant.findUnique({ where: { id: tenantId } });
       if (!tenant) throw new ApiError(404, 'Rental tenant not found');
       const createdPayment = await transaction.rentalPayment.create({ data: { tenantId, type, amount, paymentDate, paymentMethod: optionalText(req.body.paymentMethod, 'paymentMethod'), notes: optionalText(req.body.notes, 'notes') } });
-      await transaction.financeEntry.create({ data: { type: 'income', amount, description: `${type === 'rent' ? 'Shop rent' : 'Shared expense'} - ${tenant.name}`, category: 'Rental Income', sourceReference: `rental-payment:${createdPayment.id}`, notes: createdPayment.notes, paymentMethod: createdPayment.paymentMethod, entryDate: paymentDate } });
       return createdPayment;
     });
     res.status(201).json(payment);
   }));
   router.delete('/rental-payments/:id', asyncHandler(async (req, res) => {
     const id = requiredText(req.params.id, 'id');
-    await prisma.$transaction(async (transaction) => {
-      await transaction.financeEntry.deleteMany({ where: { sourceReference: `rental-payment:${id}` } });
-      await transaction.rentalPayment.delete({ where: { id } });
-    });
+    await prisma.rentalPayment.delete({ where: { id } });
     res.status(204).send();
   }));
   router.get('/entries', asyncHandler(async (req, res) => {
-    const entries = await prisma.financeEntry.findMany({ orderBy: { entryDate: 'desc' }, include: { job: { select: { id: true, jobNumber: true } }, claim: { select: { id: true, claimNumber: true } }, documents: { orderBy: { createdAt: 'desc' } } } });
+    const entries = await prisma.financeEntry.findMany({ orderBy: { entryDate: 'desc' }, include: { documents: { orderBy: { createdAt: 'desc' } } } });
     res.json(entries);
   }));
   router.post('/entries', asyncHandler(async (req, res) => {
     const type = validate(req.body.type, entryTypes, 'type');
     const amount = positive(req.body.amount);
-    const jobId = optionalText(req.body.jobId, 'jobId'); const claimId = optionalText(req.body.claimId, 'claimId');
-    if (jobId && !(await prisma.job.findUnique({ where: { id: jobId } }))) throw new ApiError(404, 'Job not found');
-    if (claimId && !(await prisma.claim.findUnique({ where: { id: claimId } }))) throw new ApiError(404, 'Claim not found');
-    const entry = await prisma.financeEntry.create({ data: { type, amount, description: requiredText(req.body.description, 'description'), category: optionalText(req.body.category, 'category'), paymentMethod: req.body.paymentMethod === undefined ? null : validate(req.body.paymentMethod, paymentMethods, 'paymentMethod'), entryDate: req.body.entryDate ? date(req.body.entryDate, 'entryDate') : new Date(), jobId, claimId, documentId: optionalText(req.body.documentId, 'documentId'), notes: optionalText(req.body.notes, 'notes') } });
+    const entry = await prisma.financeEntry.create({ data: { type, amount, description: requiredText(req.body.description, 'description'), category: optionalText(req.body.category, 'category'), paymentMethod: req.body.paymentMethod === undefined ? null : validate(req.body.paymentMethod, paymentMethods, 'paymentMethod'), entryDate: req.body.entryDate ? date(req.body.entryDate, 'entryDate') : new Date(), documentId: optionalText(req.body.documentId, 'documentId'), notes: optionalText(req.body.notes, 'notes') } });
     res.status(201).json(entry);
   }));
   router.patch('/entries/:id', asyncHandler(async (req, res) => {
     const id = requiredText(req.params.id, 'id');
     const existing = await prisma.financeEntry.findUnique({ where: { id } });
     if (!existing) throw new ApiError(404, 'Ledger entry not found');
-    if (existing.sourceReference) throw new ApiError(409, 'Edit this synced entry from its original payroll, rental, or job expense record');
-    const jobId = req.body.jobId === undefined ? undefined : optionalText(req.body.jobId, 'jobId');
-    const claimId = req.body.claimId === undefined ? undefined : optionalText(req.body.claimId, 'claimId');
-    if (jobId && !(await prisma.job.findUnique({ where: { id: jobId }, select: { id: true } }))) throw new ApiError(404, 'Job not found');
-    if (claimId && !(await prisma.claim.findUnique({ where: { id: claimId }, select: { id: true } }))) throw new ApiError(404, 'Claim not found');
     const entry = await prisma.financeEntry.update({
       where: { id },
       data: {
@@ -138,8 +122,8 @@ export function createFinanceRouter(prisma: PrismaClient) {
         category: req.body.category === undefined ? undefined : optionalText(req.body.category, 'category'),
         paymentMethod: req.body.paymentMethod === undefined ? undefined : validate(req.body.paymentMethod, paymentMethods, 'paymentMethod'),
         entryDate: req.body.entryDate === undefined ? undefined : date(req.body.entryDate, 'entryDate'),
-        jobId,
-        claimId,
+        jobId: null,
+        claimId: null,
         notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'),
       },
     });
@@ -149,7 +133,6 @@ export function createFinanceRouter(prisma: PrismaClient) {
     const id = requiredText(req.params.id, 'id');
     const entry = await prisma.financeEntry.findUnique({ where: { id }, include: { documents: true } });
     if (!entry) throw new ApiError(404, 'Ledger entry not found');
-    if (entry.sourceReference) throw new ApiError(409, 'Delete this synced entry from its original payroll, rental, or job expense record');
     for (const document of entry.documents) await removeStoredFile(document.filePath);
     await prisma.financeEntry.delete({ where: { id } });
     res.status(204).send();
@@ -191,9 +174,42 @@ export function createFinanceRouter(prisma: PrismaClient) {
     await prisma.financeEntryDocument.delete({ where: { id: documentId } });
     res.status(204).send();
   }));
-  router.get('/recurring', asyncHandler(async (_req, res) => { res.json(await prisma.recurringExpense.findMany({ orderBy: [{ active: 'desc' }, { name: 'asc' }] })); }));
+  router.get('/recurring', asyncHandler(async (_req, res) => { res.json(await prisma.recurringExpense.findMany({ orderBy: [{ active: 'desc' }, { name: 'asc' }], include: { payments: { orderBy: { period: 'desc' } } } })); }));
   router.post('/recurring', asyncHandler(async (req, res) => { const item = await prisma.recurringExpense.create({ data: { name: requiredText(req.body.name, 'name'), amount: positive(req.body.amount), category: optionalText(req.body.category, 'category'), frequency: validate(req.body.frequency || 'monthly', frequencies, 'frequency'), startDate: date(req.body.startDate, 'startDate'), endDate: req.body.endDate ? date(req.body.endDate, 'endDate') : undefined, active: req.body.active === undefined ? true : Boolean(req.body.active), notes: optionalText(req.body.notes, 'notes') } }); res.status(201).json(item); }));
-  router.patch('/recurring/:id', asyncHandler(async (req, res) => { const item = await prisma.recurringExpense.update({ where: { id: requiredText(req.params.id, 'id') }, data: { name: req.body.name === undefined ? undefined : requiredText(req.body.name, 'name'), amount: req.body.amount === undefined ? undefined : positive(req.body.amount), frequency: req.body.frequency === undefined ? undefined : validate(req.body.frequency, frequencies, 'frequency'), category: req.body.category === undefined ? undefined : optionalText(req.body.category, 'category'), active: req.body.active === undefined ? undefined : Boolean(req.body.active), endDate: req.body.endDate === undefined ? undefined : (req.body.endDate ? date(req.body.endDate, 'endDate') : null), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes') } }); res.json(item); }));
+  router.post('/recurring/:id/payments', asyncHandler(async (req, res) => {
+    const recurringExpenseId = requiredText(req.params.id, 'id');
+    const period = requiredText(req.body.period, 'period');
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) throw new ApiError(400, 'period must be YYYY-MM');
+    const recurring = await prisma.recurringExpense.findUnique({
+      where: { id: recurringExpenseId },
+      select: { id: true, amount: true, frequency: true, startDate: true, endDate: true, active: true },
+    });
+    if (!recurring) throw new ApiError(404, 'Recurring expense not found');
+    if (!recurring.active) throw new ApiError(409, 'Paused recurring expenses cannot be marked paid');
+    const amount = recurringAmountInMonth(recurring, period);
+    if (amount <= 0) throw new ApiError(400, 'This recurring expense is not scheduled for that month');
+    try {
+      const payment = await prisma.recurringExpensePayment.create({
+        data: { recurringExpenseId, period, amount },
+      });
+      res.status(201).json(payment);
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ApiError(409, 'This recurring expense is already marked paid for that month');
+      }
+      throw error;
+    }
+  }));
+  router.delete('/recurring/:id/payments/:paymentId', asyncHandler(async (req, res) => {
+    const payment = await prisma.recurringExpensePayment.findFirst({
+      where: { id: requiredText(req.params.paymentId, 'paymentId'), recurringExpenseId: requiredText(req.params.id, 'id') },
+      select: { id: true },
+    });
+    if (!payment) throw new ApiError(404, 'Recurring expense payment not found');
+    await prisma.recurringExpensePayment.delete({ where: { id: payment.id } });
+    res.status(204).send();
+  }));
+  router.patch('/recurring/:id', asyncHandler(async (req, res) => { const item = await prisma.recurringExpense.update({ where: { id: requiredText(req.params.id, 'id') }, data: { name: req.body.name === undefined ? undefined : requiredText(req.body.name, 'name'), amount: req.body.amount === undefined ? undefined : positive(req.body.amount), frequency: req.body.frequency === undefined ? undefined : validate(req.body.frequency, frequencies, 'frequency'), category: req.body.category === undefined ? undefined : optionalText(req.body.category, 'category'), startDate: req.body.startDate === undefined ? undefined : date(req.body.startDate, 'startDate'), active: req.body.active === undefined ? undefined : Boolean(req.body.active), endDate: req.body.endDate === undefined ? undefined : (req.body.endDate ? date(req.body.endDate, 'endDate') : null), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes') } }); res.json(item); }));
   router.delete('/recurring/:id', asyncHandler(async (req, res) => { await prisma.recurringExpense.delete({ where: { id: requiredText(req.params.id, 'id') } }); res.status(204).send(); }));
   router.get('/bank-balance', asyncHandler(async (_req, res) => {
     const account = await prisma.bankAccount.upsert({ where: { id: 'default' }, update: {}, create: { id: 'default' } });
@@ -204,7 +220,15 @@ export function createFinanceRouter(prisma: PrismaClient) {
     const account = await prisma.bankAccount.upsert({ where: { id: 'default' }, update: { startingBalance }, create: { id: 'default', startingBalance } });
     res.json(await calculateBankBalance(prisma, account.startingBalance));
   }));
-  router.get('/summary', asyncHandler(async (req, res) => { const period = String(req.query.period || 'month'); if (!['week', 'month', 'year'].includes(period)) throw new ApiError(400, 'period must be week, month, or year'); const anchor = req.query.date ? date(req.query.date, 'date') : new Date(); const from = startOf(anchor, period); const to = endOf(from, period); const [entries, jobs] = await Promise.all([prisma.financeEntry.findMany({ where: { entryDate: { gte: from, lte: to } } }), prisma.jobExpense.findMany({ where: { expenseDate: { gte: from, lte: to } } })]); const income = entries.filter((e) => e.type === 'income').reduce((s, e) => s + e.amount, 0); const general = entries.filter((e) => e.type === 'expense' && !e.jobId).reduce((s, e) => s + e.amount, 0); const syncedExpenseIds = new Set(entries.filter((e) => e.sourceReference?.startsWith('job-expense:')).map((e) => e.sourceReference!.slice('job-expense:'.length))); const jobExpenses = jobs.filter((e) => !syncedExpenseIds.has(e.id)).reduce((s, e) => s + e.amount, 0) + entries.filter((e) => e.type === 'expense' && Boolean(e.jobId)).reduce((s, e) => s + e.amount, 0); res.json({ period, from, to, income, generalExpenses: general, jobExpenses, expenses: general + jobExpenses, net: income - general - jobExpenses }); }));
+  router.get('/summary', asyncHandler(async (req, res) => {
+    const period = String(req.query.period || 'month');
+    if (!['week', 'month', 'year'].includes(period)) throw new ApiError(400, 'period must be week, month, or year');
+    const anchor = req.query.date ? date(req.query.date, 'date') : new Date();
+    const from = startOf(anchor, period);
+    const to = endOf(from, period);
+    const totals = await calculatePeriodSummary(prisma, from, new Date(to.getTime() + 1));
+    res.json({ period, from, to, ...totals });
+  }));
   router.get('/forecast', asyncHandler(async (req, res) => { const year = Number(req.query.year || new Date().getFullYear()); if (!Number.isInteger(year) || year < 2000 || year > 2200) throw new ApiError(400, 'year must be valid'); const from = new Date(Date.UTC(year, 0, 1)); const to = new Date(Date.UTC(year + 1, 0, 1)); const priorFrom = new Date(Date.UTC(year - 1, 0, 1)); const [current, prior, recurring] = await Promise.all([prisma.financeEntry.findMany({ where: { entryDate: { gte: from, lt: to } } }), prisma.financeEntry.findMany({ where: { entryDate: { gte: priorFrom, lt: from } } }), prisma.recurringExpense.findMany({ where: { active: true, startDate: { lt: to }, OR: [{ endDate: null }, { endDate: { gte: from } }] } })]); const sum = (items: typeof current, type: string) => items.filter((item) => item.type === type).reduce((total, item) => total + item.amount, 0); const recurringAnnual = recurring.reduce((total, item) => total + item.amount * (item.frequency === 'weekly' ? 52 : item.frequency === 'yearly' ? 1 : 12), 0); res.json({ year, income: sum(current, 'income'), expenses: sum(current, 'expense'), priorYearIncome: sum(prior, 'income'), priorYearExpenses: sum(prior, 'expense'), recurringAnnual, projectedExpenses: sum(current, 'expense') + recurringAnnual, recurring }); }));
   router.get('/range', asyncHandler(async (req, res) => {
     const months = Math.min(12, Math.max(1, Number(req.query.months || 3)));
@@ -212,10 +236,8 @@ export function createFinanceRouter(prisma: PrismaClient) {
     const anchor = req.query.date ? date(req.query.date, 'date') : new Date();
     const from = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() - months + 1, 1));
     const to = new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + 1, 1));
-    const entries = await prisma.financeEntry.findMany({ where: { entryDate: { gte: from, lt: to } } });
-    const income = entries.filter((entry) => entry.type === 'income').reduce((total, entry) => total + entry.amount, 0);
-    const expenses = entries.filter((entry) => entry.type === 'expense').reduce((total, entry) => total + entry.amount, 0);
-    res.json({ months, from, to, income, expenses, net: income - expenses });
+    const totals = await calculatePeriodSummary(prisma, from, to);
+    res.json({ months, from, to, ...totals });
   }));
   return router;
 }
@@ -223,6 +245,13 @@ function date(value: unknown, field: string) { const result = new Date(String(va
 function positive(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result <= 0) throw new ApiError(400, 'amount must be a positive number'); return result; }
 function nonNegative(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result < 0) throw new ApiError(400, 'startingBalance must be zero or greater'); return result; }
 function nonNegativeWeeklyRate(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result < 0) throw new ApiError(400, 'weeklyRate must be zero or greater'); return result; }
+async function calculatePeriodSummary(prisma: PrismaClient, from: Date, toExclusive: Date) {
+  const entries = await prisma.financeEntry.findMany({ where: { entryDate: { gte: from, lt: toExclusive } } });
+  const income = roundMoney(entries.filter((entry) => entry.type === 'income').reduce((total, entry) => total + entry.amount, 0));
+  const expenses = roundMoney(entries.filter((entry) => entry.type === 'expense').reduce((total, entry) => total + entry.amount, 0));
+  return { income, generalExpenses: expenses, jobExpenses: 0, expenses, net: roundMoney(income - expenses) };
+}
+function roundMoney(value: number) { return Math.round((value + Number.EPSILON) * 100) / 100; }
 async function sendStoredFile(res: { type: (value: string) => { send: (value: Buffer) => void } }, filePath: string, fileName: string) {
   const resolvedPath = path.resolve(process.cwd(), filePath);
   const relativePath = path.relative(uploadDirectory, resolvedPath);
@@ -263,6 +292,36 @@ function rentalTenantData(body: Record<string, unknown>, partial = false): Prism
   };
 }
 function nonNegativeRent(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result < 0) throw new ApiError(400, 'rentAmount must be zero or greater'); return result; }
+function recurringAmountInMonth(item: { amount: number; frequency: string; startDate: Date; endDate: Date | null }, period: string) {
+  const [year, month] = period.split('-').map(Number);
+  const monthStart = Date.UTC(year, month - 1, 1);
+  const monthEnd = Date.UTC(year, month, 0);
+  const start = Date.UTC(item.startDate.getUTCFullYear(), item.startDate.getUTCMonth(), item.startDate.getUTCDate());
+  const end = item.endDate
+    ? Date.UTC(item.endDate.getUTCFullYear(), item.endDate.getUTCMonth(), item.endDate.getUTCDate())
+    : monthEnd;
+  const lowerBound = Math.max(monthStart, start);
+  const upperBound = Math.min(monthEnd, end);
+  if (lowerBound > upperBound) return 0;
+  if (item.frequency === 'yearly') {
+    if (month - 1 !== item.startDate.getUTCMonth()) return 0;
+    const dueDate = Date.UTC(year, month - 1, Math.min(item.startDate.getUTCDate(), new Date(Date.UTC(year, month, 0)).getUTCDate()));
+    return dueDate >= lowerBound && dueDate <= upperBound ? item.amount : 0;
+  }
+  if (item.frequency === 'monthly') {
+    const dueDate = Date.UTC(year, month - 1, Math.min(item.startDate.getUTCDate(), new Date(Date.UTC(year, month, 0)).getUTCDate()));
+    return dueDate >= lowerBound && dueDate <= upperBound ? item.amount : 0;
+  }
+  const dayInMilliseconds = 24 * 60 * 60 * 1000;
+  let dueDate = start;
+  if (dueDate < lowerBound) dueDate += Math.ceil((lowerBound - dueDate) / (7 * dayInMilliseconds)) * 7 * dayInMilliseconds;
+  let occurrences = 0;
+  while (dueDate <= upperBound) {
+    occurrences += 1;
+    dueDate += 7 * dayInMilliseconds;
+  }
+  return item.amount * occurrences;
+}
 function validate<T extends readonly string[]>(value: unknown, values: T, field: string) { const result = requiredText(value, field); if (!values.includes(result)) throw new ApiError(400, `${field} is invalid`); return result; }
 function fullPeriodsElapsed(startDate: Date, asOf: Date, frequency: string) {
   if (asOf < startDate) return 0;
