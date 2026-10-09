@@ -412,6 +412,10 @@ model Invoice {
   id          String   @id @default(cuid())
   invoiceNumber String  @unique
   customerId  String?
+  customerName String?
+  customerPhone String?
+  customerEmail String?
+  customerAddress String?
   jobId       String?
   claimId     String?
   status      String   @default("draft")

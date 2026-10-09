@@ -52,6 +52,14 @@ On Windows, the app is available locally at http://localhost:5173. To share it p
 
 The backup task creates a verified PostgreSQL archive and a separate uploaded-files archive daily at 2:00 AM. Backups are not automatically pruned. Docker Desktop must be running and the Windows user must be signed in when the task runs; missed runs start when available. Check `E:\AutoshopBackups\Postgres\backup.log` for backup runs and `startup.log` for app restarts.
 
+To preview invoice PDF changes without replacing the current frontend/API, start the separate local test instance:
+
+```powershell
+docker compose -f docker-compose.invoice-test.yml up -d --build
+```
+
+Open http://localhost:5174 and sign in with an existing account. The test API uses the same database, authentication secret, and uploads volume as the main local instance; it does not run migrations or seed/update an admin account. Changes made to invoices, payments, customers, or uploaded documents in the test instance affect the shared data. Stop the test instance with `docker compose -f docker-compose.invoice-test.yml down` (do not add `-v`).
+
 ### Authentication and organizations
 
 Sign in and account registration use the app's local email/password authentication at `/api/auth/login` and `/api/auth/register`. Passwords are hashed by the API and authenticated users receive an app-managed token. Authenticated users can inspect their current context with `GET /api/auth/session`, create an organization with `POST /api/auth/organizations`, and switch organizations with `POST /api/auth/organizations/:organizationId/select`. Write requests require an authenticated membership.

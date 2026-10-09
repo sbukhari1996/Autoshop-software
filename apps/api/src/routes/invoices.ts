@@ -60,7 +60,7 @@ export function createInvoicesRouter(prisma: PrismaClient) {
     const lineItems = parseLineItems(req.body.lineItems);
     const invoice = await prisma.$transaction(async (tx) => {
       const totals = totalsFor(lineItems, req.body.taxRate);
-      return tx.invoice.create({ data: { invoiceNumber: optionalText(req.body.invoiceNumber, 'invoiceNumber') || `INV-${Date.now()}-${randomUUID().slice(0, 8)}`, customerId: links.customerId, jobId: links.jobId, claimId: links.claimId, status: req.body.status === undefined ? 'draft' : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate ? parseDate(req.body.issueDate, 'issueDate') : new Date(), dueDate: req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : undefined, subtotal: totals.subtotal, tax: totals.tax, total: totals.total, amountPaid: 0, balanceDue: totals.total, notes: optionalText(req.body.notes, 'notes'), lineItems: { create: lineItems } }, include: { lineItems: true, payments: true } });
+      return tx.invoice.create({ data: { invoiceNumber: optionalText(req.body.invoiceNumber, 'invoiceNumber') || `INV-${Date.now()}-${randomUUID().slice(0, 8)}`, customerId: links.customerId, customerName: links.customerId ? null : optionalText(req.body.customerName, 'customerName'), customerPhone: links.customerId ? null : optionalText(req.body.customerPhone, 'customerPhone'), customerEmail: links.customerId ? null : optionalText(req.body.customerEmail, 'customerEmail'), customerAddress: links.customerId ? null : optionalText(req.body.customerAddress, 'customerAddress'), jobId: links.jobId, claimId: links.claimId, status: req.body.status === undefined ? 'draft' : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate ? parseDate(req.body.issueDate, 'issueDate') : new Date(), dueDate: req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : undefined, subtotal: totals.subtotal, tax: totals.tax, total: totals.total, amountPaid: 0, balanceDue: totals.total, notes: optionalText(req.body.notes, 'notes'), lineItems: { create: lineItems } }, include: { lineItems: true, payments: true } });
     });
     res.status(201).json(invoice);
   }));
@@ -93,7 +93,7 @@ export function createInvoicesRouter(prisma: PrismaClient) {
       if (lineItems) await tx.invoiceLineItem.deleteMany({ where: { invoiceId: id } });
       const amountPaid = existing.amountPaid;
       const total = totals?.total ?? existing.total;
-      return tx.invoice.update({ where: { id }, data: { customerId: links.customerId, jobId: links.jobId, claimId: links.claimId, status: req.body.status === undefined ? undefined : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate === undefined ? undefined : parseDate(req.body.issueDate, 'issueDate'), dueDate: req.body.dueDate === undefined ? undefined : (req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : null), subtotal: totals?.subtotal, tax: totals?.tax, total, balanceDue: Math.max(0, total - amountPaid), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'), lineItems: lineItems ? { create: lineItems } : undefined }, include: { lineItems: true, payments: true } });
+      return tx.invoice.update({ where: { id }, data: { customerId: links.customerId, customerName: links.customerId ? null : req.body.customerName === undefined ? undefined : optionalText(req.body.customerName, 'customerName'), customerPhone: links.customerId ? null : req.body.customerPhone === undefined ? undefined : optionalText(req.body.customerPhone, 'customerPhone'), customerEmail: links.customerId ? null : req.body.customerEmail === undefined ? undefined : optionalText(req.body.customerEmail, 'customerEmail'), customerAddress: links.customerId ? null : req.body.customerAddress === undefined ? undefined : optionalText(req.body.customerAddress, 'customerAddress'), jobId: links.jobId, claimId: links.claimId, status: req.body.status === undefined ? undefined : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate === undefined ? undefined : parseDate(req.body.issueDate, 'issueDate'), dueDate: req.body.dueDate === undefined ? undefined : (req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : null), subtotal: totals?.subtotal, tax: totals?.tax, total, balanceDue: Math.max(0, total - amountPaid), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'), lineItems: lineItems ? { create: lineItems } : undefined }, include: { lineItems: true, payments: true } });
     });
     res.json(invoice);
   }));
@@ -219,38 +219,177 @@ async function createInvoicePdf(invoice: {
   total: number;
   amountPaid: number;
   balanceDue: number;
+  customerName: string | null;
+  customerPhone: string | null;
+  customerEmail: string | null;
+  customerAddress: string | null;
   customer: { firstName: string; lastName: string; phone: string | null; email: string | null; address: string | null } | null;
-  job: { jobNumber: string; vehicle: { year: number | null; make: string | null; model: string | null; trim: string | null; vin: string | null; licensePlate: string | null; licenseState: string | null } | null } | null;
-  claim: { claimNumber: string | null } | null;
+  job: { jobNumber: string; vehicle: { year: number | null; make: string | null; model: string | null; trim: string | null; bodyClass: string | null; vin: string | null; licensePlate: string | null; licenseState: string | null; color: string | null } | null } | null;
+  claim: { claimNumber: string | null; customerClaimNumber: string | null; customerName: string | null; customerPhone: string | null; customerAddress: string | null; customerInsurance: string | null; customerPolicyNumber: string | null; vehicleYear: number | null; vehicleMake: string | null; vehicleModel: string | null; vehicleTrim: string | null; vehicleBodyClass: string | null; vehicleVin: string | null; vehicleLicensePlate: string | null; vehiclePlateState: string | null; vehicleColor: string | null; insuranceCompany: string | null; adjusterName: string | null; adjusterPhone: string | null } | null;
   lineItems: Array<{ description: string; quantity: number; unitPrice: number }>;
   payments: Array<{ date: Date; method: string; amount: number; notes: string | null }>;
 }) {
   const money = (amount: number) => `$${amount.toFixed(2)}`;
-  const date = (value: Date | null) => value ? value.toLocaleDateString('en-US') : 'N/A';
+  const date = (value: Date | null) => value ? value.toLocaleDateString('en-US') : '';
   const vehicle = invoice.job?.vehicle;
-  const doc = new PDFDocument({ size: 'LETTER', margin: 36, bufferPages: true });
+  const claim = invoice.claim;
+  const doc = new PDFDocument({ size: 'LETTER', margin: 28, bufferPages: true });
   const chunks: Buffer[] = [];
-  const result = new Promise<Buffer>((resolve) => { doc.on('data', (chunk: Buffer) => chunks.push(chunk)); doc.on('end', () => resolve(Buffer.concat(chunks))); });
+  const result = new Promise<Buffer>((resolve, reject) => {
+    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+  });
+  const left = 36;
   const pageWidth = 540;
-  const right = 576;
-  const text = (value: string, x: number, y: number, options: { size?: number; bold?: boolean; color?: string; width?: number; align?: 'left' | 'right' | 'center' } = {}) => { doc.font(options.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(options.size || 9).fillColor(options.color || '#171717').text(value, x, y, { width: options.width, align: options.align || 'left' }); };
-  doc.rect(36, 36, pageWidth, 76).fill('#292929');
-  text('MASTERCRAFT AUTO REPAIR & COLLISION', 50, 51, { size: 17, bold: true, color: '#ffffff' });
-  text('38-21 23rd Street, Long Island City, NY 11101', 50, 76, { size: 8.5, color: '#eeeeee' });
-  text('Tel: 718-578-4563 | 718-603-0412 | shop@mastercraftautony.com', 50, 90, { size: 8.5, color: '#eeeeee' });
-  text('www.mastercraftautony.com | Recognized By All Insurance Companies', 50, 104, { size: 8, color: '#f1c232' });
-  doc.rect(36, 126, pageWidth, 34).fill('#c90000'); text('INVOICE / ESTIMATE OF RECORD', 36, 136, { size: 15, bold: true, color: '#ffffff', width: pageWidth, align: 'center' });
-  doc.rect(36, 174, pageWidth, 25).lineWidth(0.6).stroke('#bdbdbd'); text(`Invoice No: ${invoice.invoiceNumber}`, 45, 182, { size: 8.5, bold: true }); text(`Invoice Date: ${date(invoice.issueDate)}`, 350, 182, { size: 8.5, bold: true, width: 215, align: 'right' });
-  doc.rect(36, 216, pageWidth, 78).lineWidth(0.6).stroke('#bdbdbd'); doc.moveTo(306, 216).lineTo(306, 294).stroke('#bdbdbd');
-  text('CUSTOMER', 45, 226, { size: 10, bold: true }); text(invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : 'Walk-in / counter sale', 45, 243, { size: 10 }); text(`Address: ${invoice.customer?.address || 'N/A'}`, 45, 260, { size: 8.5 }); text(`Phone: ${invoice.customer?.phone || 'N/A'}    Email: ${invoice.customer?.email || 'N/A'}`, 45, 275, { size: 8.5 });
-  text('VEHICLE / JOB', 315, 226, { size: 10, bold: true }); text(vehicle ? [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(' ') : 'Not specified', 315, 243, { size: 9 }); text(`VIN: ${vehicle?.vin || 'N/A'}`, 315, 260, { size: 8.5 }); text(`License: ${vehicle?.licensePlate || 'N/A'}${vehicle?.licenseState ? ` (${vehicle.licenseState})` : ''}`, 315, 275, { size: 8.5 }); text(`Job: ${invoice.job?.jobNumber || 'N/A'}   Claim: ${invoice.claim?.claimNumber || 'N/A'}`, 315, 287, { size: 7.5 });
-  text('REPAIR WORK AND JOB EXPENSES', 36, 316, { size: 10, bold: true, color: '#ffffff', width: pageWidth }); doc.rect(36, 312, pageWidth, 20).fill('#292929'); text('REPAIR WORK AND JOB EXPENSES', 45, 318, { size: 10, bold: true, color: '#ffffff' });
-  const columns = [36, 345, 400, 476, 576]; let y = 332; doc.rect(36, y, pageWidth, 22).fill('#c90000'); ['Description', 'Qty', 'Unit Price', 'Amount'].forEach((label, index) => text(label, columns[index] + 5, y + 7, { size: 8, bold: true, color: '#ffffff', width: columns[index + 1] - columns[index] - 10, align: index ? 'right' : 'left' })); y += 22;
-  for (const [index, item] of invoice.lineItems.entries()) { if (y > 690) { doc.addPage(); y = 45; } if (index % 2 === 0) doc.rect(36, y, pageWidth, 24).fill('#eeeeee'); const description = item.description.length > 58 ? `${item.description.slice(0, 55)}...` : item.description; text(description, 42, y + 7, { size: 8, width: 298 }); text(String(item.quantity), 350, y + 7, { size: 8, width: 45, align: 'right' }); text(money(item.unitPrice), 405, y + 7, { size: 8, width: 66, align: 'right' }); text(money(item.quantity * item.unitPrice), 481, y + 7, { size: 8, width: 88, align: 'right' }); doc.rect(36, y, pageWidth, 24).lineWidth(0.3).stroke('#cccccc'); y += 24; }
-  y += 10; const totalsX = 350; const totalLine = (label: string, amount: number, bold = false, size = 9) => { text(label, totalsX, y, { size, bold, width: 135, align: 'right' }); text(money(amount), 490, y, { size, bold, width: 86, align: 'right' }); y += bold ? 24 : 18; };
-  totalLine('SUBTOTAL', invoice.subtotal, true); totalLine('SALES TAX', invoice.tax); totalLine('TOTAL COST OF REPAIRS', invoice.total, true, 11); totalLine('AMOUNT PAID', invoice.amountPaid); totalLine('BALANCE DUE', invoice.balanceDue, true, 11);
-  y += 8; doc.moveTo(36, y).lineTo(right, y).stroke('#222222'); y += 12; text('PAYMENTS', 36, y, { size: 10, bold: true }); y += 17; if (invoice.payments.length) for (const payment of invoice.payments) { text(`${date(payment.date)}  ${payment.method.replace('_', ' ')}`, 45, y, { size: 8 }); text(money(payment.amount), 490, y, { size: 8, width: 86, align: 'right' }); y += 15; } else { text('No payments recorded', 45, y, { size: 8, color: '#555555' }); y += 15; }
-  y += 14; text('This is an invoice for work and expenses recorded for the repair job. Final charges may vary based on supplemental findings.', 36, y, { size: 8, color: '#555555', width: pageWidth }); y += 38; text('Customer Signature: ______________________________', 36, y, { size: 8.5 }); text('Date: ______________', 395, y, { size: 8.5 }); y += 24; text('Shop Authorized By: ______________________________', 36, y, { size: 8.5 }); text('Date: ______________', 395, y, { size: 8.5 }); y += 30; doc.moveTo(36, y).lineTo(right, y).stroke('#222222'); y += 10; text('MASTERCRAFT AUTO REPAIR & COLLISION  •  38-21 23rd Street, Long Island City, NY 11101  •  718-578-4563  •  www.mastercraftautony.com', 36, y, { size: 7, color: '#666666', width: pageWidth, align: 'center' }); doc.end(); return result;
+  const right = left + pageWidth;
+  const text = (value: string, x: number, y: number, options: { size?: number; bold?: boolean; color?: string; width?: number; align?: 'left' | 'right' | 'center' } = {}) => {
+    doc.font(options.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(options.size || 8).fillColor(options.color || '#171717').text(value, x, y, { width: options.width, align: options.align || 'left', lineBreak: false });
+  };
+  const fit = (value: string | number | null | undefined, width: number, size = 7) => {
+    let result = value == null ? '' : String(value).replace(/\s+/g, ' ').trim();
+    doc.font('Helvetica').fontSize(size);
+    while (result && doc.widthOfString(result) > width) result = `${result.slice(0, -1).trimEnd()}`;
+    if (result !== String(value ?? '').replace(/\s+/g, ' ').trim() && width > 18) {
+      while (result && doc.widthOfString(`${result}...`) > width) result = result.slice(0, -1).trimEnd();
+      result = result ? `${result}...` : '';
+    }
+    return result;
+  };
+  const field = (label: string, value: string | number | null | undefined, x: number, y: number, width: number, height: number) => {
+    text(label.toUpperCase(), x + 4, y + 3, { size: 5.3, bold: true, color: '#555555', width: width - 8 });
+    text(fit(value, width - 8, 7), x + 4, y + 12, { size: 7, width: width - 8 });
+    doc.rect(x, y, width, height).lineWidth(0.35).stroke('#9b9b9b');
+  };
+  const drawFormHeader = () => {
+    doc.rect(left, 25, 4, 55).fill('#d36124');
+    text('MASTERCRAFT AUTO REPAIR & COLLISION', left + 12, 27, { size: 13, bold: true, width: 330 });
+    text('38-21 23rd Street, Long Island City, NY 11101', left + 12, 45, { size: 7.5 });
+    text('718-603-0412  |  718-578-4563  |  shop@mastercraftautony.com', left + 12, 57, { size: 7.2 });
+    text('www.mastercraftautony.com  |  Facility No. 7136099  |  EIN 42-2914045', left + 12, 69, { size: 7 });
+    text('INVOICE', 404, 30, { size: 20, bold: true, width: 172, align: 'right' });
+    text(`Invoice No. ${fit(invoice.invoiceNumber, 135, 8)}`, 404, 56, { size: 8, bold: true, width: 172, align: 'right' });
+    text(`Date: ${date(invoice.issueDate)}`, 404, 69, { size: 7.5, width: 172, align: 'right' });
+
+    doc.rect(left, 89, pageWidth, 21).fill('#333333');
+    text('VEHICLE REPAIR INVOICE', left + 8, 96, { size: 10, bold: true, color: '#ffffff', width: pageWidth - 16 });
+    text(`INVOICE NO. ${invoice.invoiceNumber}`, left + 300, 96, { size: 8, bold: true, color: '#ffffff', width: 232, align: 'right' });
+
+    const boxY = 115;
+    const boxHeight = 78;
+    const half = pageWidth / 2;
+    const rowHeight = boxHeight / 4;
+    const customerName = invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : invoice.customerName || claim?.customerName || 'Walk-in / counter sale';
+    field('Customer / insured', customerName, left, boxY, half, rowHeight);
+    field('Claim number', claim?.claimNumber || claim?.customerClaimNumber, left + half, boxY, half, rowHeight);
+    field('Address', invoice.customer?.address || invoice.customerAddress || claim?.customerAddress, left, boxY + rowHeight, half, rowHeight);
+    field('Phone', invoice.customer?.phone || invoice.customerPhone || claim?.customerPhone, left + half, boxY + rowHeight, half, rowHeight);
+    field('Email', invoice.customer?.email || invoice.customerEmail, left, boxY + rowHeight * 2, half, rowHeight);
+    field('Job / repair order', invoice.job?.jobNumber, left + half, boxY + rowHeight * 2, half, rowHeight);
+    const vehicleYear = vehicle?.year ?? claim?.vehicleYear;
+    const vehicleMake = vehicle?.make ?? claim?.vehicleMake;
+    const vehicleModel = vehicle?.model ?? claim?.vehicleModel;
+    const vehicleTrim = vehicle?.trim ?? claim?.vehicleTrim ?? vehicle?.bodyClass ?? claim?.vehicleBodyClass;
+    field('Year / make / model', [vehicleYear, vehicleMake, vehicleModel].filter(Boolean).join(' '), left, boxY + rowHeight * 3, half, rowHeight);
+    field('Style / color', [vehicleTrim, vehicle?.color ?? claim?.vehicleColor].filter(Boolean).join(' / '), left + half, boxY + rowHeight * 3, half, rowHeight);
+
+    const detailsY = boxY + boxHeight + 3;
+    const detailHeight = 20;
+    const widths = [145, 115, 140, 140];
+    const insurance = claim?.insuranceCompany || claim?.customerInsurance;
+    const policy = claim?.customerPolicyNumber;
+    const plate = [vehicle?.licensePlate ?? claim?.vehicleLicensePlate, vehicle?.licenseState ?? claim?.vehiclePlateState].filter(Boolean).join(' / ');
+    field('VIN', vehicle?.vin ?? claim?.vehicleVin, left, detailsY, widths[0], detailHeight);
+    field('License plate', plate, left + widths[0], detailsY, widths[1], detailHeight);
+    field('Insurance company', insurance, left + widths[0] + widths[1], detailsY, widths[2], detailHeight);
+    field('Insurance / policy no.', policy, left + widths[0] + widths[1] + widths[2], detailsY, widths[3], detailHeight);
+    field('Adjuster', claim?.adjusterName, left, detailsY + detailHeight, 180, detailHeight);
+    field('Adjuster phone', claim?.adjusterPhone, left + 180, detailsY + detailHeight, 150, detailHeight);
+    field('Odometer', '', left + 330, detailsY + detailHeight, 100, detailHeight);
+    field('Estimate prepared by', '', left + 430, detailsY + detailHeight, 110, detailHeight);
+  };
+  const drawItemsTable = (items: typeof invoice.lineItems, startIndex: number, pageNumber: number, pageCount: number, includeSummary: boolean) => {
+    const columns = [left, left + 22, left + 60, left + 102, left + 270, left + 318, left + 363, left + 415, left + 460, right];
+    let y = 278;
+    const headerHeight = 19;
+    const rowHeight = 17;
+    doc.rect(left, y, pageWidth, headerHeight).fill('#dedede');
+    const headings = ['No.', 'Repair', 'Replace', 'Description', 'Parts', 'Labor', 'Refinish', 'Sublet', 'Amount'];
+    headings.forEach((heading, index) => text(heading, columns[index] + 2, y + 6, { size: 5.8, bold: true, width: columns[index + 1] - columns[index] - 4, align: index > 3 ? 'right' : 'left' }));
+    y += headerHeight;
+    for (const [index, item] of items.entries()) {
+      if (index % 2 === 0) doc.rect(left, y, pageWidth, rowHeight).fill('#f4f4f4');
+      text(String(startIndex + index + 1), columns[0] + 2, y + 5, { size: 6.5, width: columns[1] - columns[0] - 4 });
+      for (const columnIndex of [1, 2]) {
+        const boxWidth = 6;
+        const boxX = columns[columnIndex] + (columns[columnIndex + 1] - columns[columnIndex] - boxWidth) / 2;
+        doc.rect(boxX, y + 5, boxWidth, boxWidth).lineWidth(0.4).stroke('#777777');
+      }
+      const description = `${item.quantity !== 1 ? `${item.quantity} x ` : ''}${item.description}`;
+      text(fit(description, columns[4] - columns[3] - 7, 6.4), columns[3] + 3, y + 5, { size: 6.4, width: columns[4] - columns[3] - 7 });
+      text(money(item.quantity * item.unitPrice), columns[8] + 2, y + 5, { size: 6.5, width: columns[9] - columns[8] - 5, align: 'right' });
+      doc.rect(left, y, pageWidth, rowHeight).lineWidth(0.3).stroke('#c2c2c2');
+      y += rowHeight;
+    }
+    if (!items.length) {
+      text('No line items recorded', left + 6, y + 5, { size: 7, color: '#555555' });
+      doc.rect(left, y, pageWidth, rowHeight).lineWidth(0.3).stroke('#c2c2c2');
+      y += rowHeight;
+    }
+    if (includeSummary) {
+      y = 590;
+      const leftWidth = 324;
+      text(`PROPOSED COMPLETION DATE: ${date(invoice.dueDate) || '________________'}`, left + 2, y + 2, { size: 7, bold: true });
+      text('The charges above are for parts, labor, refinishing, and other work performed on the vehicle identified on this invoice.', left + 2, y + 16, { size: 6.5, width: leftWidth });
+      text('Please review the listed work and charges. Any additional or supplemental work will be documented separately.', left + 2, y + 34, { size: 6.5, width: leftWidth });
+      text('I acknowledge that the work listed above was performed and approve the charges shown.', left + 2, y + 56, { size: 6.3, width: leftWidth });
+      doc.moveTo(left + 2, y + 87).lineTo(left + 211, y + 87).stroke('#555555');
+      doc.moveTo(left + 231, y + 87).lineTo(left + leftWidth, y + 87).stroke('#555555');
+      text('Customer signature', left + 2, y + 90, { size: 5.8, color: '#555555' });
+      text('Date', left + 231, y + 90, { size: 5.8, color: '#555555' });
+
+      const totalsX = left + leftWidth + 8;
+      const totalsWidth = pageWidth - leftWidth - 8;
+      const summaryRows: Array<[string, number | null, boolean?]> = [
+        ['Paint hours @', null],
+        ['Labor hours @', null],
+        ['Parts', null],
+        ['Paint / materials', null],
+        ['Sublet items', null],
+        ['Towing / storage', null],
+        ['Subtotal', invoice.subtotal],
+        ['Sales tax', invoice.tax],
+        ['Total', invoice.total, true],
+        ['Amount paid', invoice.amountPaid],
+        ['Balance due', invoice.balanceDue, true],
+      ];
+      let totalY = y - 1;
+      const totalRowHeight = 11;
+      summaryRows.forEach(([label, amount, bold]) => {
+        if (bold) doc.rect(totalsX, totalY, totalsWidth, totalRowHeight).fill('#e9e9e9');
+        text(label, totalsX + 3, totalY + 2, { size: 6, bold: !!bold, width: totalsWidth - 63 });
+        text(amount == null ? '' : money(amount), totalsX + totalsWidth - 59, totalY + 2, { size: 6.2, bold: !!bold, width: 56, align: 'right' });
+        doc.rect(totalsX, totalY, totalsWidth, totalRowHeight).lineWidth(0.3).stroke('#aaaaaa');
+        totalY += totalRowHeight;
+      });
+      if (invoice.payments.length) {
+        const paymentSummary = invoice.payments.map((payment) => `${date(payment.date)} ${payment.method.replace('_', ' ')} ${money(payment.amount)}`).join('  |  ');
+        text(fit(`Payments: ${paymentSummary}`, pageWidth, 6), left, 716, { size: 6, color: '#555555', width: pageWidth, align: 'center' });
+      }
+    }
+    text(`Page ${pageNumber} of ${pageCount}`, left, 742, { size: 6, color: '#666666', width: pageWidth, align: 'center' });
+  };
+
+  const itemsPerPage = 17;
+  const pages = Math.max(1, Math.ceil(invoice.lineItems.length / itemsPerPage));
+  for (let pageIndex = 0; pageIndex < pages; pageIndex += 1) {
+    if (pageIndex > 0) doc.addPage();
+    drawFormHeader();
+    const startIndex = pageIndex * itemsPerPage;
+    drawItemsTable(invoice.lineItems.slice(startIndex, startIndex + itemsPerPage), startIndex, pageIndex + 1, pages, pageIndex === pages - 1);
+  }
+  doc.end();
+  return result;
 }
 
 function pdfEscape(value: string) { return value.replace(/[\\()\r\n]/g, (character) => character === '\\' ? '\\\\' : character === '(' ? '\\(' : character === ')' ? '\\)' : ' '); }

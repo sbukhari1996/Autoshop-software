@@ -1,0 +1,44 @@
+services:
+  invoice-test-api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: collision-shop-invoice-test-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://collision_shop_app:collision_shop_app@collision-shop-db:5432/collision_shop?schema=public
+      PORT: 4000
+      AUTH_SECRET: ${AUTH_SECRET:-change-me-in-production}
+      NODE_ENV: production
+      ENABLE_DEFAULT_ADMIN: "false"
+      UPLOAD_DIR: /app/uploads
+    ports:
+      - "127.0.0.1:4001:4000"
+    volumes:
+      - api_uploads:/app/uploads
+    command: ["node", "dist/server.js"]
+    networks:
+      - existing_shop
+
+  invoice-test-frontend:
+    build:
+      context: ./apps/frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:4001/api
+    container_name: collision-shop-invoice-test-frontend
+    restart: unless-stopped
+    depends_on:
+      - invoice-test-api
+    ports:
+      - "127.0.0.1:5174:80"
+
+networks:
+  existing_shop:
+    name: autoshopsoftware_default
+    external: true
+
+volumes:
+  api_uploads:
+    name: autoshopsoftware_api_uploads
+    external: true
