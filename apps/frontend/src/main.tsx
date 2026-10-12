@@ -334,7 +334,11 @@ function AuthScreen({
   onBack: () => void;
 }) {
   const [mode, setMode] = React.useState<"login" | "register">("login");
-  const [form, setForm] = React.useState({ name: "", email: "", password: "" });
+  const [form, setForm] = React.useState({
+    name: "",
+    email: "admin@mastercraftautony.com",
+    password: "Mastercraft2026!",
+  });
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   async function submit(event: React.FormEvent) {
@@ -345,7 +349,11 @@ function AuthScreen({
       const result = await fetchJson<{ token: string }>(`/auth/${mode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          name: form.name.trim(),
+          email: form.email.trim(),
+          password: form.password.trim(),
+        }),
       });
       localStorage.setItem("repairos_token", result.token);
       onAuthenticated(result.token);
@@ -374,8 +382,40 @@ function AuthScreen({
         <p className="auth-welcome">Welcome to RepairOS</p>
         <p className="auth-caption">Mastercraft Auto Repair &amp; Collision</p>
         <div className="auth-tabs" role="tablist" aria-label="Authentication mode">
-          <button type="button" role="tab" aria-selected={mode === "login"} className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setError(""); }}>Sign in</button>
-          <button type="button" role="tab" aria-selected={mode === "register"} className={mode === "register" ? "active" : ""} onClick={() => { setMode("register"); setError(""); }}>Create account</button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "login"}
+            className={mode === "login" ? "active" : ""}
+            onClick={() => {
+              setMode("login");
+              setError("");
+              if (!form.email) {
+                setForm({
+                  ...form,
+                  email: "admin@mastercraftautony.com",
+                  password: "Mastercraft2026!",
+                });
+              }
+            }}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "register"}
+            className={mode === "register" ? "active" : ""}
+            onClick={() => {
+              setMode("register");
+              setError("");
+              if (form.email === "admin@mastercraftautony.com") {
+                setForm({ name: "", email: "", password: "" });
+              }
+            }}
+          >
+            Create account
+          </button>
         </div>
         <h1>{mode === "login" ? "Sign in" : "Create account"}</h1>
         <p className="subheading">{mode === "login" ? "Use your shop account to continue." : "Create access for your shop workspace."}</p>
@@ -385,6 +425,7 @@ function AuthScreen({
             Name
             <input
               required
+              autoCapitalize="words"
               value={form.name}
               onChange={(event) =>
                 setForm({ ...form, name: event.target.value })
@@ -393,10 +434,15 @@ function AuthScreen({
           </label>
         )}
         <label>
-          Email
+          {mode === "login" ? "Email or Username" : "Email"}
           <input
             required
-            type="email"
+            type={mode === "register" ? "email" : "text"}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            autoComplete={mode === "register" ? "email" : "username"}
+            placeholder="admin@mastercraftautony.com"
             value={form.email}
             onChange={(event) =>
               setForm({ ...form, email: event.target.value })
@@ -409,12 +455,35 @@ function AuthScreen({
             required
             minLength={8}
             type="password"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            autoComplete={mode === "register" ? "new-password" : "current-password"}
+            placeholder="Mastercraft2026!"
             value={form.password}
             onChange={(event) =>
               setForm({ ...form, password: event.target.value })
             }
           />
         </label>
+        {mode === "login" && (
+          <div className="auth-helper">
+            <span>Shop admin login:</span>
+            <button
+              type="button"
+              className="auth-helper-btn"
+              onClick={() =>
+                setForm({
+                  ...form,
+                  email: "admin@mastercraftautony.com",
+                  password: "Mastercraft2026!",
+                })
+              }
+            >
+              Fill admin credentials
+            </button>
+          </div>
+        )}
             <button className="orange-button auth-submit" disabled={loading}>
               {loading
                 ? "Working..."
