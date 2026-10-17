@@ -52,6 +52,12 @@ On Windows, the app is available locally at http://localhost:5173. To share it p
 
 The backup task creates a verified PostgreSQL archive and a separate uploaded-files archive daily at 2:00 AM. Backups are not automatically pruned. Docker Desktop must be running and the Windows user must be signed in when the task runs; missed runs start when available. Check `E:\AutoshopBackups\Postgres\backup.log` for backup runs and `startup.log` for app restarts.
 
+### Ubuntu production backups
+
+On the Ubuntu VM, `deploy/autoshop-backup.timer` runs `scripts/backup-linux.sh` daily at 2:00 AM New York time. It creates a verified PostgreSQL custom-format dump, an archive of the API uploads volume, a metadata manifest, and a separate SHA-256 checksum list under `/opt/autoshop/backups/daily/`. The script keeps 30 days of its timestamped backups, fails rather than writing when less than 1 GiB is free, and leaves unrelated files untouched. Systemd records each run in the journal; check with `systemctl list-timers autoshop-backup.timer` and `journalctl -u autoshop-backup.service`.
+
+These daily copies are stored on the same VM and are not protection against VM or host loss. Configure a separate off-host copy for disaster recovery. The Windows PowerShell task above is independent and does not control the Ubuntu timer.
+
 ### Authentication and organizations
 
 Sign in and account registration use the app's local email/password authentication at `/api/auth/login` and `/api/auth/register`. Passwords are hashed by the API and authenticated users receive an app-managed token. Authenticated users can inspect their current context with `GET /api/auth/session`, create an organization with `POST /api/auth/organizations`, and switch organizations with `POST /api/auth/organizations/:organizationId/select`. Write requests require an authenticated membership.
