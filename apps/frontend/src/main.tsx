@@ -334,11 +334,7 @@ function AuthScreen({
   onBack: () => void;
 }) {
   const [mode, setMode] = React.useState<"login" | "register">("login");
-  const [form, setForm] = React.useState({
-    name: "",
-    email: "admin@mastercraftautony.com",
-    password: "Mastercraft2026!",
-  });
+  const [form, setForm] = React.useState({ name: "", email: "", password: "" });
   const [error, setError] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   async function submit(event: React.FormEvent) {
@@ -390,13 +386,6 @@ function AuthScreen({
             onClick={() => {
               setMode("login");
               setError("");
-              if (!form.email) {
-                setForm({
-                  ...form,
-                  email: "admin@mastercraftautony.com",
-                  password: "Mastercraft2026!",
-                });
-              }
             }}
           >
             Sign in
@@ -409,9 +398,6 @@ function AuthScreen({
             onClick={() => {
               setMode("register");
               setError("");
-              if (form.email === "admin@mastercraftautony.com") {
-                setForm({ name: "", email: "", password: "" });
-              }
             }}
           >
             Create account
@@ -434,15 +420,15 @@ function AuthScreen({
           </label>
         )}
         <label>
-          {mode === "login" ? "Email or Username" : "Email"}
+          Email
           <input
             required
-            type={mode === "register" ? "email" : "text"}
+            type="email"
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
-            autoComplete={mode === "register" ? "email" : "username"}
-            placeholder="admin@mastercraftautony.com"
+            autoComplete="email"
+            placeholder="Enter your shop email"
             value={form.email}
             onChange={(event) =>
               setForm({ ...form, email: event.target.value })
@@ -459,31 +445,13 @@ function AuthScreen({
             autoCorrect="off"
             spellCheck={false}
             autoComplete={mode === "register" ? "new-password" : "current-password"}
-            placeholder="Mastercraft2026!"
+            placeholder="Enter your password"
             value={form.password}
             onChange={(event) =>
               setForm({ ...form, password: event.target.value })
             }
           />
         </label>
-        {mode === "login" && (
-          <div className="auth-helper">
-            <span>Shop admin login:</span>
-            <button
-              type="button"
-              className="auth-helper-btn"
-              onClick={() =>
-                setForm({
-                  ...form,
-                  email: "admin@mastercraftautony.com",
-                  password: "Mastercraft2026!",
-                })
-              }
-            >
-              Fill admin credentials
-            </button>
-          </div>
-        )}
             <button className="orange-button auth-submit" disabled={loading}>
               {loading
                 ? "Working..."
