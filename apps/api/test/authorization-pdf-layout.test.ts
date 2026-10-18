@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -138,11 +138,25 @@ test('generated authorization PDF has one Letter page and Documenso fields match
     customer: job.customer,
     vehicle: job.vehicle,
   };
+  const staleFilePath = path.join(uploadDirectory, 'stale-repair-authorization.pdf');
+  const staleAuthorization = {
+    id: 'authorization-stale',
+    fileName: 'repair-authorization-stale.pdf',
+    filePath: path.relative(process.cwd(), staleFilePath),
+    authorizationFields: null as string | null,
+    legacyDocuSealSubmissionId: null,
+    documensoEnvelopeId: null,
+    documensoCompletedAt: null,
+    job,
+    claim: null,
+  };
   const prisma = {
     job: { findUnique: async () => job },
     claim: { findUnique: async () => claim },
     repairAuthorization: {
       create: async ({ data }: { data: Record<string, unknown> }) => data,
+      findUnique: async ({ where }: { where: { id: string } }) => where.id === staleAuthorization.id ? staleAuthorization : null,
+      update: async ({ data }: { data: { authorizationFields: string } }) => Object.assign(staleAuthorization, data),
     },
   };
   const app = express();
@@ -170,6 +184,7 @@ test('generated authorization PDF has one Letter page and Documenso fields match
     assert.equal(longVehicleTypeBounds.length, 1);
     assert.ok(longVehicleTypeBounds[0].text.endsWith('...'), 'long vehicle types should be visibly shortened');
     assert.ok(longVehicleTypeBounds[0].end <= longVehicleTypeBounds[0].right, 'the vehicle type must not run into the license field');
+
     for (const value of [
       ' 1 Main St',
       ' Wood Bridge',
@@ -261,6 +276,16 @@ test('generated authorization PDF has one Letter page and Documenso fields match
       assert.ok(field.positionX + field.width <= 100);
       assert.ok(field.positionY + field.height <= 100);
     }
+
+    await writeFile(staleFilePath, Buffer.from('%PDF-1.4 stale overlapping authorization'));
+    const staleDownload = await fetch(`http://127.0.0.1:${address.port}/api/repair-authorizations/${staleAuthorization.id}/download`);
+    assert.equal(staleDownload.status, 200);
+    assert.equal(staleDownload.headers.get('content-disposition'), 'attachment; filename="repair-authorization-stale.pdf"');
+    const regeneratedPdf = await readFile(staleFilePath);
+    assert.ok(regeneratedPdf.length > 1000, 'downloading an old unsigned authorization should regenerate its PDF');
+    assert.equal(longVehicleTypeBounds.length, 3);
+    assert.ok(longVehicleTypeBounds[2].text.endsWith('...'), 'regenerated old authorizations should truncate long vehicle types');
+    assert.ok(staleAuthorization.authorizationFields, 'regeneration should refresh the Documenso field positions');
   } finally {
     PDFDocument.prototype.addPage = originalAddPage;
     PDFDocument.prototype.rect = originalRect;

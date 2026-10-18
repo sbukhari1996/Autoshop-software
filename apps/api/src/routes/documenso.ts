@@ -17,6 +17,7 @@ import {
   getSignedDocumensoDocument,
 } from '../documenso.js';
 import { readAuthorizationPdf } from './authorization-files.js';
+import { regenerateAuthorizationPdf } from './operations.js';
 
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -40,7 +41,6 @@ export function createDocumensoRouter(prisma: PrismaClient) {
       throw new ApiError(409, 'This authorization may already have been sent; check Documenso before retrying');
     }
     const recipient = signingRecipient(req.body);
-    const pdf = await readAuthorizationPdf(authorization.filePath);
     const config = getDocumensoApiConfig();
     const claimed = await prisma.repairAuthorization.updateMany({
       where: {
@@ -60,6 +60,10 @@ export function createDocumensoRouter(prisma: PrismaClient) {
 
     let envelopeId: string | undefined;
     try {
+      await regenerateAuthorizationPdf(prisma, authorization.id);
+      const pdf = await readAuthorizationPdf(authorization.filePath);
+      const refreshedAuthorization = await prisma.repairAuthorization.findUnique({ where: { id: authorization.id } });
+      if (!refreshedAuthorization) throw new ApiError(404, 'Repair authorization not found');
       envelopeId = await createRepairAuthorizationEnvelope(config, {
         authorizationId: authorization.id,
         jobId: authorization.jobId,
@@ -69,7 +73,7 @@ export function createDocumensoRouter(prisma: PrismaClient) {
         pdf,
         signerEmail: recipient.email,
         signerName: recipient.name,
-        fieldPlacements: parseAuthorizationFieldPlacements(authorization.authorizationFields),
+        fieldPlacements: parseAuthorizationFieldPlacements(refreshedAuthorization.authorizationFields),
       });
       const savedEnvelope = await prisma.repairAuthorization.updateMany({
         where: { id: authorization.id, documensoStatus: 'sending', documensoEnvelopeId: null },

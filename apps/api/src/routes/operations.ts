@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
@@ -97,6 +97,10 @@ export function createOperationsRouter(prisma: PrismaClient) {
   router.get('/repair-authorizations/:authorizationId/download', asyncHandler(async (req, res) => {
     const authorization = await prisma.repairAuthorization.findUnique({ where: { id: routeParam(req, 'authorizationId') } });
     if (!authorization) throw new ApiError(404, 'Repair authorization not found');
+    const hasUnresolvedEnvelope = Boolean(authorization.documensoEnvelopeId && !authorization.documensoCompletedAt);
+    if (!authorization.legacyDocuSealSubmissionId && !hasUnresolvedEnvelope) {
+      await regenerateAuthorizationPdf(prisma, authorization.id);
+    }
     await sendStoredFile(res, authorization.filePath, authorization.fileName);
   }));
 
@@ -258,6 +262,55 @@ async function createStoredAuthorization(
     },
   });
   return { ...authorization, downloadUrl: `/api/repair-authorizations/${authorization.id}/download` };
+}
+
+export async function regenerateAuthorizationPdf(prisma: PrismaClient, authorizationId: string) {
+  const authorization = await prisma.repairAuthorization.findUnique({
+    where: { id: authorizationId },
+    include: {
+      job: { include: { customer: true, vehicle: true, claim: true } },
+      claim: { include: { customer: true, vehicle: true } },
+    },
+  });
+  if (!authorization) throw new ApiError(404, 'Repair authorization not found');
+
+  const pdfData = authorization.job
+    ? authorization.job
+    : authorization.claim
+      ? {
+        jobNumber: authorization.claim.claimNumber || authorization.claim.id,
+        customer: authorization.claim.customer,
+        vehicle: authorization.claim.vehicle,
+        claim: authorization.claim,
+      }
+      : null;
+  if (!pdfData) throw new ApiError(500, 'Repair authorization has no claim or repair order');
+
+  const targetPath = path.resolve(process.cwd(), authorization.filePath);
+  const relativePath = path.relative(uploadDirectory, targetPath);
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+    throw new ApiError(400, 'Stored authorization PDF path is invalid');
+  }
+  const generated = await createAuthorizationPdf(pdfData);
+  const temporaryPath = `${targetPath}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryPath, generated.pdf, { flag: 'wx' });
+    await rename(temporaryPath, targetPath);
+  } catch (error) {
+    try {
+      await unlink(temporaryPath);
+    } catch (cleanupError) {
+      if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') throw cleanupError;
+    }
+    throw error;
+  }
+
+  const authorizationFields = JSON.stringify(generated.fieldPlacements);
+  await prisma.repairAuthorization.update({
+    where: { id: authorization.id },
+    data: { authorizationFields },
+  });
+  return { filePath: authorization.filePath, fileName: authorization.fileName, pdf: generated.pdf, authorizationFields };
 }
 
 async function createAuthorizationPdf(job: {
