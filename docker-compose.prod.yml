@@ -15,6 +15,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-collision_shop_app}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in production}@db:5432/${POSTGRES_DB:-collision_shop}?schema=public
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required in production}
       ENABLE_DEFAULT_ADMIN: ${ENABLE_DEFAULT_ADMIN:-false}
+      DOCUSEAL_API_KEY: ${DOCUSEAL_API_KEY:-}
+      DOCUSEAL_TEMPLATE_ID: ${DOCUSEAL_TEMPLATE_ID:-}
+      DOCUSEAL_WEBHOOK_SECRET: ${DOCUSEAL_WEBHOOK_SECRET:-}
+      DOCUSEAL_BASE_URL: ${DOCUSEAL_BASE_URL:-http://docuseal:3000/api}
+      DOCUSEAL_SIGNER_ROLE: ${DOCUSEAL_SIGNER_ROLE:-Customer}
     restart: always
 
   frontend:
@@ -32,7 +37,7 @@ services:
       - api
       - frontend
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

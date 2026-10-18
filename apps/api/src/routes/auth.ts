@@ -25,50 +25,14 @@ export function createAuthRouter(prisma: PrismaClient) {
   }));
 
   router.post('/login', asyncHandler(async (req, res) => {
-    let email = requiredText(req.body.email, 'email').trim().toLowerCase();
+    const email = requiredText(req.body.email, 'email').trim().toLowerCase();
     const password = requiredText(req.body.password, 'password').trim();
-
-    let user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      const adminAliases = [
-        'admin',
-        'mastercraft',
-        'admin@mastercraftauto.com',
-        'admin@mastercraft.com',
-        'shop@mastercraftautony.com',
-        'admin@mastercraftny.com',
-        'admin@mastercraftauto',
-      ];
-      if (adminAliases.includes(email) || email.startsWith('admin@')) {
-        user = await prisma.user.findUnique({ where: { email: 'admin@mastercraftautony.com' } });
-      } else if (!email.includes('@')) {
-        user = await prisma.user.findUnique({ where: { email: `${email}@mastercraftautony.com` } });
-      }
-    }
-
-    if (!user) {
-      console.warn(`[auth/login] No account found for email/identifier: "${email}"`);
       throw new ApiError(401, 'Invalid email or password');
     }
 
-    let passwordValid = await verifyPassword(password, user.password);
-    if (!passwordValid && user.email === 'admin@mastercraftautony.com') {
-      const allowed = ['mastercraft2026!', 'mastercraft2026', 'mastercraft!'];
-      if (
-        allowed.includes(password.toLowerCase()) ||
-        password === 'Mastercraft2026!' ||
-        password === 'Mastercraft2026'
-      ) {
-        passwordValid = true;
-      }
-    }
-
-    if (!passwordValid) {
-      console.warn(`[auth/login] Password mismatch for user: "${user.email}"`);
-      throw new ApiError(401, 'Invalid email or password');
-    }
-
-    console.log(`[auth/login] Successfully authenticated: "${user.email}"`);
+    if (!(await verifyPassword(password, user.password))) throw new ApiError(401, 'Invalid email or password');
     res.json({ user: publicUser(user), token: signToken({ sub: user.id, email: user.email, role: user.role }) });
   }));
 

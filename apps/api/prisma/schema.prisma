@@ -72,6 +72,9 @@ model Customer {
   phone       String?
   email       String?
   address     String?
+  city        String?
+  state       String?
+  zipCode     String?
   notes       String?
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
@@ -600,12 +603,17 @@ model RecurringExpensePayment {
 }
 
 model RepairAuthorization {
-  id          String   @id @default(cuid())
-  jobId       String
-  fileName    String
-  filePath    String
-  status      String   @default("generated")
-  generatedAt DateTime @default(now())
+  id                    String   @id @default(cuid())
+  jobId                 String
+  fileName              String
+  filePath              String
+  status                String   @default("generated")
+  generatedAt           DateTime @default(now())
+  docusealSubmissionId  String?  @unique
+  docusealSignerEmail   String?
+  docusealStatus        String?
+  docusealCompletedAt   DateTime?
+  docusealFields        String?
 
   job Job @relation(fields: [jobId], references: [id])
 
