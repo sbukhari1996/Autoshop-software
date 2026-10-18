@@ -6,7 +6,8 @@ import multer from 'multer';
 import PDFDocument from 'pdfkit';
 import { PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
-import type { DocuSealFieldPlacement } from '../docuseal.js';
+import { signedAuthorizationDownloadName } from '../authorization-document-name.js';
+import type { AuthorizationFieldPlacement } from '../authorization-fields.js';
 import { optionalText, requiredText } from '../validation.js';
 
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
@@ -102,13 +103,16 @@ export function createOperationsRouter(prisma: PrismaClient) {
   router.get('/documents/:documentId/download', asyncHandler(async (req, res) => {
     const documentId = routeParam(req, 'documentId');
     const [claimDocument, jobDocument, customerDocument] = await Promise.all([
-      prisma.claimDocument.findUnique({ where: { id: documentId } }),
-      prisma.jobDocument.findUnique({ where: { id: documentId } }),
-      prisma.customerDocument.findUnique({ where: { id: documentId } }),
+      prisma.claimDocument.findUnique({ where: { id: documentId }, include: { claim: { select: { customer: { select: { firstName: true, lastName: true } } } } } }),
+      prisma.jobDocument.findUnique({ where: { id: documentId }, include: { job: { select: { customer: { select: { firstName: true, lastName: true } } } } } }),
+      prisma.customerDocument.findUnique({ where: { id: documentId }, include: { customer: { select: { firstName: true, lastName: true } } } }),
     ]);
     const document = claimDocument || jobDocument || customerDocument;
     if (!document) throw new ApiError(404, 'Document not found');
-    await sendStoredFile(res, document.filePath, document.fileName);
+    const customer = claimDocument?.claim.customer || jobDocument?.job.customer || customerDocument?.customer;
+    const customerName = `${customer?.firstName || ''} ${customer?.lastName || ''}`.trim();
+    const downloadName = signedAuthorizationDownloadName(document.fileName, document.documentType, customerName);
+    await sendStoredFile(res, document.filePath, downloadName);
   }));
 
   router.delete('/documents/:documentId', asyncHandler(async (req, res) => {
@@ -179,14 +183,17 @@ function requiredDocumentType(value: unknown) {
   return documentType;
 }
 
-async function sendStoredFile(res: { type: (value: string) => { send: (value: Buffer) => void } }, filePath: string, fileName: string) {
+async function sendStoredFile(res: { type: (value: string) => { set: (name: string, value: string) => { send: (value: Buffer) => void } } }, filePath: string, fileName: string) {
   const resolvedPath = path.resolve(process.cwd(), filePath);
   const relativePath = path.relative(uploadDirectory, resolvedPath);
   if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) throw new ApiError(400, 'Stored file path is invalid');
   try {
     await stat(resolvedPath);
     const contents = await readFile(resolvedPath);
-    res.type(path.extname(fileName) || 'application/octet-stream').send(contents);
+    const safeDownloadName = fileName.replace(/["\\\r\n]/g, '_');
+    res.type(path.extname(fileName) || 'application/octet-stream')
+      .set('Content-Disposition', `attachment; filename="${safeDownloadName}"`)
+      .send(contents);
   } catch {
     throw new ApiError(404, 'Stored file not found');
   }
@@ -246,7 +253,7 @@ async function createStoredAuthorization(
       claimId: owner.claimId,
       fileName,
       filePath: path.relative(process.cwd(), filePath),
-      docusealFields: JSON.stringify(generated.fieldPlacements),
+      authorizationFields: JSON.stringify(generated.fieldPlacements),
       status: 'generated',
     },
   });
@@ -276,7 +283,7 @@ async function createAuthorizationPdf(job: {
   const chunks: Buffer[] = [];
   document.on('data', (chunk: Buffer) => chunks.push(chunk));
   const finished = new Promise<Buffer>((resolve) => document.on('end', () => resolve(Buffer.concat(chunks))));
-  const fieldPlacements: DocuSealFieldPlacement[] = [];
+  const fieldPlacements: AuthorizationFieldPlacement[] = [];
   const pageWidth = 544;
   const customerName = `${job.customer.firstName} ${job.customer.lastName}`;
   const claim = job.claim;
@@ -290,22 +297,25 @@ async function createAuthorizationPdf(job: {
   const state = job.customer.state || customerAddress.state || claimAddress.state;
   const zipCode = job.customer.zipCode || customerAddress.zipCode || claimAddress.zipCode;
   const field = (label: string, content: string, x: number, width: number) => {
-    document.font('Times-Roman').fontSize(8.5).text(`${label}:`, x, y, { continued: true });
-    document.text(` ${content || ' '}`, { continued: false });
-    document.moveTo(x + 1, y + 11).lineTo(x + width, y + 11).strokeColor('#555').stroke();
+    document.font('Times-Roman').fontSize(9);
+    const labelText = `${label}:`;
+    document.text(labelText, x, y, { continued: true });
+    const availableWidth = Math.max(0, width - document.widthOfString(labelText) - 3);
+    document.text(` ${fitTextToWidth(content || ' ', availableWidth, document.widthOfString.bind(document))}`, { continued: false });
+    document.moveTo(x + 1, y + 12).lineTo(x + width, y + 12).strokeColor('#555').stroke();
   };
   const section = (title: string, text: string, renderBody?: (bodyY: number) => void) => {
     y += 15;
-    document.font('Times-Bold').fontSize(10.5).text(title, 34, y, { width: pageWidth, align: 'center', underline: true });
+    document.font('Times-Bold').fontSize(11).text(title, 34, y, { width: pageWidth, align: 'center', underline: true });
     y += 13;
     const bodyY = y;
-    document.font('Times-Roman').fontSize(8.7);
+    document.font('Times-Roman').fontSize(9.1);
     if (renderBody) renderBody(bodyY);
     else document.text(text, 34, bodyY, { width: pageWidth, lineGap: 0.2, align: 'left' });
     y += document.heightOfString(text, { width: pageWidth, lineGap: 0.2 });
     const initialText = 'Initial here: x ____________________';
     const initialUnderline = '____________________';
-    document.font('Times-Roman').fontSize(8.5);
+    document.font('Times-Roman').fontSize(9);
     document.text(initialText, 390, y + 4, { width: 188, align: 'right' });
     const initialTextX = 390 + 188 - document.widthOfString(initialText);
     fieldPlacements.push({
@@ -320,9 +330,9 @@ async function createAuthorizationPdf(job: {
     });
   };
   let y = 34;
-  document.font('Times-Bold').fontSize(15).text('MASTERCRAFT AUTO REPAIR & COLLISION', 34, y, { width: pageWidth, align: 'center' });
+  document.font('Times-Bold').fontSize(16).text('MASTERCRAFT AUTO REPAIR & COLLISION', 34, y, { width: pageWidth, align: 'center' });
   y += 18;
-  document.font('Times-Roman').fontSize(8.4).text('38-21 23rd Street, Long Island City, NY 11101', 34, y, { width: pageWidth, align: 'center' });
+  document.font('Times-Roman').fontSize(9).text('38-21 23rd Street, Long Island City, NY 11101', 34, y, { width: pageWidth, align: 'center' });
   y += 11; document.text('Tel: (718) 603-0412  ·  (718) 578-4563', 34, y, { width: pageWidth, align: 'center' });
   y += 11; document.text('Website: www.mastercraftauto.com', 34, y, { width: pageWidth, align: 'center' });
   y += 11; document.text('Email: shop@mastercraftautony.com', 34, y, { width: pageWidth, align: 'center' });
@@ -347,7 +357,7 @@ async function createAuthorizationPdf(job: {
   const paymentRemainder = ' MASTERCRAFT AUTO REPAIR & COLLISION. I understand that by signing this authorization, I will give permission to also make 2 party check.';
   const paymentText = `${paymentPrefix}${paymentInsuranceBlank}${paymentMiddle}${paymentClaimBlank}${paymentFirstLineEnd}${paymentRemainder}`;
   section('Direction of Payment', paymentText, (bodyY) => {
-    document.font('Times-Roman').fontSize(8.7);
+    document.font('Times-Roman').fontSize(9.1);
     const firstFieldX = 34 + document.widthOfString(paymentPrefix);
     const secondFieldX = firstFieldX + document.widthOfString(paymentInsuranceBlank) + document.widthOfString(paymentMiddle);
     document.text(paymentPrefix, 34, bodyY);
@@ -367,16 +377,25 @@ async function createAuthorizationPdf(job: {
   section('Department of Motor Vehicles Notification', 'I Authorize MASTERCRAFT AUTO REPAIR & COLLISION to charge $150.00 per day storage for above vehicle upon completion of repairs or if vehicle redeemed a total loss.');
   y += 9;
   const tableY = y;
-  document.font('Times-Bold').fontSize(8.5); document.rect(34, tableY, pageWidth, 24).stroke(); document.moveTo(218, tableY).lineTo(218, tableY + 24).stroke(); document.moveTo(402, tableY).lineTo(402, tableY + 24).stroke();
-  document.text('Owner/person in charge (Print Name)', 39, tableY + 5); document.font('Times-Roman').fontSize(8.5).text(customerName || ' ', 39, tableY + 15, { width: 175 }); document.font('Times-Bold').fontSize(8.5).text('Signature', 223, tableY + 5); document.text('Date', 407, tableY + 5);
+  document.font('Times-Bold').fontSize(9); document.rect(34, tableY, pageWidth, 24).stroke(); document.moveTo(218, tableY).lineTo(218, tableY + 24).stroke(); document.moveTo(402, tableY).lineTo(402, tableY + 24).stroke();
+  document.text('Owner/person in charge (Print Name)', 39, tableY + 5); document.font('Times-Roman').fontSize(9).text(customerName || ' ', 39, tableY + 15, { width: 175 }); document.font('Times-Bold').fontSize(9).text('Signature', 223, tableY + 5); document.text('Date', 407, tableY + 5);
   y = tableY + 45; field('Address where signed', '38-21 23rd St', 34, 270); field('City', 'Long Island City', 310, 125); field('State / Zip-Code', 'NY 11101', 440, 138);
-  y += 23; document.font('Times-Bold').fontSize(8.7).text('ALL OF THE ABOVE ENTRIES MUST BE MADE AT THE TIME THE AUTHORIZATION TO REPAIR IS SIGNED.', 34, y, { width: pageWidth, align: 'center' });
+  y += 23; document.font('Times-Bold').fontSize(9.1).text('ALL OF THE ABOVE ENTRIES MUST BE MADE AT THE TIME THE AUTHORIZATION TO REPAIR IS SIGNED.', 34, y, { width: pageWidth, align: 'center' });
   fieldPlacements.push(
     { name: 'Signature', type: 'signature', required: true, x: 223, y: tableY + 14.5, w: 173, h: 8.5, page: 1 },
     { name: 'Date', type: 'date', required: true, x: 407, y: tableY + 14.5, w: 166, h: 8.5, page: 1 },
   );
   document.end();
   return { pdf: await finished, fieldPlacements };
+}
+
+function fitTextToWidth(text: string, maxWidth: number, measure: (text: string) => number) {
+  if (measure(text) <= maxWidth) return text;
+  const ellipsis = '...';
+  if (measure(ellipsis) > maxWidth) return '';
+  let fitted = text;
+  while (fitted.length && measure(`${fitted}${ellipsis}`) > maxWidth) fitted = fitted.slice(0, -1);
+  return `${fitted.trimEnd()}${ellipsis}`;
 }
 
 function splitAuthorizationAddress(value: string) {

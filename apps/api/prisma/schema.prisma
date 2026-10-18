@@ -611,11 +611,15 @@ model RepairAuthorization {
   filePath              String
   status                String   @default("generated")
   generatedAt           DateTime @default(now())
-  docusealSubmissionId  String?  @unique
-  docusealSignerEmail   String?
-  docusealStatus        String?
-  docusealCompletedAt   DateTime?
-  docusealFields        String?
+  legacyDocuSealSubmissionId String?  @unique @map("docusealSubmissionId")
+  legacyDocuSealSignerEmail  String?  @map("docusealSignerEmail")
+  legacyDocuSealStatus       String?  @map("docusealStatus")
+  legacyDocuSealCompletedAt  DateTime? @map("docusealCompletedAt")
+  authorizationFields   String?  @map("docusealFields")
+  documensoEnvelopeId   String?  @unique
+  documensoSignerEmail  String?
+  documensoStatus       String?
+  documensoCompletedAt  DateTime?
 
   job   Job?   @relation(fields: [jobId], references: [id], onDelete: Restrict)
   claim Claim? @relation(fields: [claimId], references: [id], onDelete: Restrict)

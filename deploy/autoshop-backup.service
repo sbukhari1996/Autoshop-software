@@ -9,5 +9,5 @@ User=root
 UMask=0077
 Environment=RCLONE_CONFIG=/root/.config/rclone/rclone.conf
 Environment=RCLONE_REMOTE=gdrive-crypt:
-ExecStart=/opt/autoshop/app/scripts/backup-linux.sh
+ExecStart=/opt/autoshop/backup/backup-linux.sh
 TimeoutStartSec=1h

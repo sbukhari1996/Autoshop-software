@@ -634,13 +634,13 @@ body { color: var(--text); background: #f5f6f7; }
 .authorization-signing-error { margin: -4px 0 0; color: #a7471b; font-size: .7rem; text-align: right; }
 .authorization-signing-hint { margin: -4px 0 0; color: #718087; font-size: .7rem; text-align: right; }
 .authorization-signing-status { margin: -4px 0 0; color: #2c6847; font-size: .7rem; text-align: right; }
-.docuseal-send-modal form { display: grid; gap: 12px; }
-.docuseal-recipient-options { display: grid; gap: 8px; margin: 0; padding: 12px; border: 1px solid #d9e0e8; border-radius: 10px; }
-.docuseal-recipient-options legend { padding: 0 4px; font-weight: 700; }
-.docuseal-recipient-options label { display: flex; align-items: flex-start; gap: 8px; }
-.docuseal-recipient-options input { width: auto; margin: 3px 0 0; }
-.docuseal-send-modal .authorization-signing-status { margin: 0; text-align: left; }
-@media print { .docuseal-send-backdrop { display: none !important; } }
+.documenso-send-modal form { display: grid; gap: 12px; }
+.documenso-recipient-options { display: grid; gap: 8px; margin: 0; padding: 12px; border: 1px solid #d9e0e8; border-radius: 10px; }
+.documenso-recipient-options legend { padding: 0 4px; font-weight: 700; }
+.documenso-recipient-options label { display: flex; align-items: flex-start; gap: 8px; }
+.documenso-recipient-options input { width: auto; margin: 3px 0 0; }
+.documenso-send-modal .authorization-signing-status { margin: 0; text-align: left; }
+@media print { .documenso-send-backdrop { display: none !important; } }
 .authorization-header { position: relative; padding-bottom: 7px; border-bottom: 1.2px solid #111; }
 .authorization-header h1 { margin: 0 0 3px; font-size: 15pt; letter-spacing: 0; }
 .authorization-header p { margin: 1px 0; font-size: 8.4pt; }
@@ -1314,14 +1314,14 @@ select:focus-visible, textarea:focus-visible {
 	.app-shell:has(.authorization-mode) > .sidebar, .main-panel:has(.authorization-mode) > .topbar, .page-content:has(.authorization-mode) > :not(.modal-backdrop) { display: none !important; }
 	.page-content:has(.authorization-mode) { max-width: none; padding: 0; margin: 0; }
 	.authorization-mode { width: 100%; max-width: none; }
-	.authorization-paper { position: static; inset: auto; page: authorization; box-sizing: border-box; width: 8in; min-height: 0; height: auto; margin: 0 auto; padding: .18in .28in; font-size: 9pt; line-height: 1.15; }
+	.authorization-paper { position: static; inset: auto; page: authorization; box-sizing: border-box; width: 8in; min-height: 0; height: auto; margin: 0 auto; padding: .18in .28in; font-size: 10.25pt; line-height: 1.2; }
 	.claim-workspace { width: 100%; max-height: none; overflow: visible; }
 	.authorization-header { padding-bottom: 5px; }
-	.authorization-header h1 { font-size: 12pt; }
-	.authorization-header p { font-size: 7.5pt; }
-	.authorization-recognized { margin: 6px 0 4px; font-size: 9.5pt; }
+	.authorization-header h1 { font-size: 13.5pt; }
+	.authorization-header p { font-size: 8.25pt; }
+	.authorization-recognized { margin: 6px 0 4px; font-size: 10.75pt; }
 	.authorization-intake { gap: 1px; padding-bottom: 3px; }
-	.authorization-line-row { flex-wrap: nowrap; gap: 4px; min-height: 12px; }
+	.authorization-line-row { flex-wrap: nowrap; gap: 4px; min-height: 14px; }
 	.authorization-paper .authorization-field { flex: 0 1 auto; min-width: 0; }
 	.authorization-paper .date-line { width: 19%; }.authorization-paper .name-line { width: 44%; }.authorization-paper .claim-line { width: 37%; }
 	.authorization-paper .address-line { width: 57%; }.authorization-paper .city-line { width: 43%; }
@@ -1329,19 +1329,19 @@ select:focus-visible, textarea:focus-visible {
 	.authorization-paper .license-line { width: 24%; }.authorization-paper .insurance-line { width: 42%; }.authorization-paper .loss-line { width: 34%; }
 	.authorization-paper .year-line { width: 13%; }.authorization-paper .make-line { width: 18%; }.authorization-paper .model-line { width: 21%; }.authorization-paper .type-line { width: 15%; }.authorization-paper .vehicle-license-line { width: 33%; }
 	.authorization-paper .vin-line { width: 67%; }.authorization-paper .color-line { width: 33%; }
-	.authorization-field b, .authorization-field > span { font-size: 7.5pt; }
+	.authorization-field b, .authorization-field > span { font-size: 8.25pt; }
 	.authorization-field > span { min-width: 0; }
 	.authorization-section { padding: 2px 0 1px; }
-	.authorization-section h3 { margin-bottom: 1px; font-size: 8.5pt; }
-	.authorization-section p { margin: 2px 0; font-size: 9pt; line-height: 1.15; }
+	.authorization-section h3 { margin-bottom: 2px; font-size: 9.25pt; }
+	.authorization-section p { margin: 2px 0; font-size: 10.25pt; line-height: 1.2; }
 	.authorization-initial { margin-top: 1px; font-size: 7pt; }
 	.authorization-bold-center { margin: 2px 0 !important; }
 	.authorization-signing-block { break-inside: avoid; page-break-inside: avoid; }
-	.authorization-signature-table { margin-top: 5px; font-size: 9pt; }
-	.authorization-signature-table th, .authorization-signature-table td { height: 21px; padding: 2px 4px; }
+	.authorization-signature-table { margin-top: 5px; font-size: 10.25pt; }
+	.authorization-signature-table th, .authorization-signature-table td { height: 24px; padding: 2px 4px; }
 	.authorization-signed-fields { grid-template-columns: 1.4fr 1fr 1.3fr; gap: 6px; margin-top: 4px; }
 	.authorization-signed-fields .authorization-field { min-height: 14px; }
-	.authorization-final { margin-top: 5px; font-size: 9pt; }
+	.authorization-final { margin-top: 5px; font-size: 10.25pt; }
 	.authorization-section { break-inside: auto; page-break-inside: auto; }
 }
 .estimate-line-table {

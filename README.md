@@ -61,7 +61,7 @@ docker compose -f docker-compose.invoice-test.yml up -d --build
 Open http://localhost:5174 and sign in with an existing account. The test API uses the same database, authentication secret, and uploads volume as the main local instance; it does not run migrations or seed/update an admin account. Changes made to invoices, payments, customers, or uploaded documents in the test instance affect the shared data. Stop the test instance with `docker compose -f docker-compose.invoice-test.yml down` (do not add `-v`).
 ### Ubuntu production backups
 
-On the Ubuntu VM, `deploy/autoshop-backup.timer` runs `scripts/backup-linux.sh` daily at 2:00 AM New York time. It creates a verified PostgreSQL custom-format dump, an archive of the API uploads volume, a metadata manifest, and a separate SHA-256 checksum list under `/opt/autoshop/backups/daily/`. It then copies that complete backup into a client-side encrypted rclone crypt remote on Google Drive and verifies the remote copy by downloading and comparing its contents. The transfer uses `rclone copy` and never deletes remote files.
+On the Ubuntu VM, `deploy/autoshop-backup.timer` runs the protected copy of `scripts/backup-linux.sh` installed at `/opt/autoshop/backup/backup-linux.sh` daily at 2:00 AM New York time. It creates verified PostgreSQL custom-format dumps for the shop and Documenso databases, and a legacy DocuSeal database dump when that database is still running. It also archives the API uploads volume and Documenso's root-only environment, Compose file, and signing certificate. A metadata manifest and separate SHA-256 checksums are stored under `/opt/autoshop/backups/daily/`. The script copies the complete backup into a client-side encrypted rclone crypt remote on Google Drive and verifies the remote copy by downloading and comparing its contents. The transfer uses `rclone copy` and never deletes remote files. Protect local backups as credentials are included in the Documenso recovery archive.
 
 Configure rclone on the VM as root:
 
@@ -75,47 +75,28 @@ Complete Google's authorization in the browser requested by rclone. On a headles
 
 The Google Drive copy protects against VM or host loss; the local copy remains a fast restore source. The Windows PowerShell task above is independent and does not control the Ubuntu timer.
 
-### DocuSeal signing server
+### Documenso signing
 
-The isolated DocuSeal Compose stack is defined in `deploy/docuseal-compose.yml`. On the shop VM, create `/opt/docuseal/.env` as a root-only file containing randomly generated `DOCUSEAL_DATABASE_PASSWORD` and `DOCUSEAL_SECRET_KEY_BASE` values, then start it with:
+Documenso v2.20.0 is the active signing provider. Its isolated Compose stack, database, and PDF-signing certificate are maintained under `/opt/documenso` on the shop VM. The shop application reaches it on the private Docker network at `http://documenso:3000`; new customer signing links use `https://shop-1.tail1d791.ts.net:8443`. Port 3003 remains bound to the VM's Tailscale IP for older signing links created before the public URL was changed; that compatibility address is tailnet-only. The shop remains on port 443. PostgreSQL is not published. Do not run `docker compose down -v`; that removes the Documenso database volume.
 
-```sh
-cd /opt/autoshop/app
-sudo docker compose --env-file /opt/docuseal/.env -p docuseal -f deploy/docuseal-compose.yml up -d
-```
+In a claim's **Authorization form**, **Send via Documenso** opens a recipient dialog for the claim customer or a different name and email. If the customer has no saved email, manual entry is required. The API creates a saved one-page Letter PDF directly from the claim, with five required initials fields, signature/date fields, and insurance/claim text fields. Documenso emails the request using the configured SMTP account. On status refresh after signing, the API retrieves the signed PDF and saves it to the claim and, if linked, the repair job documents. After a request is completed and its signed copy is saved, the same authorization can be sent again as a new signing envelope; prior signed copies remain in the document list. Pending or uncertain requests stay blocked to prevent duplicate emails. Claim and job documents can be opened, downloaded, or deleted from **Documents & job records**.
 
-DocuSeal is pinned to version 3.3.2 and its PostgreSQL 16 database and application files use separate persistent Docker volumes. It is available at `https://shop-1.tail1d791.ts.net:8443`; the existing shop site remains on port 443. Tailscale Funnel forwards port 8443 to DocuSeal on loopback, and the DocuSeal app is also attached to the shop's private Docker network for server-to-server API access. PostgreSQL is not exposed.
+Configure these secrets outside source control in root-protected `/opt/autoshop/app/.env` on the VM, with restrictive permissions (`chmod 600`):
 
-Funnel makes the DocuSeal web app, including its login page, reachable from the public internet. DocuSeal still requires authentication for administration; use a unique strong password and enable two-factor authentication. Only send signing links to intended customers.
+- `DOCUMENSO_API_TOKEN` (required): API token from the shop's Documenso account.
+- `DOCUMENSO_API_URL` (optional): defaults to `http://documenso:3000/api/v2`.
 
-The DocuSeal email settings use Gmail SMTP (`smtp.gmail.com`, port `587`, STARTTLS) and the shop Gmail sender. The account owner has entered the SMTP details; use DocuSeal's test-email action if delivery has not yet been verified. Do not put the App Password in this repository or send it in chat.
+Documenso's own SMTP password, database credentials, and signing keys remain in `/opt/documenso/.env`; never put them in this repository or chat. The API sends the token in Documenso's `Authorization` header. After updating the API token, recreate the API container so the setting takes effect.
 
-The DocuSeal API key is stored in the shop VM's protected `/opt/autoshop/app/.env` as `DOCUSEAL_API_KEY`. Do not display it or copy it into repository files. The app submits its saved repair-authorization PDF directly to DocuSeal; no template or `DOCUSEAL_TEMPLATE_ID` is required.
+The authenticated signing routes are:
 
-In a claim's **Authorization form**, **Send via DocuSeal** opens a dialog to choose the customer recipient on the claim or enter a different name and email. If the customer has no saved email, the dialog selects manual entry and requires an email before sending. The app creates or reuses a saved one-page Letter authorization PDF directly from the claim, so a repair order is not required; it includes the customer's structured address and the existing shop signing address, then submits it with five required initials fields, required signature/date fields, and required insurance/claim text fields already placed. DocuSeal sends the signing email through its configured SMTP account. After signing, the PDF is saved in the claim's documents and, when the claim is linked to a repair order, separately in the repair job's documents.
+- `POST /api/claims/:claimId/authorization.pdf` — creates a saved authorization PDF from a claim without a repair order.
+- `POST /api/repair-authorizations/:authorizationId/send` — accepts `{ "recipientName": "...", "recipientEmail": "..." }` and returns the created signing status.
+- `GET /api/repair-authorizations/:authorizationId/signing` — refreshes the status and imports a completed signed PDF.
 
-DocuSeal's public application URL is configured as `https://shop-1.tail1d791.ts.net:8443`. The API server reaches DocuSeal on the private Docker network. Configure these API-server environment variables outside source control:
+DocuSeal has been removed from the active app and its containers, database volume, and stored files are purged from the VM after an encrypted backup. Historical DocuSeal IDs/statuses remain in their original shop-database columns as legacy records; the app will not send or poll them. Existing DocuSeal signing links no longer work after this cutover. The Documenso signing certificate is locally generated and supports PDF signatures without a public certificate-authority identity.
 
-- `DOCUSEAL_API_KEY` (required): DocuSeal API key.
-- `DOCUSEAL_WEBHOOK_SECRET` (required for completion sync): the HMAC secret generated in DocuSeal's webhook settings.
-- `DOCUSEAL_BASE_URL` (optional): DocuSeal API base URL, defaulting to `http://docuseal:3000/api` for the API container's internal network connection.
-
-Keep both secrets in the root/shop-protected `/opt/autoshop/app/.env` with restrictive permissions (`chmod 600`) and out of source control. Recreate the API container after updating them so they take effect:
-
-```sh
-cd /opt/autoshop/app
-docker compose -f docker-compose.yml -f docker-compose.prod.yml --env-file .env up -d --build api
-```
-
-The configured DocuSeal webhook listens only for `submission.completed` and posts to `http://collision-shop-api:4000/api/webhooks/docuseal` over the shared private Docker network. Set `DOCUSEAL_WEBHOOK_SECRET` to the webhook's HMAC signing secret. The API verifies `X-Docuseal-Signature` against the raw request body and rejects timestamps outside five minutes. On completion it downloads the signed PDFs and adds them to the associated claim and job documents as `repair_authorization`.
-
-The PDF prefill uses the linked customer's name, structured street/city/state/ZIP and phone; the linked claim number, insurance and incident date; and linked vehicle details with claim vehicle details as fallback. The signer name and email are confirmed in the send dialog. Signing fields are positioned from the generated PDF layout: initials at each of the five authorization sections, text fields in Direction of Payment, and signature/date in the signature row. For full-size printing from DocuSeal, download the signed PDF rather than printing the signing webpage, which includes the signing controls and may scale the document.
-
-The authenticated API routes are:
-
-- `POST /api/claims/:claimId/authorization.pdf` — creates a saved authorization PDF from a claim without requiring a linked repair order.
-- `POST /api/repair-authorizations/:authorizationId/send` — accepts `{ "recipientName": "...", "recipientEmail": "..." }`, sends the saved PDF to the specified recipient and returns `201` with `{ authorizationId, jobId, claimId, submissionId, signerEmail, status, completedAt }`.
-- `GET /api/repair-authorizations/:authorizationId/signing` — return that status object (with `status: "not_sent"` before sending).
+The Documenso stack source is `deploy/documenso-compose.yml`; it is installed as `/opt/documenso/compose.yml` on the VM. Secrets must be generated or entered directly on the VM and never committed.
 
 ### Dockhand Docker management
 

@@ -1,0 +1,63 @@
+services:
+  app:
+    image: documenso/documenso:v2.20.0
+    container_name: documenso-app
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3003:3000"
+      - "100.64.134.8:3003:3000"
+    environment:
+      PORT: "3000"
+      NEXT_PUBLIC_WEBAPP_URL: ${DOCUMENSO_WEBAPP_URL:?Set DOCUMENSO_WEBAPP_URL}
+      NEXT_PRIVATE_INTERNAL_WEBAPP_URL: http://localhost:3000
+      NEXT_PRIVATE_DATABASE_URL: postgresql://documenso:${DOCUMENSO_DATABASE_PASSWORD:?Set DOCUMENSO_DATABASE_PASSWORD}@database:5432/documenso
+      NEXT_PRIVATE_DIRECT_DATABASE_URL: postgresql://documenso:${DOCUMENSO_DATABASE_PASSWORD:?Set DOCUMENSO_DATABASE_PASSWORD}@database:5432/documenso
+      NEXTAUTH_SECRET: ${DOCUMENSO_NEXTAUTH_SECRET:?Set DOCUMENSO_NEXTAUTH_SECRET}
+      NEXT_PRIVATE_ENCRYPTION_KEY: ${DOCUMENSO_ENCRYPTION_KEY:?Set DOCUMENSO_ENCRYPTION_KEY}
+      NEXT_PRIVATE_ENCRYPTION_SECONDARY_KEY: ${DOCUMENSO_ENCRYPTION_SECONDARY_KEY:?Set DOCUMENSO_ENCRYPTION_SECONDARY_KEY}
+      NEXT_PRIVATE_SMTP_TRANSPORT: smtp-auth
+      NEXT_PRIVATE_SMTP_HOST: ${DOCUMENSO_SMTP_HOST:-smtp.gmail.com}
+      NEXT_PRIVATE_SMTP_PORT: ${DOCUMENSO_SMTP_PORT:-587}
+      NEXT_PRIVATE_SMTP_USERNAME: ${DOCUMENSO_SMTP_USERNAME:-shop@mastercraftautony.com}
+      NEXT_PRIVATE_SMTP_PASSWORD: ${DOCUMENSO_SMTP_PASSWORD:-}
+      NEXT_PRIVATE_SMTP_SECURE: "false"
+      NEXT_PUBLIC_DISABLE_SIGNUP: ${DOCUMENSO_DISABLE_SIGNUP:-false}
+      NEXT_PRIVATE_SMTP_FROM_ADDRESS: shop@mastercraftautony.com
+      NEXT_PRIVATE_SMTP_FROM_NAME: Mastercraft Auto Repair & Collision
+      NEXT_PRIVATE_SIGNING_TRANSPORT: local
+      NEXT_PRIVATE_SIGNING_LOCAL_FILE_PATH: /opt/documenso/cert.p12
+      NEXT_PRIVATE_SIGNING_PASSPHRASE: ${DOCUMENSO_SIGNING_PASSPHRASE:?Set DOCUMENSO_SIGNING_PASSPHRASE}
+    volumes:
+      - /opt/documenso/cert.p12:/opt/documenso/cert.p12:ro
+    networks:
+      default: {}
+      autoshop:
+        aliases:
+          - documenso
+
+  database:
+    image: postgres:15-alpine
+    container_name: documenso-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: documenso
+      POSTGRES_USER: documenso
+      POSTGRES_PASSWORD: ${DOCUMENSO_DATABASE_PASSWORD:?Set DOCUMENSO_DATABASE_PASSWORD}
+    volumes:
+      - documenso_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U documenso -d documenso"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  documenso_postgres:
+
+networks:
+  autoshop:
+    external: true
+    name: autoshopsoftware_default

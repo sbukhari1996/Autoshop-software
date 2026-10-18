@@ -204,6 +204,7 @@ type RepairAuthorizationSigning = {
   signerEmail: string | null;
   status: string;
   completedAt: string | null;
+  provider?: "legacy_docuseal" | "documenso";
 };
 type DocumentRecord = {
   id: string;
@@ -222,6 +223,11 @@ type DocumentsData = {
   jobDocuments: DocumentRecord[];
   customerDocuments: DocumentRecord[];
 };
+function getDownloadFileName(response: Response, fallback: string) {
+  const contentDisposition = response.headers.get("Content-Disposition") || "";
+  const match = /filename="?([^";]+)"?/i.exec(contentDisposition);
+  return match?.[1] || fallback;
+}
 type ReportsData = DashboardData & {
   jobsByStatus: Array<{ status: string; count: number }>;
   estimateTotals: { count: number; total: number };
@@ -1520,6 +1526,7 @@ function ClaimRecordsPanel({ claim, selectedJobId }: { claim: Claim; selectedJob
   const [files, setFiles] = React.useState<File[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
+  const [deletingDocumentId, setDeletingDocumentId] = React.useState("");
   const [error, setError] = React.useState("");
   async function loadHub() {
     setLoading(true);
@@ -1537,6 +1544,19 @@ function ClaimRecordsPanel({ claim, selectedJobId }: { claim: Claim; selectedJob
   }
   React.useEffect(() => { void loadHub(); }, [claim.id]);
   React.useEffect(() => { setTarget(selectedJobId || "claim"); }, [selectedJobId]);
+  async function deleteDocument(documentRecord: DocumentRecord) {
+    if (!window.confirm(`Delete "${documentRecord.fileName}"? This cannot be undone.`)) return;
+    setDeletingDocumentId(documentRecord.id);
+    setError("");
+    try {
+      await fetchJson(`/documents/${documentRecord.id}`, { method: "DELETE" });
+      await loadHub();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete document");
+    } finally {
+      setDeletingDocumentId("");
+    }
+  }
   async function upload(event: React.FormEvent) {
     event.preventDefault();
     if (!file) { setError("Choose a file before uploading."); return; }
@@ -1566,7 +1586,7 @@ function ClaimRecordsPanel({ claim, selectedJobId }: { claim: Claim; selectedJob
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = documentRecord.fileName;
+        link.download = getDownloadFileName(response, documentRecord.fileName);
         link.click();
         window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
       } else {
@@ -1590,7 +1610,7 @@ function ClaimRecordsPanel({ claim, selectedJobId }: { claim: Claim; selectedJob
     {error && <div className="error-banner">{error}</div>}
     <form className="records-upload" onSubmit={upload}><label>Attach to<select value={target} onChange={(event) => setTarget(event.target.value)}><option value="claim">Claim file</option>{jobs.map((job) => <option value={job.id} key={job.id}>{job.jobNumber} · {job.status}</option>)}</select></label><label>Document type<select value={documentType} onChange={(event) => setDocumentType(event.target.value as typeof documentTypes[number])}>{documentTypes.map((type) => <option value={type} key={type}>{type.replaceAll("_", " ")}</option>)}</select></label><label>Description<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Optional note" /></label><label className="records-file">File<input type="file" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label><button className="orange-button" disabled={busy}>{busy ? "Uploading..." : "Upload record"}</button></form>
     {loading ? <p className="records-muted">Loading claim records...</p> : <>
-      <section className="records-section"><div className="records-section-heading"><h4>Uploaded documents</h4><span>{documents.length} records</span></div>{documents.length ? <div className="records-list">{documents.map(({ document, owner }) => <div className="record-row" key={document.id}><div><strong>{document.fileName}</strong><small>{document.documentType || "other"}{document.description ? ` · ${document.description}` : ""}</small></div><span>{owner}</span><time>{formatDateTime(document.createdAt)}</time><div className="document-actions"><button type="button" onClick={() => void accessDocument(document, false)}>Open</button><button type="button" onClick={() => void accessDocument(document, true)}>Download</button></div></div>)}</div> : <p className="records-muted">No local documents are attached yet.</p>}</section>
+      <section className="records-section"><div className="records-section-heading"><h4>Uploaded documents</h4><span>{documents.length} records</span></div>{documents.length ? <div className="records-list">{documents.map(({ document, owner }) => <div className="record-row" key={document.id}><div><strong>{document.fileName}</strong><small>{document.documentType || "other"}{document.description ? ` · ${document.description}` : ""}</small></div><span>{owner}</span><time>{formatDateTime(document.createdAt)}</time><div className="document-actions"><button type="button" onClick={() => void accessDocument(document, false)}>Open</button><button type="button" onClick={() => void accessDocument(document, true)}>Download</button><button type="button" className="danger-button" disabled={Boolean(deletingDocumentId)} onClick={() => void deleteDocument(document)}>{deletingDocumentId === document.id ? "Deleting..." : "Delete"}</button></div></div>)}</div> : <p className="records-muted">No local documents are attached yet.</p>}</section>
       <section className="records-section"><div className="records-section-heading"><h4>Invoices &amp; payments</h4><span>{linkedInvoices.length} linked</span></div>{linkedInvoices.length ? linkedInvoices.map((invoice) => <div className="record-summary invoice-record" key={invoice.id}><div><strong>{invoice.invoiceNumber} · {invoice.status}</strong><small>{invoice.job?.jobNumber || "Claim invoice"} · Total ${invoice.total.toFixed(2)} · Paid ${invoice.amountPaid.toFixed(2)} · Balance ${invoice.balanceDue.toFixed(2)}</small></div>{invoice.payments.length ? <div className="invoice-payment-list">{invoice.payments.map((payment) => <small key={payment.id}>{payment.method.replace("_", " ")} · ${payment.amount.toFixed(2)} · {formatDateTime(payment.date)}{payment.notes ? ` · ${payment.notes}` : ""}</small>)}</div> : <small>No payments recorded</small>}</div>) : <p className="records-muted">No invoices are linked to this claim or its repair orders yet.</p>}</section>
       {jobs.map((job) => <section className="records-section" key={job.id}><div className="records-section-heading"><h4>{job.jobNumber} <span className={`status-pill ${job.status === "completed" ? "green" : "orange"}`}>{job.status}</span></h4><span>Revenue ${job.totalRevenue.toFixed(2)} · Expenses ${(job.totalExpenses ?? job.expenses?.reduce((sum, expense) => sum + expense.amount, 0) ?? 0).toFixed(2)}</span></div>{(job.estimates || []).map((estimate) => <div className="record-summary" key={estimate.id}><strong>Estimate {estimate.estimateNumber || " draft"} · ${estimate.totalAmount.toFixed(2)}</strong><small>{estimate.status} · {estimate.lineItems.length} line items: {estimate.lineItems.map((line) => line.description).join(", ")}</small></div>)}{(job.expenses || []).map((expense) => <div className="record-summary" key={expense.id}><strong>Expense · ${expense.amount.toFixed(2)}</strong><small>{expense.description}{expense.category ? ` · ${expense.category}` : ""} · {formatDateTime(expense.expenseDate)}</small></div>)}{(job.statusHistory || []).map((entry) => <div className="record-summary" key={entry.id}><strong>Status {entry.fromStatus} → {entry.toStatus}</strong><small>{entry.note || "No note"} · {formatDateTime(entry.createdAt)}</small></div>)}{(job.authorizations || []).map((authorization) => <div className="record-summary" key={authorization.id}><strong>Repair authorization · {authorization.status}</strong><small>{authorization.fileName} · {formatDateTime(authorization.generatedAt)}</small></div>)}</section>)}
     </>}
@@ -1771,26 +1791,27 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
   const signingStatusText = signing?.status === "completed"
     ? `Signed by ${signing.signerEmail || customer?.email || "customer"}${signing.completedAt ? ` on ${new Date(signing.completedAt).toLocaleDateString()}` : ""}. The signed PDF is saved in this claim's documents${signing.jobId ? " and the job documents" : ""}.`
     : signing?.status === "send_unknown" || signing?.status === "sending"
-      ? "Delivery status is not confirmed. Check DocuSeal before trying again to avoid sending a duplicate."
+      ? `Delivery status is not confirmed. Check ${signing.provider === "legacy_docuseal" ? "the legacy DocuSeal record" : "Documenso"} before trying again to avoid sending a duplicate.`
       : signing?.submissionId
-        ? `Sent to DocuSeal for ${signing.signerEmail || customer?.email || "the recipient"}. Status: ${signing.status.replace(/_/g, " ")}.`
+        ? `${signing.provider === "legacy_docuseal" ? "Legacy DocuSeal record" : "Sent to Documenso"} for ${signing.signerEmail || customer?.email || "the recipient"}. Status: ${signing.status.replace(/_/g, " ")}.`
         : signing?.status === "send_failed"
           ? "The last delivery attempt failed. Review the error and recipient details before retrying."
           : signing && signing.status !== "not_sent"
             ? `Signing status: ${signing.status.replace(/_/g, " ")}. Confirm the status before retrying.`
             : "";
-  const hasExistingSubmission = Boolean(signing?.submissionId) || Boolean(signing && !["not_sent", "send_failed"].includes(signing.status));
-  return <div className="authorization-preview"><div className="authorization-actions"><button type="button" className="orange-button print-button" onClick={() => window.print()}>Print authorization</button><button type="button" className="secondary-button download-button" onClick={() => void downloadAuthorization()} disabled={downloadBusy || signingBusy || authorizationLookupBusy || !authorizationStatusReady}>{downloadBusy ? "Preparing PDF..." : "Download PDF"}</button><button type="button" className="secondary-button" onClick={openSendDialog} disabled={signingBusy || sendBlocked || hasExistingSubmission || authorizationLookupBusy || !authorizationStatusReady || authorizationLookupFailed || (!jobId && !claimId)}>{authorizationLookupBusy || !authorizationStatusReady ? "Checking status..." : signingBusy ? "Sending..." : "Send via DocuSeal"}</button></div>{!jobId && claimId && <p className="authorization-signing-hint" role="status">This authorization can be sent directly from the claim without a repair order.</p>}{(authorizationLookupBusy || !authorizationStatusReady) && <p className="authorization-signing-status" role="status">Checking for an existing authorization...</p>}{authorizationLookupFailed && <button type="button" className="secondary-button" onClick={() => setAuthorizationLookupRevision((revision) => revision + 1)}>Retry status check</button>}{downloadError && <p className="authorization-download-error">{downloadError}</p>}{signingError && <p className="authorization-signing-error" role="alert">{signingError}</p>}{signingStatusText && <p className="authorization-signing-status" role="status">{signingStatusText}</p>}
-    {sendDialogOpen && <div className="modal-backdrop docuseal-send-backdrop" onClick={() => { if (!signingBusy) setSendDialogOpen(false); }}><section className="modal docuseal-send-modal" role="dialog" aria-modal="true" aria-labelledby="docuseal-send-title" onClick={(event) => event.stopPropagation()}>
-      <div className="modal-heading"><div><p className="eyebrow">Repair authorization</p><h2 id="docuseal-send-title">Send for signature</h2></div><button type="button" className="close-button" aria-label="Close" disabled={signingBusy} onClick={() => setSendDialogOpen(false)}><Icon name="close" /></button></div>
-      <p className="subheading">DocuSeal will email the saved authorization with five initials fields, signature, date, and insurance/claim fields ready to complete. For a full-size print of the signed form, use DocuSeal&apos;s Download button instead of printing its signing webpage.</p>
+  const canSendAgain = signing?.provider === "documenso" && signing.status === "completed" && Boolean(signing.completedAt);
+  const hasExistingSubmission = !canSendAgain && (Boolean(signing?.submissionId) || Boolean(signing && !["not_sent", "send_failed"].includes(signing.status)));
+  return <div className="authorization-preview"><div className="authorization-actions"><button type="button" className="orange-button print-button" onClick={() => window.print()}>Print authorization</button><button type="button" className="secondary-button download-button" onClick={() => void downloadAuthorization()} disabled={downloadBusy || signingBusy || authorizationLookupBusy || !authorizationStatusReady}>{downloadBusy ? "Preparing PDF..." : "Download PDF"}</button><button type="button" className="secondary-button" onClick={openSendDialog} disabled={signingBusy || sendBlocked || hasExistingSubmission || authorizationLookupBusy || !authorizationStatusReady || authorizationLookupFailed || (!jobId && !claimId)}>{authorizationLookupBusy || !authorizationStatusReady ? "Checking status..." : signingBusy ? "Sending..." : "Send via Documenso"}</button></div>{!jobId && claimId && <p className="authorization-signing-hint" role="status">This authorization can be sent directly from the claim without a repair order.</p>}{(authorizationLookupBusy || !authorizationStatusReady) && <p className="authorization-signing-status" role="status">Checking for an existing authorization...</p>}{authorizationLookupFailed && <button type="button" className="secondary-button" onClick={() => setAuthorizationLookupRevision((revision) => revision + 1)}>Retry status check</button>}{downloadError && <p className="authorization-download-error">{downloadError}</p>}{signingError && <p className="authorization-signing-error" role="alert">{signingError}</p>}{signingStatusText && <p className="authorization-signing-status" role="status">{signingStatusText}</p>}
+    {sendDialogOpen && <div className="modal-backdrop documenso-send-backdrop" onClick={() => { if (!signingBusy) setSendDialogOpen(false); }}><section className="modal documenso-send-modal" role="dialog" aria-modal="true" aria-labelledby="documenso-send-title" onClick={(event) => event.stopPropagation()}>
+      <div className="modal-heading"><div><p className="eyebrow">Repair authorization</p><h2 id="documenso-send-title">Send for signature</h2></div><button type="button" className="close-button" aria-label="Close" disabled={signingBusy} onClick={() => setSendDialogOpen(false)}><Icon name="close" /></button></div>
+      <p className="subheading">{canSendAgain ? "This authorization was signed and saved. Sending again creates a new Documenso signing request; previously signed copies remain in the claim documents." : "Documenso will email the saved authorization with five initials fields, signature, date, and insurance/claim fields ready to complete."} For a full-size print of a signed form, download the signed PDF instead of printing its signing webpage.</p>
       {signingError && <div className="error-banner" role="alert">{signingError}</div>}
       {signingStatusText && <p className="authorization-signing-status" role="status">{signingStatusText}</p>}
       <form onSubmit={(event) => void sendForSignature(event)}>
-        <fieldset className="docuseal-recipient-options" disabled={signingBusy}>
+        <fieldset className="documenso-recipient-options" disabled={signingBusy}>
           <legend>Who should receive the signing request?</legend>
-          <label><input type="radio" name="docuseal-recipient" value="claim" checked={recipientMode === "claim"} disabled={!customer?.email} onChange={() => setRecipientMode("claim")} /> Claim recipient{customer?.email ? ` · ${customerName} (${customer.email})` : " · No email saved"}</label>
-          <label><input type="radio" name="docuseal-recipient" value="different" checked={recipientMode === "different"} onChange={() => setRecipientMode("different")} /> Use a different email address</label>
+          <label><input type="radio" name="documenso-recipient" value="claim" checked={recipientMode === "claim"} disabled={!customer?.email} onChange={() => setRecipientMode("claim")} /> Claim recipient{customer?.email ? ` · ${customerName} (${customer.email})` : " · No email saved"}</label>
+          <label><input type="radio" name="documenso-recipient" value="different" checked={recipientMode === "different"} onChange={() => setRecipientMode("different")} /> Use a different email address</label>
         </fieldset>
         {recipientMode === "different" && <>
           <label>Recipient name<input autoComplete="name" required value={recipientName} onChange={(event) => setRecipientName(event.target.value)} disabled={signingBusy} /></label>
@@ -2221,7 +2242,7 @@ function DocumentView({
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
-        link.download = documentRecord.fileName;
+        link.download = getDownloadFileName(response, documentRecord.fileName);
         link.click();
         window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
         return;

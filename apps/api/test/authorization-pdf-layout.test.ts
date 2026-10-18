@@ -6,13 +6,13 @@ import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
 import PDFDocument from 'pdfkit';
-import { buildDocuSealSubmissionPayload, getDocuSealSendConfig } from '../src/docuseal.js';
+import { buildDocumensoPayload } from '../src/documenso.js';
 
 const uploadDirectory = await mkdtemp(path.join(os.tmpdir(), 'autoshop-auth-pdf-layout-'));
 process.env.UPLOAD_DIR = uploadDirectory;
 const { createOperationsRouter } = await import('../src/routes/operations.js');
 
-test('generated authorization PDF has one page and DocuSeal fields fit its printed signature/date cells', async () => {
+test('generated authorization PDF has one Letter page and Documenso fields match its signature/date cells', async () => {
   const pageNumbers = new WeakMap<object, number>();
   let pagesCreated = 0;
   let pageDimensions: { width: number; height: number } | undefined;
@@ -20,8 +20,10 @@ test('generated authorization PDF has one page and DocuSeal fields fit its print
   const verticalLines: Array<{ page: number; fromX: number; fromY: number; toX: number; toY: number }> = [];
   const labels: Array<{ page: number; text: string; x: number; y: number }> = [];
   const textCalls: string[] = [];
+  let contentBottom = 0;
   const initialLines: Array<{ page: number; x: number; y: number; blankX: number; blankWidth: number }> = [];
   const paymentBlanks: Array<{ page: number; text: string; x: number; y: number; width: number }> = [];
+  const longVehicleTypeBounds: Array<{ right: number; end: number; text: string }> = [];
   let printNamePosition: { x: number; y: number } | undefined;
   const originalAddPage = PDFDocument.prototype.addPage;
   const originalRect = PDFDocument.prototype.rect;
@@ -62,6 +64,14 @@ test('generated authorization PDF has one page and DocuSeal fields fit its print
   };
   PDFDocument.prototype.text = function (text, x, y, options) {
     if (typeof text === 'string') textCalls.push(text);
+    if (typeof text === 'string' && text.includes('Sport Utility')) {
+      longVehicleTypeBounds.push({
+        right: 490,
+        end: this.x + this.widthOfString(text),
+        text,
+      });
+    }
+    if (typeof y === 'number') contentBottom = Math.max(contentBottom, y + this._fontSize);
     if (text === 'Initial here: x ____________________' && typeof x === 'number' && typeof y === 'number') {
       initialLines.push({
         page: pageNumbers.get(this.page) || 1,
@@ -86,7 +96,9 @@ test('generated authorization PDF has one page and DocuSeal fields fit its print
     if ((text === 'Signature' && x === 223) || (text === 'Date' && x === 407)) {
       labels.push({ page: pageNumbers.get(this.page) || 1, text, x, y });
     }
-    return originalText.call(this, text, x, y, options);
+    const result = originalText.call(this, text, x, y, options);
+    contentBottom = Math.max(contentBottom, this.y);
+    return result;
   };
 
   const job = {
@@ -102,7 +114,7 @@ test('generated authorization PDF has one page and DocuSeal fields fit its print
       state: 'NJ',
       zipCode: '07095',
     },
-    vehicle: { year: 2020, make: 'Honda', model: 'Civic', bodyClass: 'Sedan', vin: 'VIN123', licensePlate: 'ABC123', color: 'Blue' },
+    vehicle: { year: 2020, make: 'Honda', model: 'Civic', bodyClass: 'Sport Utility Vehicle [SUV] Multi-Purpose Vehicle', vin: 'VIN123', licensePlate: 'ABC123', color: 'Blue' },
     claim: {
       claimNumber: 'CL-1',
       customerAddress: '1 Main St, Wood Bridge, NJ, 07095',
@@ -143,16 +155,21 @@ test('generated authorization PDF has one page and DocuSeal fields fit its print
     assert.ok(address && typeof address === 'object');
     const response = await fetch(`http://127.0.0.1:${address.port}/api/jobs/${job.id}/authorization.pdf`, { method: 'POST' });
     assert.equal(response.status, 201);
-    const authorization = await response.json() as { filePath: string; fileName: string; docusealFields: string };
+    const authorization = await response.json() as { filePath: string; fileName: string; authorizationFields: string };
     const pdf = await readFile(path.resolve(process.cwd(), authorization.filePath));
     const pdfText = pdf.toString('latin1');
     const pageCount = [...pdfText.matchAll(/\/Type\s*\/Page\b/g)].length;
-    const fieldPlacements = JSON.parse(authorization.docusealFields) as Array<{
+    const fieldPlacements = JSON.parse(authorization.authorizationFields) as Array<{
       name: string; type: string; required: boolean; x: number; y: number; w: number; h: number; page: number;
     }>;
 
     assert.equal(pageCount, 1, 'the generated authorization must remain a single-page Letter PDF');
     assert.deepEqual(pageDimensions, { width: 612, height: 792 }, 'the authorization must use full Letter page dimensions');
+    assert.ok(contentBottom >= 720, `authorization text should fill most of the page (last text at ${contentBottom}pt)`);
+    assert.ok(contentBottom <= 758, `authorization text must remain within the printable Letter page (last text at ${contentBottom}pt)`);
+    assert.equal(longVehicleTypeBounds.length, 1);
+    assert.ok(longVehicleTypeBounds[0].text.endsWith('...'), 'long vehicle types should be visibly shortened');
+    assert.ok(longVehicleTypeBounds[0].end <= longVehicleTypeBounds[0].right, 'the vehicle type must not run into the license field');
     for (const value of [
       ' 1 Main St',
       ' Wood Bridge',
@@ -209,7 +226,7 @@ test('generated authorization PDF has one page and DocuSeal fields fit its print
     const claimPdf = await readFile(path.resolve(process.cwd(), claimAuthorization.filePath));
     assert.equal([...claimPdf.toString('latin1').matchAll(/\/Type\s*\/Page\b/g)].length, 1);
 
-    const payload = buildDocuSealSubmissionPayload(getDocuSealSendConfig({ DOCUSEAL_API_KEY: 'test-key' }), {
+    const payload = buildDocumensoPayload({
       authorizationId: 'authorization-layout',
       jobId: job.id,
       jobNumber: job.jobNumber,
@@ -219,45 +236,30 @@ test('generated authorization PDF has one page and DocuSeal fields fit its print
       signerName: 'Casey Customer',
       fieldPlacements,
     });
-    assert.deepEqual(Buffer.from(payload.documents[0].file, 'base64'), pdf);
-    assert.equal(payload.documents[0].fields.length, 9);
-    assert.deepEqual(payload.documents[0].fields.map(({ name, type }) => [name, type]), [
-      ['Designated Representative Authorization initials', 'initials'],
-      ['Authorization To Repair initials', 'initials'],
-      ['Authorization To Dismantle initials', 'initials'],
-      ['Insurance Company', 'text'],
-      ['Claim Number', 'text'],
-      ['Direction of Payment initials', 'initials'],
-      ['Department of Motor Vehicles Notification initials', 'initials'],
-      ['Signature', 'signature'],
-      ['Date', 'date'],
+    assert.equal(payload.type, 'DOCUMENT');
+    assert.equal(payload.externalId, 'authorization-layout');
+    assert.equal(payload.recipients.length, 1);
+    assert.equal(payload.recipients[0].email, 'customer@example.test');
+    assert.equal(payload.recipients[0].fields.length, 9);
+    assert.deepEqual(payload.recipients[0].fields.map(({ type }) => type), [
+      'INITIALS', 'INITIALS', 'INITIALS', 'TEXT', 'TEXT', 'INITIALS', 'INITIALS', 'SIGNATURE', 'DATE',
     ]);
-    const signature = payload.documents[0].fields.find(({ name }) => name === 'Signature');
-    const date = payload.documents[0].fields.find(({ name }) => name === 'Date');
+    assert.equal(payload.recipients[0].fields[0].fieldMeta.required, true);
+    assert.equal(payload.recipients[0].fields[3].fieldMeta.label, 'Insurance Company');
+    const signature = payload.recipients[0].fields.find(({ type }) => type === 'SIGNATURE');
+    const date = payload.recipients[0].fields.find(({ type }) => type === 'DATE');
     assert.ok(signature && date);
-    assert.equal(signature.areas[0].page, 1);
-    assert.equal(date.areas[0].page, 1);
-    const pixelsToPoints = 72 / 96;
-    const signatureLeft = signature.areas[0].x * pixelsToPoints;
-    const signatureTop = signature.areas[0].y * pixelsToPoints;
-    const signatureWidth = signature.areas[0].w * pixelsToPoints;
-    const signatureHeight = signature.areas[0].h * pixelsToPoints;
-    const dateLeft = date.areas[0].x * pixelsToPoints;
-    const dateTop = date.areas[0].y * pixelsToPoints;
-    const dateWidth = date.areas[0].w * pixelsToPoints;
-    const dateHeight = date.areas[0].h * pixelsToPoints;
-
-    assert.ok(signatureLeft >= 223 && signatureLeft + signatureWidth <= 397);
-    assert.ok(dateLeft >= 407 && dateLeft + dateWidth <= 573);
-    assert.ok(signatureTop >= labels[0].y + 9.5);
-    assert.ok(dateTop >= labels[1].y + 9.5);
-    assert.ok(signatureTop + signatureHeight <= signatureRow.y + signatureRow.h);
-    assert.ok(dateTop + dateHeight <= signatureRow.y + signatureRow.h);
+    assert.equal(signature.page, 1);
+    assert.equal(date.page, 1);
+    assert.equal(signature.positionX, Number(((fieldPlacements.find(({ type }) => type === 'signature')!.x / 612) * 100).toFixed(5)));
+    assert.equal(date.positionX, Number(((fieldPlacements.find(({ type }) => type === 'date')!.x / 612) * 100).toFixed(5)));
     for (const [index, placement] of fieldPlacements.entries()) {
-      const field = payload.documents[0].fields[index];
-      assert.equal(field.areas[0].page, placement.page);
-      assert.equal(field.required, true);
-      assert.ok(field.areas[0].x >= 0 && field.areas[0].y >= 0);
+      const field = payload.recipients[0].fields[index];
+      assert.equal(field.page, placement.page);
+      assert.equal(field.fieldMeta.required, true);
+      assert.ok(field.positionX >= 0 && field.positionY >= 0);
+      assert.ok(field.positionX + field.width <= 100);
+      assert.ok(field.positionY + field.height <= 100);
     }
   } finally {
     PDFDocument.prototype.addPage = originalAddPage;
