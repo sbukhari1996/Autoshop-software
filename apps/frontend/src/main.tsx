@@ -198,7 +198,8 @@ type RepairAuthorization = {
 };
 type RepairAuthorizationSigning = {
   authorizationId: string;
-  jobId: string;
+  jobId: string | null;
+  claimId: string | null;
   submissionId: string | null;
   signerEmail: string | null;
   status: string;
@@ -215,7 +216,7 @@ type DocumentRecord = {
   claim?: Claim & { customer: Customer; vehicle: Vehicle | null };
   job?: Job;
 };
-type ClaimHub = Omit<Claim, "jobs"> & { documents: DocumentRecord[]; jobs: Job[] };
+type ClaimHub = Omit<Claim, "jobs"> & { authorizations: RepairAuthorization[]; documents: DocumentRecord[]; jobs: Job[] };
 type DocumentsData = {
   claimDocuments: DocumentRecord[];
   jobDocuments: DocumentRecord[];
@@ -1619,17 +1620,17 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
   const [recipientEmail, setRecipientEmail] = React.useState(customer?.email || "");
   const [recipientMode, setRecipientMode] = React.useState<"claim" | "different">(customer?.email ? "claim" : "different");
   const [sendBlocked, setSendBlocked] = React.useState(false);
-  const [authorizationLookupBusy, setAuthorizationLookupBusy] = React.useState(Boolean(claimId && jobId));
+  const [authorizationLookupBusy, setAuthorizationLookupBusy] = React.useState(Boolean(claimId));
   const [authorizationLookupFailed, setAuthorizationLookupFailed] = React.useState(false);
   const [authorizationLookupFor, setAuthorizationLookupFor] = React.useState("");
   const [authorizationLookupRevision, setAuthorizationLookupRevision] = React.useState(0);
   const authorizationLookupKey = `${claimId || ""}:${jobId || ""}`;
-  const authorizationStatusReady = !claimId || !jobId || authorizationLookupFor === authorizationLookupKey;
+  const authorizationStatusReady = !claimId || authorizationLookupFor === authorizationLookupKey;
   const line = (label: string, content: React.ReactNode = "", className = "") => <span className={`authorization-field ${className}`}><b>{label}</b> <span>{content}</span></span>;
   const section = (title: string, children: React.ReactNode) => <section className="authorization-section"><h3>{title}</h3>{children}<div className="authorization-initial">Initial here: <span className="authorization-mark">x</span> ____________________</div></section>;
   const addressParts = customerAddressParts(value("customerAddress") || customer?.address || "");
   async function downloadAuthorization() {
-    if (!jobId) { setDownloadError("Link a repair order before downloading the authorization."); return; }
+    if (!jobId && !claimId) { setDownloadError("Open this authorization from a claim or repair order."); return; }
     setDownloadBusy(true); setDownloadError("");
     try {
       let authorizationId = signing?.authorizationId;
@@ -1639,12 +1640,13 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
         downloadUrl = `/repair-authorizations/${authorizationId}/download`;
         fileName = authorizationFileName || "repair-authorization.pdf";
       } else {
-        const result = await fetchJson<{ id: string; downloadUrl: string; fileName: string }>(`/jobs/${jobId}/authorization.pdf`, { method: "POST" });
+        const endpoint = jobId ? `/jobs/${jobId}/authorization.pdf` : `/claims/${claimId}/authorization.pdf`;
+        const result = await fetchJson<{ id: string; downloadUrl: string; fileName: string }>(endpoint, { method: "POST" });
         authorizationId = result.id;
         downloadUrl = result.downloadUrl;
         fileName = result.fileName;
         setAuthorizationFileName(fileName);
-        setSigning({ authorizationId, jobId, submissionId: null, signerEmail: null, status: "not_sent", completedAt: null });
+        setSigning({ authorizationId, jobId: jobId || null, claimId: claimId || null, submissionId: null, signerEmail: null, status: "not_sent", completedAt: null });
       }
       const response = await fetch(new URL(downloadUrl, API_URL).toString(), { headers: { Authorization: `Bearer ${localStorage.getItem("repairos_token") || ""}` } });
       if (!response.ok) throw new Error("Unable to download authorization PDF");
@@ -1658,7 +1660,7 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
     } finally { setDownloadBusy(false); }
   }
   function openSendDialog() {
-    if (!jobId) { setSigningError("Link a repair order before sending for signature."); return; }
+    if (!jobId && !claimId) { setSigningError("Open this authorization from a claim or repair order."); return; }
     if (!authorizationStatusReady || authorizationLookupBusy || authorizationLookupFailed) return;
     setRecipientName(customerName);
     setRecipientEmail(customer?.email || "");
@@ -1668,7 +1670,7 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
   }
   async function sendForSignature(event: React.FormEvent) {
     event.preventDefault();
-    if (!jobId) { setSigningError("Link a repair order before sending for signature."); return; }
+    if (!jobId && !claimId) { setSigningError("Open this authorization from a claim or repair order."); return; }
     const cleanName = (recipientMode === "claim" ? customerName : recipientName).trim();
     const cleanEmail = (recipientMode === "claim" ? customer?.email || "" : recipientEmail).trim();
     if (!cleanName || !cleanEmail) { setSigningError("Enter the recipient name and email address."); return; }
@@ -1676,10 +1678,11 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
     let authorizationId = signing?.authorizationId;
     try {
       if (!authorizationId) {
-        const authorization = await fetchJson<{ id: string; fileName: string }>(`/jobs/${jobId}/authorization.pdf`, { method: "POST" });
+        const endpoint = jobId ? `/jobs/${jobId}/authorization.pdf` : `/claims/${claimId}/authorization.pdf`;
+        const authorization = await fetchJson<{ id: string; fileName: string }>(endpoint, { method: "POST" });
         authorizationId = authorization.id;
         setAuthorizationFileName(authorization.fileName);
-        setSigning({ authorizationId, jobId, submissionId: null, signerEmail: cleanEmail, status: "not_sent", completedAt: null });
+        setSigning({ authorizationId, jobId: jobId || null, claimId: claimId || null, submissionId: null, signerEmail: cleanEmail, status: "not_sent", completedAt: null });
       }
       const result = await fetchJson<RepairAuthorizationSigning>(`/repair-authorizations/${authorizationId}/send`, {
         method: "POST",
@@ -1716,7 +1719,7 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
       setAuthorizationFileName("");
       setSigningError("");
       setAuthorizationLookupFailed(false);
-      if (!claimId || !jobId) {
+      if (!claimId) {
         setAuthorizationLookupBusy(false);
         setAuthorizationLookupFor(authorizationLookupKey);
         return;
@@ -1725,7 +1728,9 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
       setAuthorizationLookupFor("");
       try {
         const hub = await fetchJson<ClaimHub>(`/claims/${claimId}/hub`);
-        const existing = hub.jobs.find((job) => job.id === jobId)?.authorizations?.[0];
+        const existing = jobId
+          ? hub.jobs.find((job) => job.id === jobId)?.authorizations?.[0]
+          : hub.authorizations?.[0];
         if (existing) {
           if (active) setAuthorizationFileName(existing.fileName);
           const current = await fetchJson<RepairAuthorizationSigning>(`/repair-authorizations/${existing.id}/signing`);
@@ -1764,7 +1769,7 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
     return () => window.clearInterval(timer);
   }, [signing?.authorizationId, signing?.submissionId, signing?.status]);
   const signingStatusText = signing?.status === "completed"
-    ? `Signed by ${signing.signerEmail || customer?.email || "customer"}${signing.completedAt ? ` on ${new Date(signing.completedAt).toLocaleDateString()}` : ""}. The signed PDF is saved in this claim's documents and the job documents.`
+    ? `Signed by ${signing.signerEmail || customer?.email || "customer"}${signing.completedAt ? ` on ${new Date(signing.completedAt).toLocaleDateString()}` : ""}. The signed PDF is saved in this claim's documents${signing.jobId ? " and the job documents" : ""}.`
     : signing?.status === "send_unknown" || signing?.status === "sending"
       ? "Delivery status is not confirmed. Check DocuSeal before trying again to avoid sending a duplicate."
       : signing?.submissionId
@@ -1775,7 +1780,7 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
             ? `Signing status: ${signing.status.replace(/_/g, " ")}. Confirm the status before retrying.`
             : "";
   const hasExistingSubmission = Boolean(signing?.submissionId) || Boolean(signing && !["not_sent", "send_failed"].includes(signing.status));
-  return <div className="authorization-preview"><div className="authorization-actions"><button type="button" className="orange-button print-button" onClick={() => window.print()}>Print authorization</button><button type="button" className="secondary-button download-button" onClick={() => void downloadAuthorization()} disabled={downloadBusy || signingBusy || authorizationLookupBusy || !authorizationStatusReady}>{downloadBusy ? "Preparing PDF..." : "Download PDF"}</button><button type="button" className="secondary-button" onClick={openSendDialog} disabled={signingBusy || sendBlocked || hasExistingSubmission || authorizationLookupBusy || !authorizationStatusReady || authorizationLookupFailed || !jobId}>{authorizationLookupBusy || !authorizationStatusReady ? "Checking status..." : signingBusy ? "Sending..." : "Send via DocuSeal"}</button></div>{!jobId && <p className="authorization-signing-hint" role="status">Link this claim to a repair order to enable sending for signature.</p>}{(authorizationLookupBusy || !authorizationStatusReady) && <p className="authorization-signing-status" role="status">Checking for an existing authorization...</p>}{authorizationLookupFailed && <button type="button" className="secondary-button" onClick={() => setAuthorizationLookupRevision((revision) => revision + 1)}>Retry status check</button>}{downloadError && <p className="authorization-download-error">{downloadError}</p>}{signingError && <p className="authorization-signing-error" role="alert">{signingError}</p>}{signingStatusText && <p className="authorization-signing-status" role="status">{signingStatusText}</p>}
+  return <div className="authorization-preview"><div className="authorization-actions"><button type="button" className="orange-button print-button" onClick={() => window.print()}>Print authorization</button><button type="button" className="secondary-button download-button" onClick={() => void downloadAuthorization()} disabled={downloadBusy || signingBusy || authorizationLookupBusy || !authorizationStatusReady}>{downloadBusy ? "Preparing PDF..." : "Download PDF"}</button><button type="button" className="secondary-button" onClick={openSendDialog} disabled={signingBusy || sendBlocked || hasExistingSubmission || authorizationLookupBusy || !authorizationStatusReady || authorizationLookupFailed || (!jobId && !claimId)}>{authorizationLookupBusy || !authorizationStatusReady ? "Checking status..." : signingBusy ? "Sending..." : "Send via DocuSeal"}</button></div>{!jobId && claimId && <p className="authorization-signing-hint" role="status">This authorization can be sent directly from the claim without a repair order.</p>}{(authorizationLookupBusy || !authorizationStatusReady) && <p className="authorization-signing-status" role="status">Checking for an existing authorization...</p>}{authorizationLookupFailed && <button type="button" className="secondary-button" onClick={() => setAuthorizationLookupRevision((revision) => revision + 1)}>Retry status check</button>}{downloadError && <p className="authorization-download-error">{downloadError}</p>}{signingError && <p className="authorization-signing-error" role="alert">{signingError}</p>}{signingStatusText && <p className="authorization-signing-status" role="status">{signingStatusText}</p>}
     {sendDialogOpen && <div className="modal-backdrop docuseal-send-backdrop" onClick={() => { if (!signingBusy) setSendDialogOpen(false); }}><section className="modal docuseal-send-modal" role="dialog" aria-modal="true" aria-labelledby="docuseal-send-title" onClick={(event) => event.stopPropagation()}>
       <div className="modal-heading"><div><p className="eyebrow">Repair authorization</p><h2 id="docuseal-send-title">Send for signature</h2></div><button type="button" className="close-button" aria-label="Close" disabled={signingBusy} onClick={() => setSendDialogOpen(false)}><Icon name="close" /></button></div>
       <p className="subheading">DocuSeal will email the saved authorization with five initials fields, signature, date, and insurance/claim fields ready to complete. For a full-size print of the signed form, use DocuSeal&apos;s Download button instead of printing its signing webpage.</p>

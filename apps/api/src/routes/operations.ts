@@ -68,13 +68,29 @@ export function createOperationsRouter(prisma: PrismaClient) {
   router.post('/jobs/:jobId/authorization.pdf', asyncHandler(async (req, res) => {
     const job = await prisma.job.findUnique({ where: { id: routeParam(req, 'jobId') }, include: { customer: true, vehicle: true, claim: true } });
     if (!job) throw new ApiError(404, 'Job not found');
-    const authorizationId = randomUUID();
-    const fileName = `repair-authorization-${job.jobNumber.replace(/[^a-zA-Z0-9_-]+/g, '_')}-${authorizationId}.pdf`;
-    await mkdir(uploadDirectory, { recursive: true });
-    const generated = await createAuthorizationPdf(job);
-    await writeFile(path.join(uploadDirectory, fileName), generated.pdf);
-    const authorization = await prisma.repairAuthorization.create({ data: { id: authorizationId, jobId: job.id, fileName, filePath: path.relative(process.cwd(), path.join(uploadDirectory, fileName)), docusealFields: JSON.stringify(generated.fieldPlacements), status: 'generated' } });
-    res.status(201).json({ ...authorization, downloadUrl: `/api/repair-authorizations/${authorization.id}/download` });
+    res.status(201).json(await createStoredAuthorization(prisma, {
+      jobId: job.id,
+      claimId: job.claimId,
+      reference: job.jobNumber,
+    }, job));
+  }));
+
+  router.post('/claims/:claimId/authorization.pdf', asyncHandler(async (req, res) => {
+    const claim = await prisma.claim.findUnique({
+      where: { id: routeParam(req, 'claimId') },
+      include: { customer: true, vehicle: true },
+    });
+    if (!claim) throw new ApiError(404, 'Claim not found');
+    res.status(201).json(await createStoredAuthorization(prisma, {
+      jobId: null,
+      claimId: claim.id,
+      reference: claim.claimNumber || claim.id,
+    }, {
+      jobNumber: claim.claimNumber || claim.id,
+      customer: claim.customer,
+      vehicle: claim.vehicle,
+      claim,
+    }));
   }));
 
   router.get('/repair-authorizations/:authorizationId/download', asyncHandler(async (req, res) => {
@@ -210,6 +226,33 @@ function vehicleLabel(vehicle: { year: number | null; make: string | null; model
 }
 
 function pdfEscape(value: string) { return value.replace(/([\\()])/g, '\\$1'); }
+
+async function createStoredAuthorization(
+  prisma: PrismaClient,
+  owner: { jobId: string | null; claimId: string | null; reference: string },
+  data: Parameters<typeof createAuthorizationPdf>[0],
+) {
+  const authorizationId = randomUUID();
+  const safeReference = owner.reference.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const fileName = `repair-authorization-${safeReference}-${authorizationId}.pdf`;
+  const filePath = path.join(uploadDirectory, fileName);
+  await mkdir(uploadDirectory, { recursive: true });
+  const generated = await createAuthorizationPdf(data);
+  await writeFile(filePath, generated.pdf);
+  const authorization = await prisma.repairAuthorization.create({
+    data: {
+      id: authorizationId,
+      jobId: owner.jobId,
+      claimId: owner.claimId,
+      fileName,
+      filePath: path.relative(process.cwd(), filePath),
+      docusealFields: JSON.stringify(generated.fieldPlacements),
+      status: 'generated',
+    },
+  });
+  return { ...authorization, downloadUrl: `/api/repair-authorizations/${authorization.id}/download` };
+}
+
 async function createAuthorizationPdf(job: {
   jobNumber: string;
   customer: {

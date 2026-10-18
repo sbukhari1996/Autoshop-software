@@ -246,7 +246,7 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
     const claimId = routeParam(req, 'claimId');
     const claim = await prisma.claim.findUnique({
       where: { id: claimId },
-      select: { id: true, _count: { select: { jobs: true, invoices: true, inspections: true } } },
+      select: { id: true, _count: { select: { jobs: true, invoices: true, inspections: true, authorizations: true } } },
     });
     if (!claim) throw new ApiError(404, 'Claim not found');
 
@@ -984,6 +984,7 @@ const claimInclude = {
   customer: true,
   vehicle: true,
   documents: { orderBy: { createdAt: 'desc' } },
+  authorizations: { orderBy: { generatedAt: 'desc' } },
   jobs: {
     orderBy: { updatedAt: 'desc' },
     include: {

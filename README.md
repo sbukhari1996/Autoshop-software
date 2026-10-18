@@ -92,7 +92,7 @@ The DocuSeal email settings use Gmail SMTP (`smtp.gmail.com`, port `587`, STARTT
 
 The DocuSeal API key is stored in the shop VM's protected `/opt/autoshop/app/.env` as `DOCUSEAL_API_KEY`. Do not display it or copy it into repository files. The app submits its saved repair-authorization PDF directly to DocuSeal; no template or `DOCUSEAL_TEMPLATE_ID` is required.
 
-In a claim's **Authorization form**, **Send via DocuSeal** opens a dialog to choose the customer recipient on the claim or enter a different name and email. If the customer has no saved email, the dialog selects manual entry and requires an email before sending. The app creates or reuses the saved one-page Letter authorization PDF, including the customer's structured address and the existing shop signing address, then submits it with five required initials fields, required signature/date fields, and required insurance/claim text fields already placed. DocuSeal sends the signing email through its configured SMTP account. After signing, the PDF is saved separately in both the claim's documents and the repair job's documents.
+In a claim's **Authorization form**, **Send via DocuSeal** opens a dialog to choose the customer recipient on the claim or enter a different name and email. If the customer has no saved email, the dialog selects manual entry and requires an email before sending. The app creates or reuses a saved one-page Letter authorization PDF directly from the claim, so a repair order is not required; it includes the customer's structured address and the existing shop signing address, then submits it with five required initials fields, required signature/date fields, and required insurance/claim text fields already placed. DocuSeal sends the signing email through its configured SMTP account. After signing, the PDF is saved in the claim's documents and, when the claim is linked to a repair order, separately in the repair job's documents.
 
 DocuSeal's public application URL is configured as `https://shop-1.tail1d791.ts.net:8443`. The API server reaches DocuSeal on the private Docker network. Configure these API-server environment variables outside source control:
 
@@ -113,7 +113,8 @@ The PDF prefill uses the linked customer's name, structured street/city/state/ZI
 
 The authenticated API routes are:
 
-- `POST /api/repair-authorizations/:authorizationId/send` — accepts `{ "recipientName": "...", "recipientEmail": "..." }`, sends the saved PDF to the specified recipient and returns `201` with `{ authorizationId, jobId, submissionId, signerEmail, status, completedAt }`.
+- `POST /api/claims/:claimId/authorization.pdf` — creates a saved authorization PDF from a claim without requiring a linked repair order.
+- `POST /api/repair-authorizations/:authorizationId/send` — accepts `{ "recipientName": "...", "recipientEmail": "..." }`, sends the saved PDF to the specified recipient and returns `201` with `{ authorizationId, jobId, claimId, submissionId, signerEmail, status, completedAt }`.
 - `GET /api/repair-authorizations/:authorizationId/signing` — return that status object (with `status: "not_sent"` before sending).
 
 ### Dockhand Docker management

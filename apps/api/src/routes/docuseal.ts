@@ -23,7 +23,7 @@ export function createDocuSealRouter(prisma: PrismaClient) {
     const authorizationId = routeParam(req, 'authorizationId');
     const authorization = await prisma.repairAuthorization.findUnique({
       where: { id: authorizationId },
-      include: { job: true },
+      include: { job: true, claim: true },
     });
     if (!authorization) throw new ApiError(404, 'Repair authorization not found');
     if (authorization.docusealSubmissionId) throw new ApiError(409, 'This repair authorization has already been sent to DocuSeal');
@@ -50,7 +50,8 @@ export function createDocuSealRouter(prisma: PrismaClient) {
       submission = await sendRepairAuthorizationToDocuSeal(config, {
         authorizationId: authorization.id,
         jobId: authorization.jobId,
-        jobNumber: authorization.job.jobNumber,
+        claimId: authorization.claimId,
+        jobNumber: authorization.job?.jobNumber || authorization.claim?.claimNumber || authorization.claimId || authorization.id,
         fileName: authorization.fileName,
         pdf,
         signerEmail: recipient.email,
@@ -163,15 +164,17 @@ function isFileSystemError(error: unknown): error is NodeJS.ErrnoException {
 
 function signingStatus(authorization: {
   id: string;
-  jobId: string;
+  jobId: string | null;
   docusealSubmissionId: string | null;
   docusealSignerEmail: string | null;
   docusealStatus: string | null;
   docusealCompletedAt: Date | null;
+  claimId: string | null;
 }) {
   return {
     authorizationId: authorization.id,
     jobId: authorization.jobId,
+    claimId: authorization.claimId,
     submissionId: authorization.docusealSubmissionId,
     signerEmail: authorization.docusealSignerEmail,
     status: authorization.docusealStatus || 'not_sent',

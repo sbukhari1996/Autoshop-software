@@ -70,9 +70,24 @@ test('validates the send-time email, confines PDF reads to uploads, and submits 
   process.env.DOCUSEAL_BASE_URL = `http://127.0.0.1:${docusealAddress.port}/api`;
   process.env.DOCUSEAL_SIGNER_ROLE = 'Customer';
 
-  const record = {
+  const record: {
+    id: string;
+    jobId: string | null;
+    claimId: string | null;
+    fileName: string;
+    filePath: string;
+    status: string;
+    docusealSubmissionId: string | null;
+    docusealSignerEmail: string | null;
+    docusealStatus: string | null;
+    docusealCompletedAt: Date | null;
+    docusealFields: string;
+    job: { jobNumber: string; customer: { firstName: string; lastName: string; email: string } } | null;
+    claim: { claimNumber: string } | null;
+  } = {
     id: 'authorization-1',
     jobId: 'job-1',
+    claimId: null,
     fileName: 'authorization.pdf',
     filePath: path.relative(process.cwd(), pdfPath),
     status: 'generated',
@@ -83,6 +98,7 @@ test('validates the send-time email, confines PDF reads to uploads, and submits 
     docusealFields: JSON.stringify([
       { name: 'Initials', type: 'initials', required: true, x: 40, y: 100, w: 42, h: 9, page: 1 },
     ]),
+    claim: null,
     job: {
       jobNumber: 'JOB-104',
       customer: { firstName: 'Casey', lastName: 'Customer', email: 'stored@example.test' },
@@ -168,6 +184,32 @@ test('validates the send-time email, confines PDF reads to uploads, and submits 
     assert.equal(body.submitters[0].email, 'chosen@example.test');
     assert.equal(body.submitters[0].external_id, record.id);
     assert.equal(body.submitters[0].metadata.repair_authorization_id, record.id);
+
+    Object.assign(record, {
+      jobId: null,
+      claimId: 'claim-1',
+      job: null,
+      claim: { claimNumber: 'CLM-104' },
+      docusealSubmissionId: null,
+      docusealStatus: null,
+      docusealSignerEmail: null,
+    });
+    const claimOnlySent = await fetch(url, {
+      method: 'POST',
+      headers: { authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ recipientName: 'Claim Recipient', recipientEmail: 'claim@example.test' }),
+    });
+    assert.equal(claimOnlySent.status, 201);
+    const claimOnlyStatus = await claimOnlySent.json() as { jobId: string | null; claimId: string | null };
+    assert.equal(claimOnlyStatus.jobId, null);
+    assert.equal(claimOnlyStatus.claimId, 'claim-1');
+    const claimOnlyPayload = receivedPayload as {
+      submitters: Array<{ metadata: Record<string, string> }>;
+    };
+    assert.deepEqual(claimOnlyPayload.submitters[0].metadata, {
+      claim_id: 'claim-1',
+      repair_authorization_id: record.id,
+    });
   } finally {
     await Promise.all([
       new Promise<void>((resolve, reject) => {
