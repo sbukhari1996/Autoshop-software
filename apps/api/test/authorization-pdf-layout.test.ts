@@ -22,7 +22,6 @@ test('generated authorization PDF has one Letter page and Documenso fields match
   const textCalls: string[] = [];
   let contentBottom = 0;
   const initialLines: Array<{ page: number; x: number; y: number; blankX: number; blankWidth: number }> = [];
-  const paymentBlanks: Array<{ page: number; text: string; x: number; y: number; width: number }> = [];
   const longVehicleTypeBounds: Array<{ right: number; end: number; text: string }> = [];
   let printNamePosition: { x: number; y: number } | undefined;
   const originalAddPage = PDFDocument.prototype.addPage;
@@ -81,15 +80,6 @@ test('generated authorization PDF has one Letter page and Documenso fields match
         blankWidth: this.widthOfString('____________________'),
       });
     }
-    if (text === '______________________________' && typeof x === 'number' && typeof y === 'number') {
-      paymentBlanks.push({
-        page: pageNumbers.get(this.page) || 1,
-        text,
-        x,
-        y,
-        width: this.widthOfString(text),
-      });
-    }
     if (text === 'Casey Customer' && typeof x === 'number' && typeof y === 'number') {
       printNamePosition = { x, y };
     }
@@ -120,6 +110,7 @@ test('generated authorization PDF has one Letter page and Documenso fields match
       customerAddress: '1 Main St, Wood Bridge, NJ, 07095',
       customerPhone: '555-0100',
       customerInsurance: 'Test Insurance',
+      atFaultInsurance: 'GEICO',
       driverLicense: 'D123',
       vehicleYear: 2020,
       vehicleMake: 'Honda',
@@ -199,13 +190,12 @@ test('generated authorization PDF has one Letter page and Documenso fields match
     }
     assert.ok(signatureRow, 'the generated PDF must contain the signature/date table');
     assert.equal(initialLines.length, 5);
-    assert.equal(paymentBlanks.length, 2);
-    assert.equal(fieldPlacements.length, 9);
+    assert.ok(textCalls.some((text) => text.includes('GEICO on my claim# CL-1')), 'the payment direction should prefill the at-fault insurer and claim number');
+    assert.equal(fieldPlacements.length, 7);
     assert.deepEqual(fieldPlacements.map(({ type }) => type).sort(), [
-      'date', 'initials', 'initials', 'initials', 'initials', 'initials', 'signature', 'text', 'text',
+      'date', 'initials', 'initials', 'initials', 'initials', 'initials', 'signature',
     ]);
     assert.ok(initialLines.every((line) => line.page === 1));
-    assert.ok(paymentBlanks.every((line) => line.page === 1));
     const initials = fieldPlacements.filter(({ type }) => type === 'initials');
     for (const [index, line] of initialLines.entries()) {
       const placement = initials[index];
@@ -215,12 +205,6 @@ test('generated authorization PDF has one Letter page and Documenso fields match
       assert.equal(placement.y, line.y + 1);
       assert.equal(placement.page, 1);
     }
-    const insuranceField = fieldPlacements.find(({ name }) => name === 'Insurance Company');
-    const claimNumberField = fieldPlacements.find(({ name }) => name === 'Claim Number');
-    assert.ok(insuranceField && claimNumberField);
-    assert.deepEqual(paymentBlanks.map(({ x }) => x), [insuranceField.x, claimNumberField.x]);
-    assert.deepEqual(paymentBlanks.map(({ y }) => y + 1), [insuranceField.y, claimNumberField.y]);
-    assert.ok(insuranceField.required && claimNumberField.required);
     assert.equal(signatureRow.page, 1);
     assert.equal(signatureRow.x, 34);
     assert.equal(signatureRow.w, 544);
@@ -255,12 +239,11 @@ test('generated authorization PDF has one Letter page and Documenso fields match
     assert.equal(payload.externalId, 'authorization-layout');
     assert.equal(payload.recipients.length, 1);
     assert.equal(payload.recipients[0].email, 'customer@example.test');
-    assert.equal(payload.recipients[0].fields.length, 9);
+    assert.equal(payload.recipients[0].fields.length, 7);
     assert.deepEqual(payload.recipients[0].fields.map(({ type }) => type), [
-      'INITIALS', 'INITIALS', 'INITIALS', 'TEXT', 'TEXT', 'INITIALS', 'INITIALS', 'SIGNATURE', 'DATE',
+      'INITIALS', 'INITIALS', 'INITIALS', 'INITIALS', 'INITIALS', 'SIGNATURE', 'DATE',
     ]);
     assert.equal(payload.recipients[0].fields[0].fieldMeta.required, true);
-    assert.equal(payload.recipients[0].fields[3].fieldMeta.label, 'Insurance Company');
     const signature = payload.recipients[0].fields.find(({ type }) => type === 'SIGNATURE');
     const date = payload.recipients[0].fields.find(({ type }) => type === 'DATE');
     assert.ok(signature && date);

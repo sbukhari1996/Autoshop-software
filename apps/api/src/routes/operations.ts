@@ -326,7 +326,7 @@ async function createAuthorizationPdf(job: {
   };
   vehicle: { year: number | null; make: string | null; model: string | null; bodyClass: string | null; vin: string | null; licensePlate: string | null; color: string | null } | null;
   claim: {
-    claimNumber: string | null; customerAddress: string | null; customerPhone: string | null; customerInsurance: string | null;
+    claimNumber: string | null; customerAddress: string | null; customerPhone: string | null; customerInsurance: string | null; atFaultInsurance: string | null;
     driverLicense: string | null; vehicleYear: number | null; vehicleMake: string | null; vehicleModel: string | null;
     vehicleBodyClass: string | null; vehicleVin: string | null; vehicleLicensePlate: string | null; vehicleColor: string | null;
     incidentDate: Date | null;
@@ -402,31 +402,8 @@ async function createAuthorizationPdf(job: {
   section('Designated Representative Authorization', 'I (Above Owner) insured by: ______________________________ hereby authorize MASTERCRAFT AUTO REPAIR & COLLISION as my/our designated representative to reach an agreed price with the insurance company as to the reasonable cost to repair my/our vehicle. The designated authorization is in conformance with New York State Department Regulations No.64 and is NOT an authorization to repair.');
   section('Authorization To Repair', 'I (Above Owner) hereby authorize MASTERCRAFT AUTO REPAIR & COLLISION to test drive my vehicle while the vehicle is in their possession.\n\nAS AGREED TO REPAIR FOR INSURANCE COMPANY PRICE ONLY AND AS PER SHOP ESTIMATE\nTO OWNER OR PERSON IN CHARGE OF DAMAGE VEHICLE:\n\nPlease read all printed matter before signing, all complaints of quality of repairs must be made to the New York State Department of Motor Vehicle. No Towing Company or Insurance may require that repair be made to a motor vehicle in a particular place or repair shop. You have the right to have your motor vehicle repaired in the shop of your choice.\n1. Do Not Sign this "Authorization to Repair" at the scene of an accident. You can not be required to do so\n    SIGN ONLY AT:\n    (a) The place to which the vehicle is towed to, or\n    (b) Your home or place designated by the person in charge of the disabled vehicle, or\n    (c) The hospital, if you are hospitalized by not before twenty-four (24) hours after the accident unless you are discharged from hospital before that period of time.\n2. Before signing your name to the bottom of this form, print/write in your own handwriting in the spaces provided I authorize the repair of the vehicle indicated above.');
   section('Authorization To Dismantle', 'I (Above Owner) hereby authorize MASTERCRAFT AUTO REPAIR & COLLISION to dismantle my vehicle prior/after Insurance Co. inspection to see any hidden and related damage. MASTERCRAFT AUTO REPAIR & COLLISION hourly rate of $75.00 per hour maximum time of dismantling __________ hours. I also allow MASTERCRAFT AUTO REPAIR & COLLISION to place my vehicle in any one of their location while in their possession.');
-  const paymentPrefix = 'I (Above Owner) hereby authorize ';
-  const paymentInsuranceBlank = '______________________________';
-  const paymentMiddle = ' on my claim# ';
-  const paymentClaimBlank = '______________________________';
-  const paymentFirstLineEnd = ' to directly pay';
-  const paymentRemainder = ' MASTERCRAFT AUTO REPAIR & COLLISION. I understand that by signing this authorization, I will give permission to also make 2 party check.';
-  const paymentText = `${paymentPrefix}${paymentInsuranceBlank}${paymentMiddle}${paymentClaimBlank}${paymentFirstLineEnd}${paymentRemainder}`;
-  section('Direction of Payment', paymentText, (bodyY) => {
-    document.font('Times-Roman').fontSize(9.1);
-    const firstFieldX = 34 + document.widthOfString(paymentPrefix);
-    const secondFieldX = firstFieldX + document.widthOfString(paymentInsuranceBlank) + document.widthOfString(paymentMiddle);
-    document.text(paymentPrefix, 34, bodyY);
-    document.text(paymentInsuranceBlank, firstFieldX, bodyY);
-    document.text(paymentMiddle, firstFieldX + document.widthOfString(paymentInsuranceBlank), bodyY);
-    document.text(paymentClaimBlank, secondFieldX, bodyY);
-    document.text(paymentFirstLineEnd, secondFieldX + document.widthOfString(paymentClaimBlank), bodyY);
-    const continuationY = bodyY + document.currentLineHeight(true);
-    document.text(paymentRemainder.trimStart(), 34, continuationY, { width: pageWidth, lineGap: 0.2, align: 'left' });
-    for (const [name, x, w] of [
-      ['Insurance Company', firstFieldX, document.widthOfString(paymentInsuranceBlank)],
-      ['Claim Number', secondFieldX, document.widthOfString(paymentClaimBlank)],
-    ] as const) {
-      fieldPlacements.push({ name, type: 'text', required: true, x, y: bodyY + 1, w, h: 10, page: 1 });
-    }
-  });
+  const paymentText = `I (Above Owner) hereby authorize ${claim?.atFaultInsurance || ''} on my claim# ${claim?.claimNumber || ''} to directly pay MASTERCRAFT AUTO REPAIR & COLLISION. I understand that by signing this authorization, I will give permission to also make 2 party check.`;
+  section('Direction of Payment', paymentText);
   section('Department of Motor Vehicles Notification', 'I Authorize MASTERCRAFT AUTO REPAIR & COLLISION to charge $150.00 per day storage for above vehicle upon completion of repairs or if vehicle redeemed a total loss.');
   y += 9;
   const tableY = y;
