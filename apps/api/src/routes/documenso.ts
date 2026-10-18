@@ -11,7 +11,7 @@ import {
   DocumensoDeliveryUnknownError,
   createRepairAuthorizationEnvelope,
   distributeDocumensoEnvelope,
-  canResendCompletedAuthorization,
+  canStartAuthorizationSigning,
   getDocumensoApiConfig,
   getDocumensoEnvelope,
   getSignedDocumensoDocument,
@@ -35,9 +35,7 @@ export function createDocumensoRouter(prisma: PrismaClient) {
     if (authorization.legacyDocuSealSubmissionId) {
       throw new ApiError(409, 'This authorization has a legacy DocuSeal signing record and cannot be resent');
     }
-    const isCompleted = canResendCompletedAuthorization(authorization.documensoStatus, authorization.documensoCompletedAt);
-    if (authorization.documensoEnvelopeId && !isCompleted) throw new ApiError(409, 'This repair authorization already has an active or unresolved Documenso request');
-    if (authorization.documensoStatus === 'sending' || authorization.documensoStatus === 'send_unknown') {
+    if (!canStartAuthorizationSigning(authorization.documensoStatus)) {
       throw new ApiError(409, 'This authorization may already have been sent; check Documenso before retrying');
     }
     const recipient = signingRecipient(req.body);
@@ -146,7 +144,7 @@ export function createDocumensoRouter(prisma: PrismaClient) {
     const status = normalizeStatus(envelope.status);
     if (status !== 'completed') {
       await prisma.repairAuthorization.updateMany({
-        where: { id: authorization.id, documensoCompletedAt: null, documensoStatus: { not: 'downloading' } },
+        where: { id: authorization.id, documensoEnvelopeId: authorization.documensoEnvelopeId, documensoCompletedAt: null, documensoStatus: { not: 'downloading' } },
         data: { documensoStatus: status, documensoSignerEmail: envelope.signerEmail || authorization.documensoSignerEmail },
       });
       const current = await prisma.repairAuthorization.findUnique({ where: { id: authorization.id } });

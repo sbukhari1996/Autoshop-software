@@ -1639,7 +1639,6 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
   const [recipientName, setRecipientName] = React.useState(customerName);
   const [recipientEmail, setRecipientEmail] = React.useState(customer?.email || "");
   const [recipientMode, setRecipientMode] = React.useState<"claim" | "different">(customer?.email ? "claim" : "different");
-  const [sendBlocked, setSendBlocked] = React.useState(false);
   const [authorizationLookupBusy, setAuthorizationLookupBusy] = React.useState(Boolean(claimId));
   const [authorizationLookupFailed, setAuthorizationLookupFailed] = React.useState(false);
   const [authorizationLookupFor, setAuthorizationLookupFor] = React.useState("");
@@ -1713,18 +1712,11 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
       setSendDialogOpen(false);
     } catch (sendError) {
       const message = sendError instanceof Error ? sendError.message : "Unable to send authorization for signature";
-      const conflict = message.includes("(HTTP 409)");
-      if (conflict) setSendBlocked(true);
       setSigningError(message);
       if (authorizationId) {
         try {
           const current = await fetchJson<RepairAuthorizationSigning>(`/repair-authorizations/${authorizationId}/signing`);
           setSigning(current);
-          if (current.submissionId) {
-            setSendBlocked(true);
-            setSigningError("");
-            setSendDialogOpen(false);
-          }
         } catch (statusError) {
           setSigningError(statusError instanceof Error ? `${message}; Unable to check signing status: ${statusError.message}` : message);
         }
@@ -1735,7 +1727,6 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
     let active = true;
     async function loadExistingAuthorization() {
       setSigning(null);
-      setSendBlocked(false);
       setAuthorizationFileName("");
       setSigningError("");
       setAuthorizationLookupFailed(false);
@@ -1774,7 +1765,7 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
   React.useEffect(() => {
     if (!signing?.authorizationId) return;
     const reportedSend = signing.status !== "not_sent" && signing.status !== "send_failed";
-    const terminalStatuses = ["completed", "declined", "expired", "canceled", "cancelled", "rejected", "send_failed"];
+    const terminalStatuses = ["completed", "declined", "expired", "canceled", "cancelled", "deleted", "rejected", "send_failed"];
     if (!signing.submissionId && !reportedSend) return;
     if (terminalStatuses.includes(signing.status)) return;
     const refresh = async () => {
@@ -1799,12 +1790,12 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
           : signing && signing.status !== "not_sent"
             ? `Signing status: ${signing.status.replace(/_/g, " ")}. Confirm the status before retrying.`
             : "";
-  const canSendAgain = signing?.provider === "documenso" && signing.status === "completed" && Boolean(signing.completedAt);
-  const hasExistingSubmission = !canSendAgain && (Boolean(signing?.submissionId) || Boolean(signing && !["not_sent", "send_failed"].includes(signing.status)));
-  return <div className="authorization-preview"><div className="authorization-actions"><button type="button" className="orange-button print-button" onClick={() => window.print()}>Print authorization</button><button type="button" className="secondary-button download-button" onClick={() => void downloadAuthorization()} disabled={downloadBusy || signingBusy || authorizationLookupBusy || !authorizationStatusReady}>{downloadBusy ? "Preparing PDF..." : "Download PDF"}</button><button type="button" className="secondary-button" onClick={openSendDialog} disabled={signingBusy || sendBlocked || hasExistingSubmission || authorizationLookupBusy || !authorizationStatusReady || authorizationLookupFailed || (!jobId && !claimId)}>{authorizationLookupBusy || !authorizationStatusReady ? "Checking status..." : signingBusy ? "Sending..." : "Send via Documenso"}</button></div>{!jobId && claimId && <p className="authorization-signing-hint" role="status">This authorization can be sent directly from the claim without a repair order.</p>}{(authorizationLookupBusy || !authorizationStatusReady) && <p className="authorization-signing-status" role="status">Checking for an existing authorization...</p>}{authorizationLookupFailed && <button type="button" className="secondary-button" onClick={() => setAuthorizationLookupRevision((revision) => revision + 1)}>Retry status check</button>}{downloadError && <p className="authorization-download-error">{downloadError}</p>}{signingError && <p className="authorization-signing-error" role="alert">{signingError}</p>}{signingStatusText && <p className="authorization-signing-status" role="status">{signingStatusText}</p>}
+  const sendBlocked = signing?.provider === "legacy_docuseal" || ["sending", "send_unknown", "downloading", "download_failed"].includes(signing?.status || "");
+  const canSendAgain = signing?.provider === "documenso" && Boolean(signing.submissionId) && !sendBlocked;
+  return <div className="authorization-preview"><div className="authorization-actions"><button type="button" className="orange-button print-button" onClick={() => window.print()}>Print authorization</button><button type="button" className="secondary-button download-button" onClick={() => void downloadAuthorization()} disabled={downloadBusy || signingBusy || authorizationLookupBusy || !authorizationStatusReady}>{downloadBusy ? "Preparing PDF..." : "Download PDF"}</button><button type="button" className="secondary-button" onClick={openSendDialog} disabled={signingBusy || sendBlocked || authorizationLookupBusy || !authorizationStatusReady || authorizationLookupFailed || (!jobId && !claimId)}>{authorizationLookupBusy || !authorizationStatusReady ? "Checking status..." : signingBusy ? "Sending..." : canSendAgain ? "Send another request" : "Send via Documenso"}</button></div>{!jobId && claimId && <p className="authorization-signing-hint" role="status">This authorization can be sent directly from the claim without a repair order.</p>}{(authorizationLookupBusy || !authorizationStatusReady) && <p className="authorization-signing-status" role="status">Checking for an existing authorization...</p>}{authorizationLookupFailed && <button type="button" className="secondary-button" onClick={() => setAuthorizationLookupRevision((revision) => revision + 1)}>Retry status check</button>}{downloadError && <p className="authorization-download-error">{downloadError}</p>}{signingError && <p className="authorization-signing-error" role="alert">{signingError}</p>}{signingStatusText && <p className="authorization-signing-status" role="status">{signingStatusText}</p>}
     {sendDialogOpen && <div className="modal-backdrop documenso-send-backdrop" onClick={() => { if (!signingBusy) setSendDialogOpen(false); }}><section className="modal documenso-send-modal" role="dialog" aria-modal="true" aria-labelledby="documenso-send-title" onClick={(event) => event.stopPropagation()}>
       <div className="modal-heading"><div><p className="eyebrow">Repair authorization</p><h2 id="documenso-send-title">Send for signature</h2></div><button type="button" className="close-button" aria-label="Close" disabled={signingBusy} onClick={() => setSendDialogOpen(false)}><Icon name="close" /></button></div>
-      <p className="subheading">{canSendAgain ? "This authorization was signed and saved. Sending again creates a new Documenso signing request; previously signed copies remain in the claim documents." : "Documenso will email the saved authorization with five initials fields, signature, date, and insurance/claim fields ready to complete."} For a full-size print of a signed form, download the signed PDF instead of printing its signing webpage.</p>
+      <p className="subheading">{canSendAgain ? "This creates a separate Documenso signing request. Any earlier pending or cancelled request remains separate; signed copies are saved in the claim documents." : "Documenso will email the saved authorization with five initials fields, signature, date, and insurance/claim fields ready to complete."} For a full-size print of a signed form, download the signed PDF instead of printing its signing webpage.</p>
       {signingError && <div className="error-banner" role="alert">{signingError}</div>}
       {signingStatusText && <p className="authorization-signing-status" role="status">{signingStatusText}</p>}
       <form onSubmit={(event) => void sendForSignature(event)}>
@@ -1817,7 +1808,7 @@ function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: 
           <label>Recipient name<input autoComplete="name" required value={recipientName} onChange={(event) => setRecipientName(event.target.value)} disabled={signingBusy} /></label>
           <label>Recipient email<input type="email" autoComplete="email" required value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} disabled={signingBusy} /></label>
         </>}
-        <div className="claim-form-actions"><button type="button" className="secondary-button" onClick={() => setSendDialogOpen(false)} disabled={signingBusy}>Cancel</button><button type="submit" className="orange-button" disabled={signingBusy || sendBlocked || hasExistingSubmission}>{signingBusy ? signing?.authorizationId ? "Sending..." : "Preparing authorization PDF..." : "Send once"}</button></div>
+        <div className="claim-form-actions"><button type="button" className="secondary-button" onClick={() => setSendDialogOpen(false)} disabled={signingBusy}>Cancel</button><button type="submit" className="orange-button" disabled={signingBusy || sendBlocked}>{signingBusy ? signing?.authorizationId ? "Sending..." : "Preparing authorization PDF..." : canSendAgain ? "Send another request" : "Send request"}</button></div>
       </form>
     </section></div>}
     <article className="authorization-paper">

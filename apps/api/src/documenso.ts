@@ -29,8 +29,8 @@ export interface DocumensoApiConfig {
   baseUrl: URL;
 }
 
-export function canResendCompletedAuthorization(status: string | null, completedAt: Date | null): boolean {
-  return status === 'completed' && completedAt !== null;
+export function canStartAuthorizationSigning(status: string | null): boolean {
+  return !['sending', 'send_unknown', 'downloading', 'download_failed'].includes(status || '');
 }
 
 export function getDocumensoApiConfig(env: NodeJS.ProcessEnv = process.env): DocumensoApiConfig {
@@ -118,7 +118,22 @@ export async function getDocumensoEnvelope(
   envelopeId: string,
   fetcher: typeof fetch = fetch,
 ): Promise<DocumensoEnvelope> {
-  const result = await request(config, `envelope/${encodeURIComponent(envelopeId)}`, { method: 'GET' }, fetcher);
+  const response = await requestResponse(config, `envelope/${encodeURIComponent(envelopeId)}`, { method: 'GET' }, fetcher, false, true);
+  if (response.status === 404) {
+    return {
+      id: envelopeId,
+      status: 'deleted',
+      completedAt: null,
+      signerEmail: null,
+      envelopeItems: [],
+    };
+  }
+  let result: unknown;
+  try {
+    result = await response.json() as unknown;
+  } catch {
+    throw new ApiError(502, 'Documenso returned an invalid API response');
+  }
   if (!isRecord(result) || typeof result.id !== 'string' || !Array.isArray(result.envelopeItems)) {
     throw new ApiError(502, 'Documenso returned an invalid envelope status');
   }
@@ -179,6 +194,7 @@ async function requestResponse(
   init: RequestInit,
   fetcher: typeof fetch,
   outcomeUnknown = false,
+  allowNotFound = false,
 ): Promise<Response> {
   let response: Response;
   try {
@@ -191,7 +207,7 @@ async function requestResponse(
     if (outcomeUnknown) throw new DocumensoDeliveryUnknownError('Documenso signing outcome is unknown because the request could not be confirmed');
     throw new ApiError(502, 'Unable to contact Documenso');
   }
-  if (!response.ok) {
+  if (!response.ok && !(allowNotFound && response.status === 404)) {
     if (outcomeUnknown && response.status >= 500) throw new DocumensoDeliveryUnknownError(`Documenso signing outcome is unknown (${response.status})`);
     throw new ApiError(502, `Documenso rejected the signing request (${response.status})`);
   }

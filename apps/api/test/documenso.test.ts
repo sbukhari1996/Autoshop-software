@@ -3,7 +3,7 @@ import test from 'node:test';
 import { dopAuthorizationFileName, signedAuthorizationDownloadName } from '../src/authorization-document-name.js';
 import {
   buildDocumensoPayload,
-  canResendCompletedAuthorization,
+  canStartAuthorizationSigning,
   createRepairAuthorizationEnvelope,
   distributeDocumensoEnvelope,
   getDocumensoApiConfig,
@@ -63,12 +63,13 @@ test('maps the authorization PDF and fields to a Documenso signer envelope', () 
   assert.equal(payload.recipients[0].fields[1].positionY, Number(((646 / 792) * 100).toFixed(5)));
 });
 
-test('allows a new signing request only after the previous envelope is fully completed and saved', () => {
-  assert.equal(canResendCompletedAuthorization('completed', new Date('2026-10-18T04:00:00.000Z')), true);
-  assert.equal(canResendCompletedAuthorization('completed', null), false);
-  assert.equal(canResendCompletedAuthorization('sent', null), false);
-  assert.equal(canResendCompletedAuthorization('send_unknown', null), false);
-  assert.equal(canResendCompletedAuthorization('download_failed', null), false);
+test('allows another signing request except while a send or signed-document save is uncertain', () => {
+  for (const status of ['not_sent', 'sent', 'completed', 'cancelled', 'canceled', 'declined', 'expired', 'deleted', 'send_failed']) {
+    assert.equal(canStartAuthorizationSigning(status), true, `${status} should allow a new request`);
+  }
+  for (const status of ['sending', 'send_unknown', 'downloading', 'download_failed']) {
+    assert.equal(canStartAuthorizationSigning(status), false, `${status} should remain protected`);
+  }
 });
 
 test('creates the PDF envelope and distributes it using server-side authorization', async () => {
@@ -124,6 +125,14 @@ test('reads envelope status and accepts only signed PDF downloads', async () => 
   assert.equal(envelope.signerEmail, submission.signerEmail);
   assert.deepEqual(envelope.envelopeItems, [{ id: 'envelope_item_test123' }]);
   assert.equal((await getSignedDocumensoDocument(config, envelope.envelopeItems[0].id, fetcher)).toString(), '%PDF-1.7 signed');
+});
+
+test('treats a deleted Documenso envelope as terminal and resendable', async () => {
+  const envelope = await getDocumensoEnvelope(config, 'envelope_deleted', async () => new Response(null, { status: 404 }));
+  assert.equal(envelope.status, 'deleted');
+  assert.equal(envelope.id, 'envelope_deleted');
+  assert.deepEqual(envelope.envelopeItems, []);
+  assert.equal(canStartAuthorizationSigning(envelope.status), true);
 });
 
 test('keeps an interrupted create or send outcome explicit and avoids treating it as safe to retry', async () => {
