@@ -274,7 +274,7 @@ table.paper-totals { width: min(100%, 510px); margin: 9px 0 0 auto; border-colla
 	.modal-backdrop, .claim-workspace, .authorization-preview, .authorization-paper, .authorization-paper *, .estimate-builder, .estimate-preview, .estimate-paper, .estimate-paper * { visibility: visible; }
 	.modal-backdrop { position: static; display: block; padding: 0; background: #fff; }
 	.claim-workspace { display: block; width: 100%; max-height: none; padding: 0; overflow: visible; border: 0; background: #fff; box-shadow: none; }
-	.claim-heading, .claim-workspace > .error-banner, .authorization-visit, .authorization-actions, .authorization-download-error, .authorization-signing-error, .authorization-signing-status { display: none !important; }
+	.claim-heading, .claim-workspace > .error-banner, .authorization-visit, .authorization-actions, .authorization-download-error, .authorization-signing-error, .authorization-signing-status, .authorization-signing-hint { display: none !important; }
 	.authorization-preview { display: block; }
 }
 .customer-workspace { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr); gap: 18px; }.customer-file { min-height: 420px; }.selected-row td { background: #15364d !important; }.customer-file-heading { display: flex; align-items: center; gap: 12px; padding-bottom: 17px; border-bottom: 1px solid var(--line); }.large-avatar { width: 42px; height: 42px; font-size: .76rem; }.customer-file-heading h2 { margin: 0; color: #eef3f5; font-size: 1.05rem; }.customer-file-heading p:not(.eyebrow) { margin: 4px 0 0; color: #8298a8; font-size: .7rem; }.customer-stats { display: flex; gap: 18px; padding: 15px 0; color: #8298a8; font-size: .68rem; }.customer-stats strong { display: block; color: #f0f5f7; font-size: 1.15rem; }.customer-file-section { padding-top: 15px; margin-top: 3px; border-top: 1px solid #172f42; }.customer-claims { display: grid; gap: 5px; }.customer-claim-row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 10px 0; border: 0; color: #dce7ec; background: transparent; text-align: left; }.customer-claim-row:hover { padding-left: 6px; background: #10283b; }.customer-claim-row > span:first-child { flex: 1; }.customer-claim-row strong, .customer-claim-row small { display: block; }.customer-claim-row strong { font-size: .73rem; }.customer-claim-row small { margin-top: 4px; color: #718a9d; font-size: .64rem; }.customer-claim-row > .icon { width: 14px; color: #708da0; }.customer-vehicle-list { display: grid; gap: 7px; color: #b9c9d2; font-size: .72rem; }
@@ -632,6 +632,7 @@ body { color: var(--text); background: #f5f6f7; }
 .authorization-actions .print-button { justify-self: auto; }
 .authorization-download-error { margin: -4px 0 0; color: #a7471b; font-size: .7rem; text-align: right; }
 .authorization-signing-error { margin: -4px 0 0; color: #a7471b; font-size: .7rem; text-align: right; }
+.authorization-signing-hint { margin: -4px 0 0; color: #718087; font-size: .7rem; text-align: right; }
 .authorization-signing-status { margin: -4px 0 0; color: #2c6847; font-size: .7rem; text-align: right; }
 .docuseal-send-modal form { display: grid; gap: 12px; }
 .docuseal-recipient-options { display: grid; gap: 8px; margin: 0; padding: 12px; border: 1px solid #d9e0e8; border-radius: 10px; }
