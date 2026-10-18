@@ -23,7 +23,8 @@ export interface DocuSealSendConfig extends DocuSealApiConfig {
 
 export interface RepairAuthorizationSubmission {
   authorizationId: string;
-  jobId: string;
+  jobId: string | null;
+  claimId: string | null;
   jobNumber: string;
   fileName: string;
   pdf: Buffer;
@@ -139,7 +140,8 @@ export function buildDocuSealSubmissionPayload(
       role: config.signerRole,
       external_id: submission.authorizationId,
       metadata: {
-        job_id: submission.jobId,
+        ...(submission.jobId ? { job_id: submission.jobId } : {}),
+        ...(submission.claimId ? { claim_id: submission.claimId } : {}),
         repair_authorization_id: submission.authorizationId,
       },
     }],

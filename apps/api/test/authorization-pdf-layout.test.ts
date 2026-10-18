@@ -91,6 +91,7 @@ test('generated authorization PDF has one page and DocuSeal fields fit its print
 
   const job = {
     id: 'job-layout',
+    claimId: null,
     jobNumber: 'JOB-LAYOUT',
     customer: {
       firstName: 'Casey',
@@ -118,8 +119,16 @@ test('generated authorization PDF has one page and DocuSeal fields fit its print
       incidentDate: new Date('2026-10-01T00:00:00Z'),
     },
   };
+  const claim = {
+    ...job.claim,
+    id: 'claim-layout',
+    customerId: 'customer-layout',
+    customer: job.customer,
+    vehicle: job.vehicle,
+  };
   const prisma = {
     job: { findUnique: async () => job },
+    claim: { findUnique: async () => claim },
     repairAuthorization: {
       create: async ({ data }: { data: Record<string, unknown> }) => data,
     },
@@ -191,6 +200,14 @@ test('generated authorization PDF has one page and DocuSeal fields fit its print
       { page: 1, text: 'Signature', x: 223, y: signatureRow.y + 5 },
       { page: 1, text: 'Date', x: 407, y: signatureRow.y + 5 },
     ]);
+
+    const claimResponse = await fetch(`http://127.0.0.1:${address.port}/api/claims/${claim.id}/authorization.pdf`, { method: 'POST' });
+    assert.equal(claimResponse.status, 201);
+    const claimAuthorization = await claimResponse.json() as { jobId: string | null; claimId: string; filePath: string };
+    assert.equal(claimAuthorization.jobId, null);
+    assert.equal(claimAuthorization.claimId, claim.id);
+    const claimPdf = await readFile(path.resolve(process.cwd(), claimAuthorization.filePath));
+    assert.equal([...claimPdf.toString('latin1').matchAll(/\/Type\s*\/Page\b/g)].length, 1);
 
     const payload = buildDocuSealSubmissionPayload(getDocuSealSendConfig({ DOCUSEAL_API_KEY: 'test-key' }), {
       authorizationId: 'authorization-layout',

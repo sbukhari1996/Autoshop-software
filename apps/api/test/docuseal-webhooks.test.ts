@@ -39,10 +39,11 @@ test('imports completed PDFs when the webhook identifies authorization by extern
   process.env.DOCUSEAL_WEBHOOK_SECRET = secret;
 
   try {
-    for (const [index, matchType] of ['external_id', 'metadata'].entries()) {
+    for (const [index, matchType] of ['external_id', 'metadata', 'claim-only'].entries()) {
       const authorizationId = `authorization-${matchType}`;
       const submissionId = String(81 + index);
-      const authorization = createAuthorization(authorizationId);
+      const claimOnly = matchType === 'claim-only';
+      const authorization = createAuthorization(authorizationId, claimOnly);
       const insertedDocuments: Array<{ filePath: string; fileName: string; documentType: string }> = [];
       const insertedClaimDocuments: Array<{ filePath: string; fileName: string; documentType: string }> = [];
       const prisma = {
@@ -127,16 +128,18 @@ test('imports completed PDFs when the webhook identifies authorization by extern
         assert.equal(authorization.docusealSubmissionId, submissionId);
         assert.equal(authorization.docusealStatus, 'completed');
         assert.ok(authorization.docusealCompletedAt instanceof Date);
-        assert.equal(insertedDocuments.length, 1);
-        assert.equal(insertedDocuments[0].documentType, 'repair_authorization');
+        assert.equal(insertedDocuments.length, claimOnly ? 0 : 1);
         assert.equal(insertedClaimDocuments.length, 1);
         assert.equal(insertedClaimDocuments[0].documentType, 'repair_authorization');
-        assert.notEqual(insertedClaimDocuments[0].filePath, insertedDocuments[0].filePath);
         assert.equal(
           (await readFile(path.resolve(process.cwd(), insertedClaimDocuments[0].filePath))).toString(),
           signedPdf.toString(),
         );
-        assert.equal((await readFile(path.resolve(process.cwd(), insertedDocuments[0].filePath))).toString(), signedPdf.toString());
+        if (!claimOnly) {
+          assert.equal(insertedDocuments[0].documentType, 'repair_authorization');
+          assert.notEqual(insertedClaimDocuments[0].filePath, insertedDocuments[0].filePath);
+          assert.equal((await readFile(path.resolve(process.cwd(), insertedDocuments[0].filePath))).toString(), signedPdf.toString());
+        }
       } finally {
         await new Promise<void>((resolve, reject) => {
           webhookServer.close((error) => error ? reject(error) : resolve());
@@ -157,11 +160,13 @@ test('imports completed PDFs when the webhook identifies authorization by extern
   }
 });
 
-function createAuthorization(id: string) {
+function createAuthorization(id: string, claimOnly = false) {
   return {
     id,
-    jobId: `job-${id}`,
-    job: { claimId: `claim-${id}` },
+    jobId: claimOnly ? null : `job-${id}`,
+    claimId: claimOnly ? `claim-${id}` : null,
+    job: claimOnly ? null : { claimId: `claim-${id}` },
+    claim: claimOnly ? { id: `claim-${id}` } : null,
     docusealSubmissionId: null as string | null,
     docusealSignerEmail: null as string | null,
     docusealStatus: 'sent',

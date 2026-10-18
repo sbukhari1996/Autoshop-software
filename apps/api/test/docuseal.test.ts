@@ -20,6 +20,7 @@ const pdf = Buffer.from('%PDF-1.4 repair authorization');
 const submission = {
   authorizationId: 'authorization-1',
   jobId: 'job-1',
+  claimId: null,
   jobNumber: 'JOB-104',
   fileName: 'repair-authorization-JOB-104.pdf',
   pdf,
@@ -55,6 +56,17 @@ test('builds a PDF submission with aligned required signature and date fields', 
     role: 'Customer',
     external_id: 'authorization-1',
     metadata: { job_id: 'job-1', repair_authorization_id: 'authorization-1' },
+  });
+
+  const claimPayload = buildDocuSealSubmissionPayload(config, {
+    ...submission,
+    jobId: null,
+    claimId: 'claim-1',
+    jobNumber: 'CLM-104',
+  });
+  assert.deepEqual(claimPayload.submitters[0].metadata, {
+    claim_id: 'claim-1',
+    repair_authorization_id: 'authorization-1',
   });
 
   test('parses persisted field placements and rejects corrupt or out-of-page layouts', () => {

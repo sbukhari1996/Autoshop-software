@@ -42,12 +42,12 @@ export function createDocuSealWebhookRouter(prisma: PrismaClient) {
     const externalAuthorizationId = findExternalAuthorizationId(event.data);
     let authorization = await prisma.repairAuthorization.findUnique({
       where: { docusealSubmissionId: submissionId },
-      include: { job: { select: { claimId: true } } },
+      include: { job: { select: { claimId: true } }, claim: { select: { id: true } } },
     });
     if (!authorization && externalAuthorizationId) {
       authorization = await prisma.repairAuthorization.findUnique({
         where: { id: externalAuthorizationId },
-        include: { job: { select: { claimId: true } } },
+        include: { job: { select: { claimId: true } }, claim: { select: { id: true } } },
       });
     }
     if (!authorization) {
@@ -84,7 +84,7 @@ export function createDocuSealWebhookRouter(prisma: PrismaClient) {
         prisma,
         authorization.id,
         authorization.jobId,
-        authorization.job.claimId,
+        authorization.claimId || authorization.job?.claimId || null,
         submissionId,
         completedAt,
         documents,
@@ -105,12 +105,13 @@ export function createDocuSealWebhookRouter(prisma: PrismaClient) {
 async function persistSignedDocuments(
   prisma: PrismaClient,
   authorizationId: string,
-  jobId: string,
+  jobId: string | null,
   claimId: string | null,
   submissionId: string,
   completedAt: Date,
   documents: Awaited<ReturnType<typeof getSignedDocuSealDocuments>>,
 ) {
+  if (!jobId && !claimId) throw new ApiError(500, 'Repair authorization has no claim or repair order');
   await mkdir(uploadDirectory, { recursive: true });
   const stored: Array<{ absolutePath: string; fileName: string; filePath: string; description: string }> = [];
   const jobDocuments: Array<{ fileName: string; filePath: string; documentType: string; description: string }> = [];
@@ -127,14 +128,16 @@ async function persistSignedDocuments(
         stored.push({ absolutePath, fileName, filePath, description });
         return { fileName, filePath, documentType: 'repair_authorization', description };
       };
-      jobDocuments.push(await storeCopy());
+      if (jobId) jobDocuments.push(await storeCopy());
       if (claimId) claimDocuments.push(await storeCopy());
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.jobDocument.createMany({
-        data: jobDocuments.map((file) => ({ jobId, ...file })),
-      });
+      if (jobId) {
+        await tx.jobDocument.createMany({
+          data: jobDocuments.map((file) => ({ jobId, ...file })),
+        });
+      }
       if (claimId) {
         await tx.claimDocument.createMany({
           data: claimDocuments.map((file) => ({ claimId, ...file })),
