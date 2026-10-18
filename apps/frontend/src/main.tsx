@@ -24,6 +24,9 @@ type Customer = {
   phone: string | null;
   email: string | null;
   address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zipCode?: string | null;
   vehicles?: Array<{ id: string; year: number | null; make: string | null; model: string | null }>;
   _count?: { claims: number; jobs: number };
 };
@@ -193,6 +196,14 @@ type RepairAuthorization = {
   status: string;
   generatedAt: string;
 };
+type RepairAuthorizationSigning = {
+  authorizationId: string;
+  jobId: string;
+  submissionId: string | null;
+  signerEmail: string | null;
+  status: string;
+  completedAt: string | null;
+};
 type DocumentRecord = {
   id: string;
   fileName: string;
@@ -204,7 +215,7 @@ type DocumentRecord = {
   claim?: Claim & { customer: Customer; vehicle: Vehicle | null };
   job?: Job;
 };
-type ClaimHub = Claim & { documents: DocumentRecord[]; jobs: Job[] };
+type ClaimHub = Omit<Claim, "jobs"> & { documents: DocumentRecord[]; jobs: Job[] };
 type DocumentsData = {
   claimDocuments: DocumentRecord[];
   jobDocuments: DocumentRecord[];
@@ -1168,19 +1179,23 @@ function CustomerView({ customers, claims, vehicles, jobs, onChanged }: { custom
     {selectedCustomer && <div className="customer-file-action"><span>Customer file: <strong>{selectedCustomer.firstName} {selectedCustomer.lastName}</strong></span><div className="customer-file-actions"><button type="button" className="secondary-button" onClick={() => setEditingCustomer(true)}>Edit customer</button><button type="button" className="danger-button" onClick={async () => { if (!window.confirm(`Delete ${selectedCustomer.firstName} ${selectedCustomer.lastName}? This cannot be undone.`)) return; setError(""); try { await fetchJson(`/customers/${selectedCustomer.id}`, { method: "DELETE" }); setSelectedCustomer(null); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete customer"); } }}>Delete customer</button></div></div>}
     <div className="customer-workspace">
       <div className="surface customer-directory"><div className="surface-heading"><div><h2>Customer directory</h2><p>{customers.length} customer records · Select a customer to see their complete file</p></div></div><table className="data-table"><thead><tr><th>Customer</th><th>Contact</th><th>Open jobs</th><th>Claims</th></tr></thead><tbody>{customers.map((customer) => <tr className={selectedCustomer?.id === customer.id ? "clickable-row selected-row" : "clickable-row"} key={customer.id} onClick={() => { setSelectedCustomer(customer); setSelectedClaim(null); }}><td data-label="Customer"><div className="person-cell"><div className="table-avatar">{customer.firstName[0]}{customer.lastName[0]}</div><strong>{customer.firstName} {customer.lastName}</strong></div></td><td data-label="Contact">{customer.phone || customer.email || "No contact details"}</td><td data-label="Open jobs">{customer._count?.jobs || 0}</td><td data-label="Claims"><span className="status-pill blue">{customer._count?.claims || 0} claims</span></td></tr>)}</tbody></table>{!customers.length && <EmptyState text="No customers yet. Create the first customer to begin an intake." />}</div>
-      <div className="surface customer-file">{selectedCustomer ? <><div className="customer-file-heading"><div className="table-avatar large-avatar">{selectedCustomer.firstName[0]}{selectedCustomer.lastName[0]}</div><div><p className="eyebrow">Customer file</p><h2>{selectedCustomer.firstName} {selectedCustomer.lastName}</h2><p>{selectedCustomer.phone || "No phone"} · {selectedCustomer.email || "No email"}</p>{selectedCustomer.address && <p>{selectedCustomer.address}</p>}</div></div><div className="customer-stats"><span><strong>{customerClaims.length}</strong> claims</span><span><strong>{customerVehicles.length}</strong> vehicles</span><span><strong>{customerJobs.length}</strong> jobs</span></div><div className="customer-file-section"><div className="records-section-heading"><h4>Claims</h4><span>Click a claim to open its full file</span></div>{customerClaims.length ? <div className="customer-claims">{customerClaims.map((claim) => <button className="customer-claim-row" key={claim.id} onClick={() => setSelectedClaim(claim)}><span><strong>{claim.claimNumber || "Unnumbered claim"}</strong><small>{claim.insuranceCompany || "Insurance pending"} · {claim.vehicle ? [claim.vehicle.year, claim.vehicle.make, claim.vehicle.model].filter(Boolean).join(" ") : "Vehicle pending"}</small></span><span className={`status-pill ${claim.claimStatus === "approved" ? "green" : "orange"}`}>{claim.claimStatus}</span><Icon name="arrow" /></button>)}</div> : <p className="records-muted">No claims attached to this customer.</p>}</div><div className="customer-file-section"><div className="records-section-heading"><h4>Vehicles</h4><span>{customerVehicles.length} registered</span></div>{customerVehicles.length ? <div className="customer-vehicle-list">{customerVehicles.map((vehicle) => <span key={vehicle.id}>{[vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || "Vehicle pending"}</span>)}</div> : <p className="records-muted">No vehicles attached to this customer.</p>}</div></> : <EmptyState text="Select a customer to view every claim, vehicle, and repair record together." />}</div>
+      <div className="surface customer-file">{selectedCustomer ? <><div className="customer-file-heading"><div className="table-avatar large-avatar">{selectedCustomer.firstName[0]}{selectedCustomer.lastName[0]}</div><div><p className="eyebrow">Customer file</p><h2>{selectedCustomer.firstName} {selectedCustomer.lastName}</h2><p>{selectedCustomer.phone || "No phone"} · {selectedCustomer.email || "No email"}</p>{[selectedCustomer.address, selectedCustomer.city, selectedCustomer.state, selectedCustomer.zipCode].filter(Boolean).length > 0 && <p>{[selectedCustomer.address, selectedCustomer.city, [selectedCustomer.state, selectedCustomer.zipCode].filter(Boolean).join(" ")].filter(Boolean).join(", ")}</p>}</div></div><div className="customer-stats"><span><strong>{customerClaims.length}</strong> claims</span><span><strong>{customerVehicles.length}</strong> vehicles</span><span><strong>{customerJobs.length}</strong> jobs</span></div><div className="customer-file-section"><div className="records-section-heading"><h4>Claims</h4><span>Click a claim to open its full file</span></div>{customerClaims.length ? <div className="customer-claims">{customerClaims.map((claim) => <button className="customer-claim-row" key={claim.id} onClick={() => setSelectedClaim(claim)}><span><strong>{claim.claimNumber || "Unnumbered claim"}</strong><small>{claim.insuranceCompany || "Insurance pending"} · {claim.vehicle ? [claim.vehicle.year, claim.vehicle.make, claim.vehicle.model].filter(Boolean).join(" ") : "Vehicle pending"}</small></span><span className={`status-pill ${claim.claimStatus === "approved" ? "green" : "orange"}`}>{claim.claimStatus}</span><Icon name="arrow" /></button>)}</div> : <p className="records-muted">No claims attached to this customer.</p>}</div><div className="customer-file-section"><div className="records-section-heading"><h4>Vehicles</h4><span>{customerVehicles.length} registered</span></div>{customerVehicles.length ? <div className="customer-vehicle-list">{customerVehicles.map((vehicle) => <span key={vehicle.id}>{[vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || "Vehicle pending"}</span>)}</div> : <p className="records-muted">No vehicles attached to this customer.</p>}</div></> : <EmptyState text="Select a customer to view every claim, vehicle, and repair record together." />}</div>
     </div>
     {selectedCustomer && editingCustomer && <CustomerEditModal customer={selectedCustomer} onClose={() => setEditingCustomer(false)} onSaved={async (updated) => { setSelectedCustomer(updated); setEditingCustomer(false); await onChanged(); }} />}
     {selectedClaim && <ClaimWorkspace claim={selectedClaim} customers={customers} vehicles={vehicles} jobs={jobs} onClose={() => setSelectedClaim(null)} onSaved={async () => { await onChanged(); setSelectedClaim(null); }} />}
   </>;
 }
 function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer; onClose: () => void; onSaved: (customer: Customer) => Promise<void> }) {
+  const savedAddress = customerAddressParts(customer.address || "");
   const [form, setForm] = React.useState({
     firstName: customer.firstName,
     lastName: customer.lastName,
     phone: customer.phone || "",
     email: customer.email || "",
-    address: customer.address || "",
+    address: customer.address && !customer.city && !customer.state && !customer.zipCode ? savedAddress.address : customer.address || "",
+    city: customer.city || savedAddress.city,
+    state: customer.state || savedAddress.state,
+    zipCode: customer.zipCode || savedAddress.zipCode,
   });
   const [error, setError] = React.useState("");
   const [saving, setSaving] = React.useState(false);
@@ -1216,7 +1231,10 @@ function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer;
         <label>Last name<input required maxLength={100} value={form.lastName} onChange={(event) => update("lastName", event.target.value)} /></label>
         <label>Phone<input type="tel" maxLength={50} value={form.phone} onChange={(event) => update("phone", event.target.value)} /></label>
         <label>Email<input type="email" maxLength={254} value={form.email} onChange={(event) => update("email", event.target.value)} /></label>
-        <label className="customer-address-field">Address<textarea maxLength={500} value={form.address} onChange={(event) => update("address", event.target.value)} /></label>
+        <label className="customer-address-field">Street address<input maxLength={250} value={form.address} onChange={(event) => update("address", event.target.value)} /></label>
+        <label>City<input maxLength={100} value={form.city} onChange={(event) => update("city", event.target.value)} /></label>
+        <label>State<input maxLength={50} value={form.state} onChange={(event) => update("state", event.target.value)} /></label>
+        <label>ZIP code<input maxLength={20} value={form.zipCode} onChange={(event) => update("zipCode", event.target.value)} /></label>
       </div>
       <div className="customer-edit-actions">
         <button type="button" className="secondary-button" onClick={onClose} disabled={saving}>Cancel</button>
@@ -1324,11 +1342,14 @@ const claimFlags = [
 function claimFormFromClaim(claim: Claim | null, customer?: Customer, vehicle?: Vehicle | null): ClaimForm {
   const source = claim || {};
   const customerName = customer ? `${customer.firstName} ${customer.lastName}` : source.customerName || "";
+  const addressParts = customerAddressParts(String(source.customerAddress || customer?.address || ""));
   const selectedVehicle = vehicle || source.vehicle;
   return {
     customerId: source.customerId || customer?.id || "", vehicleId: source.vehicleId || selectedVehicle?.id || "", jobId: source.jobs?.[0]?.id || "",
     ...Object.fromEntries(claimTextFields.map(([key]) => [key, source[key as keyof Claim] ?? ""])),
-    customerName, customerPhone: source.customerPhone || customer?.phone || "", customerAddress: source.customerAddress || customer?.address || "",
+    customerName, customerPhone: source.customerPhone || customer?.phone || "",
+    customerAddress: addressParts.address, customerCity: addressParts.city || customer?.city || "",
+    customerState: addressParts.state || customer?.state || "", customerZip: addressParts.zipCode || customer?.zipCode || "",
     insuranceCompany: source.insuranceCompany || "", policeReportFile: source.policeReportFile || "",
     vehicleYear: source.vehicleYear ?? selectedVehicle?.year ?? "", vehicleMake: source.vehicleMake || selectedVehicle?.make || "", vehicleModel: source.vehicleModel || selectedVehicle?.model || "",
     vehicleVin: source.vehicleVin || selectedVehicle?.vin || "", vehicleLicensePlate: source.vehicleLicensePlate || selectedVehicle?.licensePlate || "",
@@ -1336,6 +1357,18 @@ function claimFormFromClaim(claim: Claim | null, customer?: Customer, vehicle?: 
     status: source.claimStatus || "new", notes: source.notes || "",
     ...Object.fromEntries(claimFlags.map(([key]) => [key, source[key as keyof Claim] || false])),
   };
+}
+
+function customerAddressParts(value: string) {
+  const parts = value.split(",").map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 4 && /^\d{5}(?:-\d{4})?$/.test(parts[parts.length - 1]) && /^[A-Za-z]{2}$/.test(parts[parts.length - 2])) {
+    return { address: parts.slice(0, -3).join(", "), city: parts[parts.length - 3], state: parts[parts.length - 2], zipCode: parts[parts.length - 1] };
+  }
+  if (parts.length >= 3) {
+    const stateZip = parts[parts.length - 1].match(/^([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
+    if (stateZip) return { address: parts.slice(0, -2).join(", "), city: parts[parts.length - 2], state: stateZip[1], zipCode: stateZip[2] };
+  }
+  return { address: value, city: "", state: "", zipCode: "" };
 }
 
 function toDateTimeLocal(value: string | null | undefined) {
@@ -1391,10 +1424,13 @@ function ClaimWorkspace({
   }
   function selectCustomer(value: string) {
     const customer = customers.find((item) => item.id === value);
+    const customerAddress = customerAddressParts(customer?.address || "");
     const firstVehicle = vehicles.find((vehicle) => vehicle.customer.id === value);
     setForm((current) => ({
       ...current, customerId: value, vehicleId: "", jobId: "",
-      customerName: customer ? `${customer.firstName} ${customer.lastName}` : "", customerPhone: customer?.phone || "", customerAddress: customer?.address || "",
+      customerName: customer ? `${customer.firstName} ${customer.lastName}` : "", customerPhone: customer?.phone || "",
+      customerAddress: customer?.address && (customer.city || customer.state || customer.zipCode) ? customer.address : customerAddress.address,
+      customerCity: customer?.city || customerAddress.city, customerState: customer?.state || customerAddress.state, customerZip: customer?.zipCode || customerAddress.zipCode,
       vehicleYear: firstVehicle?.year ?? "", vehicleMake: firstVehicle?.make || "", vehicleModel: firstVehicle?.model || "", vehicleVin: firstVehicle?.vin || "", vehicleTrim: "", vehicleBodyClass: "", vehicleLicensePlate: firstVehicle?.licensePlate || "",
     }));
   }
@@ -1431,8 +1467,7 @@ function ClaimWorkspace({
     event.preventDefault();
     if (!customerId) { setError("Select an existing customer before saving the claim."); return; }
     setBusy(true); setError("");
-    const address = [form.customerAddress, form.customerCity, form.customerState, form.customerZip].filter(Boolean).join(", ");
-    const payload = { ...form, customerAddress: address, vehicleId: form.vehicleId || null, jobId: form.jobId || null, vehicleYear: form.vehicleYear ? Number(form.vehicleYear) : null, atFaultVehicleYear: form.atFaultVehicleYear ? Number(form.atFaultVehicleYear) : null, incidentDate: form.incidentDate || null, adjusterVisitAt: form.adjusterVisitAt || null, dateSubmitted: form.dateSubmitted || null };
+    const payload = { ...form, vehicleId: form.vehicleId || null, jobId: form.jobId || null, vehicleYear: form.vehicleYear ? Number(form.vehicleYear) : null, atFaultVehicleYear: form.atFaultVehicleYear ? Number(form.atFaultVehicleYear) : null, incidentDate: form.incidentDate || null, adjusterVisitAt: form.adjusterVisitAt || null, dateSubmitted: form.dateSubmitted || null };
     try {
       const path = claim ? `/claims/${claim.id}` : "/claims";
       await fetchJson(path, { method: claim ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -1449,7 +1484,10 @@ function ClaimWorkspace({
         </div>
         {error && <div className="error-banner">{error}</div>}
         {!printMode && claim && <div className="claim-workspace-tabs" role="tablist" aria-label="Claim workspace sections"><button type="button" className={workspaceTab === "intake" ? "active" : ""} onClick={() => setWorkspaceTab("intake")}>Claim intake</button><button type="button" className={workspaceTab === "records" ? "active" : ""} onClick={() => setWorkspaceTab("records")}>Documents &amp; job records</button></div>}
-        {printMode ? <AuthorizationForm form={form} customer={selectedCustomer || claim?.customer} vehicle={availableVehicles.find((item) => item.id === form.vehicleId) || claim?.vehicle} jobLabel={availableJobs.find((item) => item.id === form.jobId)?.jobNumber} jobId={String(form.jobId || "")} /> : workspaceTab === "records" && claim ? <ClaimRecordsPanel claim={claim} selectedJobId={String(form.jobId || "")} /> : (
+        <div style={{ display: printMode ? "contents" : "none" }} aria-hidden={!printMode}>
+          <AuthorizationForm form={form} customer={selectedCustomer || claim?.customer} vehicle={availableVehicles.find((item) => item.id === form.vehicleId) || claim?.vehicle} jobId={String(form.jobId || "")} claimId={claim?.id} />
+        </div>
+        {!printMode && (workspaceTab === "records" && claim ? <ClaimRecordsPanel claim={claim} selectedJobId={String(form.jobId || "")} /> : (
           <form className="claim-form" onSubmit={save}>
             <div className="claim-section"><h3>Record links</h3><div className="claim-grid">
               <label>Existing customer<select required value={customerId} onChange={(event) => selectCustomer(event.target.value)}><option value="">Select customer</option>{customers.map((customer) => <option value={customer.id} key={customer.id}>{customer.firstName} {customer.lastName}{customer.phone ? ` · ${customer.phone}` : ""}</option>)}</select></label>
@@ -1465,7 +1503,7 @@ function ClaimWorkspace({
             <div className="claim-section"><h3>Claim status</h3><div className="claim-grid"><label>Status<select value={String(form.status)} onChange={(event) => update("status", event.target.value)}>{["new", "submitted", "in_review", "approved", "denied", "closed"].map((status) => <option key={status}>{status}</option>)}</select></label><Field label="Date submitted" type="date" value={form.dateSubmitted} onChange={(value) => update("dateSubmitted", value)} /><label className="claim-notes">Notes<textarea value={String(form.notes || "")} onChange={(event) => update("notes", event.target.value)} /></label></div></div>
             <div className="claim-form-actions"><button type="button" className="secondary-button" onClick={() => setPrintMode(true)}>Preview authorization</button><button className="orange-button" disabled={busy}>{busy ? "Saving..." : claim ? "Save claim" : "Create claim"}</button></div>
           </form>
-        )}
+        ))}
       </section>
     </div>
   );
@@ -1562,7 +1600,7 @@ function Field({ label, value, onChange, type = "text" }: { label: string; value
   return <label>{label}<input type={type} value={String(value ?? "")} onChange={(event) => onChange(event.target.value)} /></label>;
 }
 
-function AuthorizationForm({ form, customer, vehicle, jobId }: { form: ClaimForm; customer?: Customer; vehicle?: Vehicle | null; jobLabel?: string; jobId?: string }) {
+function AuthorizationForm({ form, customer, vehicle, jobId, claimId }: { form: ClaimForm; customer?: Customer; vehicle?: Vehicle | null; jobId?: string; claimId?: string }) {
   const customerName = customer ? `${customer.firstName} ${customer.lastName}` : String(form.customerName || "");
   const vehicleYear = vehicle?.year || form.vehicleYear || "";
   const vehicleMake = vehicle?.make || form.vehicleMake || "";
@@ -1572,31 +1610,197 @@ function AuthorizationForm({ form, customer, vehicle, jobId }: { form: ClaimForm
   const value = (field: string) => String(form[field] || "");
   const [downloadBusy, setDownloadBusy] = React.useState(false);
   const [downloadError, setDownloadError] = React.useState("");
+  const [signingBusy, setSigningBusy] = React.useState(false);
+  const [signingError, setSigningError] = React.useState("");
+  const [signing, setSigning] = React.useState<RepairAuthorizationSigning | null>(null);
+  const [authorizationFileName, setAuthorizationFileName] = React.useState("");
+  const [sendDialogOpen, setSendDialogOpen] = React.useState(false);
+  const [recipientName, setRecipientName] = React.useState(customerName);
+  const [recipientEmail, setRecipientEmail] = React.useState(customer?.email || "");
+  const [recipientMode, setRecipientMode] = React.useState<"claim" | "different">(customer?.email ? "claim" : "different");
+  const [sendBlocked, setSendBlocked] = React.useState(false);
+  const [authorizationLookupBusy, setAuthorizationLookupBusy] = React.useState(Boolean(claimId && jobId));
+  const [authorizationLookupFailed, setAuthorizationLookupFailed] = React.useState(false);
+  const [authorizationLookupFor, setAuthorizationLookupFor] = React.useState("");
+  const [authorizationLookupRevision, setAuthorizationLookupRevision] = React.useState(0);
+  const authorizationLookupKey = `${claimId || ""}:${jobId || ""}`;
+  const authorizationStatusReady = !claimId || !jobId || authorizationLookupFor === authorizationLookupKey;
   const line = (label: string, content: React.ReactNode = "", className = "") => <span className={`authorization-field ${className}`}><b>{label}</b> <span>{content}</span></span>;
-  const section = (title: string, children: React.ReactNode) => <section className="authorization-section"><h3>{title}</h3>{children}<div className="authorization-initial">Initial here: ____________________</div></section>;
+  const section = (title: string, children: React.ReactNode) => <section className="authorization-section"><h3>{title}</h3>{children}<div className="authorization-initial">Initial here: <span className="authorization-mark">x</span> ____________________</div></section>;
+  const addressParts = customerAddressParts(value("customerAddress") || customer?.address || "");
   async function downloadAuthorization() {
     if (!jobId) { setDownloadError("Link a repair order before downloading the authorization."); return; }
     setDownloadBusy(true); setDownloadError("");
     try {
-      const result = await fetchJson<{ downloadUrl: string; fileName: string }>(`/jobs/${jobId}/authorization.pdf`, { method: "POST" });
-      const response = await fetch(new URL(result.downloadUrl, API_URL).toString(), { headers: { Authorization: `Bearer ${localStorage.getItem("repairos_token") || ""}` } });
+      let authorizationId = signing?.authorizationId;
+      let downloadUrl: string;
+      let fileName: string;
+      if (authorizationId) {
+        downloadUrl = `/repair-authorizations/${authorizationId}/download`;
+        fileName = authorizationFileName || "repair-authorization.pdf";
+      } else {
+        const result = await fetchJson<{ id: string; downloadUrl: string; fileName: string }>(`/jobs/${jobId}/authorization.pdf`, { method: "POST" });
+        authorizationId = result.id;
+        downloadUrl = result.downloadUrl;
+        fileName = result.fileName;
+        setAuthorizationFileName(fileName);
+        setSigning({ authorizationId, jobId, submissionId: null, signerEmail: null, status: "not_sent", completedAt: null });
+      }
+      const response = await fetch(new URL(downloadUrl, API_URL).toString(), { headers: { Authorization: `Bearer ${localStorage.getItem("repairos_token") || ""}` } });
       if (!response.ok) throw new Error("Unable to download authorization PDF");
       const link = document.createElement("a");
       link.href = URL.createObjectURL(await response.blob());
-      link.download = result.fileName;
+      link.download = fileName;
       link.click();
       URL.revokeObjectURL(link.href);
     } catch (downloadActionError) {
       setDownloadError(downloadActionError instanceof Error ? downloadActionError.message : "Unable to download authorization PDF");
     } finally { setDownloadBusy(false); }
   }
-  return <div className="authorization-preview"><div className="authorization-actions"><button type="button" className="orange-button print-button" onClick={() => window.print()}>Print authorization</button><button type="button" className="secondary-button download-button" onClick={() => void downloadAuthorization()} disabled={downloadBusy}>{downloadBusy ? "Preparing PDF..." : "Download PDF"}</button></div>{downloadError && <p className="authorization-download-error">{downloadError}</p>}<article className="authorization-paper">
+  function openSendDialog() {
+    if (!jobId) { setSigningError("Link a repair order before sending for signature."); return; }
+    if (!authorizationStatusReady || authorizationLookupBusy || authorizationLookupFailed) return;
+    setRecipientName(customerName);
+    setRecipientEmail(customer?.email || "");
+    setRecipientMode(customer?.email ? "claim" : "different");
+    setSigningError("");
+    setSendDialogOpen(true);
+  }
+  async function sendForSignature(event: React.FormEvent) {
+    event.preventDefault();
+    if (!jobId) { setSigningError("Link a repair order before sending for signature."); return; }
+    const cleanName = (recipientMode === "claim" ? customerName : recipientName).trim();
+    const cleanEmail = (recipientMode === "claim" ? customer?.email || "" : recipientEmail).trim();
+    if (!cleanName || !cleanEmail) { setSigningError("Enter the recipient name and email address."); return; }
+    setSigningBusy(true); setSigningError("");
+    let authorizationId = signing?.authorizationId;
+    try {
+      if (!authorizationId) {
+        const authorization = await fetchJson<{ id: string; fileName: string }>(`/jobs/${jobId}/authorization.pdf`, { method: "POST" });
+        authorizationId = authorization.id;
+        setAuthorizationFileName(authorization.fileName);
+        setSigning({ authorizationId, jobId, submissionId: null, signerEmail: cleanEmail, status: "not_sent", completedAt: null });
+      }
+      const result = await fetchJson<RepairAuthorizationSigning>(`/repair-authorizations/${authorizationId}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipientName: cleanName, recipientEmail: cleanEmail }),
+      });
+      setSigning(result);
+      setSendDialogOpen(false);
+    } catch (sendError) {
+      const message = sendError instanceof Error ? sendError.message : "Unable to send authorization for signature";
+      const conflict = message.includes("(HTTP 409)");
+      if (conflict) setSendBlocked(true);
+      setSigningError(message);
+      if (authorizationId) {
+        try {
+          const current = await fetchJson<RepairAuthorizationSigning>(`/repair-authorizations/${authorizationId}/signing`);
+          setSigning(current);
+          if (current.submissionId) {
+            setSendBlocked(true);
+            setSigningError("");
+            setSendDialogOpen(false);
+          }
+        } catch (statusError) {
+          setSigningError(statusError instanceof Error ? `${message}; Unable to check signing status: ${statusError.message}` : message);
+        }
+      }
+    } finally { setSigningBusy(false); }
+  }
+  React.useEffect(() => {
+    let active = true;
+    async function loadExistingAuthorization() {
+      setSigning(null);
+      setSendBlocked(false);
+      setAuthorizationFileName("");
+      setSigningError("");
+      setAuthorizationLookupFailed(false);
+      if (!claimId || !jobId) {
+        setAuthorizationLookupBusy(false);
+        setAuthorizationLookupFor(authorizationLookupKey);
+        return;
+      }
+      setAuthorizationLookupBusy(true);
+      setAuthorizationLookupFor("");
+      try {
+        const hub = await fetchJson<ClaimHub>(`/claims/${claimId}/hub`);
+        const existing = hub.jobs.find((job) => job.id === jobId)?.authorizations?.[0];
+        if (existing) {
+          if (active) setAuthorizationFileName(existing.fileName);
+          const current = await fetchJson<RepairAuthorizationSigning>(`/repair-authorizations/${existing.id}/signing`);
+          if (active) setSigning(current);
+        }
+      } catch (lookupError) {
+        if (active) {
+          setAuthorizationLookupFailed(true);
+          setSigningError(lookupError instanceof Error ? lookupError.message : "Unable to check existing authorization status");
+        }
+      } finally {
+        if (active) {
+          setAuthorizationLookupBusy(false);
+          setAuthorizationLookupFor(authorizationLookupKey);
+        }
+      }
+    }
+    void loadExistingAuthorization();
+    return () => { active = false; };
+  }, [claimId, jobId, authorizationLookupRevision]);
+  React.useEffect(() => {
+    if (!signing?.authorizationId) return;
+    const reportedSend = signing.status !== "not_sent" && signing.status !== "send_failed";
+    const terminalStatuses = ["completed", "declined", "expired", "canceled", "cancelled", "rejected", "send_failed"];
+    if (!signing.submissionId && !reportedSend) return;
+    if (terminalStatuses.includes(signing.status)) return;
+    const refresh = async () => {
+      try {
+        const result = await fetchJson<RepairAuthorizationSigning>(`/repair-authorizations/${signing.authorizationId}/signing`);
+        setSigning(result);
+      } catch (statusError) {
+        setSigningError(statusError instanceof Error ? statusError.message : "Unable to check signing status");
+      }
+    };
+    const timer = window.setInterval(() => void refresh(), 10000);
+    return () => window.clearInterval(timer);
+  }, [signing?.authorizationId, signing?.submissionId, signing?.status]);
+  const signingStatusText = signing?.status === "completed"
+    ? `Signed by ${signing.signerEmail || customer?.email || "customer"}${signing.completedAt ? ` on ${new Date(signing.completedAt).toLocaleDateString()}` : ""}. The signed PDF is saved in this claim's documents and the job documents.`
+    : signing?.status === "send_unknown" || signing?.status === "sending"
+      ? "Delivery status is not confirmed. Check DocuSeal before trying again to avoid sending a duplicate."
+      : signing?.submissionId
+        ? `Sent to DocuSeal for ${signing.signerEmail || customer?.email || "the recipient"}. Status: ${signing.status.replace(/_/g, " ")}.`
+        : signing?.status === "send_failed"
+          ? "The last delivery attempt failed. Review the error and recipient details before retrying."
+          : signing && signing.status !== "not_sent"
+            ? `Signing status: ${signing.status.replace(/_/g, " ")}. Confirm the status before retrying.`
+            : "";
+  const hasExistingSubmission = Boolean(signing?.submissionId) || Boolean(signing && !["not_sent", "send_failed"].includes(signing.status));
+  return <div className="authorization-preview"><div className="authorization-actions"><button type="button" className="orange-button print-button" onClick={() => window.print()}>Print authorization</button><button type="button" className="secondary-button download-button" onClick={() => void downloadAuthorization()} disabled={downloadBusy || signingBusy || authorizationLookupBusy || !authorizationStatusReady}>{downloadBusy ? "Preparing PDF..." : "Download PDF"}</button><button type="button" className="secondary-button" onClick={openSendDialog} disabled={signingBusy || sendBlocked || hasExistingSubmission || authorizationLookupBusy || !authorizationStatusReady || authorizationLookupFailed || !jobId}>{authorizationLookupBusy || !authorizationStatusReady ? "Checking status..." : signingBusy ? "Sending..." : "Send via DocuSeal"}</button></div>{(authorizationLookupBusy || !authorizationStatusReady) && <p className="authorization-signing-status" role="status">Checking for an existing authorization...</p>}{authorizationLookupFailed && <button type="button" className="secondary-button" onClick={() => setAuthorizationLookupRevision((revision) => revision + 1)}>Retry status check</button>}{downloadError && <p className="authorization-download-error">{downloadError}</p>}{signingError && <p className="authorization-signing-error" role="alert">{signingError}</p>}{signingStatusText && <p className="authorization-signing-status" role="status">{signingStatusText}</p>}
+    {sendDialogOpen && <div className="modal-backdrop docuseal-send-backdrop" onClick={() => { if (!signingBusy) setSendDialogOpen(false); }}><section className="modal docuseal-send-modal" role="dialog" aria-modal="true" aria-labelledby="docuseal-send-title" onClick={(event) => event.stopPropagation()}>
+      <div className="modal-heading"><div><p className="eyebrow">Repair authorization</p><h2 id="docuseal-send-title">Send for signature</h2></div><button type="button" className="close-button" aria-label="Close" disabled={signingBusy} onClick={() => setSendDialogOpen(false)}><Icon name="close" /></button></div>
+      <p className="subheading">DocuSeal will email the saved authorization with five initials fields, signature, date, and insurance/claim fields ready to complete. For a full-size print of the signed form, use DocuSeal&apos;s Download button instead of printing its signing webpage.</p>
+      {signingError && <div className="error-banner" role="alert">{signingError}</div>}
+      {signingStatusText && <p className="authorization-signing-status" role="status">{signingStatusText}</p>}
+      <form onSubmit={(event) => void sendForSignature(event)}>
+        <fieldset className="docuseal-recipient-options" disabled={signingBusy}>
+          <legend>Who should receive the signing request?</legend>
+          <label><input type="radio" name="docuseal-recipient" value="claim" checked={recipientMode === "claim"} disabled={!customer?.email} onChange={() => setRecipientMode("claim")} /> Claim recipient{customer?.email ? ` · ${customerName} (${customer.email})` : " · No email saved"}</label>
+          <label><input type="radio" name="docuseal-recipient" value="different" checked={recipientMode === "different"} onChange={() => setRecipientMode("different")} /> Use a different email address</label>
+        </fieldset>
+        {recipientMode === "different" && <>
+          <label>Recipient name<input autoComplete="name" required value={recipientName} onChange={(event) => setRecipientName(event.target.value)} disabled={signingBusy} /></label>
+          <label>Recipient email<input type="email" autoComplete="email" required value={recipientEmail} onChange={(event) => setRecipientEmail(event.target.value)} disabled={signingBusy} /></label>
+        </>}
+        <div className="claim-form-actions"><button type="button" className="secondary-button" onClick={() => setSendDialogOpen(false)} disabled={signingBusy}>Cancel</button><button type="submit" className="orange-button" disabled={signingBusy || sendBlocked || hasExistingSubmission}>{signingBusy ? signing?.authorizationId ? "Sending..." : "Preparing authorization PDF..." : "Send once"}</button></div>
+      </form>
+    </section></div>}
+    <article className="authorization-paper">
     <header className="authorization-header"><h1>MASTERCRAFT AUTO REPAIR &amp; COLLISION</h1><p>38-21 23rd Street, Long Island City, NY 11101</p><p>Tel: (718) 603-0412&nbsp; · &nbsp;(718) 578-4563</p><p>Website: www.mastercraftauto.com</p><p>Email: shop@mastercraftautony.com</p><span className="authorization-facility">Facility Number: 7136099</span><span className="authorization-ein">EIN# 42-2914045</span></header>
     <h2 className="authorization-recognized">Recognized By All Insurance Companies</h2>
     <div className="authorization-intake">
       <div className="authorization-line-row">{line("Date", new Date().toLocaleDateString("en-US"), "date-line")}{line("Name (Person in Charge)", customerName, "name-line")}{line("Claim#", value("claimNumber"), "claim-line")}</div>
-      <div className="authorization-line-row">{line("Address", value("customerAddress"), "address-line")}{line("City", value("customerCity"), "city-line")}</div>
-      <div className="authorization-line-row">{line("State", value("customerState"), "state-line")}{line("Zip Code", value("customerZip"), "zip-line")}{line("Phone", value("customerPhone"), "phone-line")}{line("Alt. Phone", "", "alt-phone-line")}</div>
+      <div className="authorization-line-row">{line("Address", addressParts.address, "address-line")}{line("City", value("customerCity") || customer?.city || addressParts.city, "city-line")}</div>
+      <div className="authorization-line-row">{line("State", value("customerState") || customer?.state || addressParts.state, "state-line")}{line("Zip Code", value("customerZip") || customer?.zipCode || addressParts.zipCode, "zip-line")}{line("Phone", value("customerPhone"), "phone-line")}{line("Alt. Phone", "", "alt-phone-line")}</div>
       <div className="authorization-line-row">{line("License No.", value("driverLicense"), "license-line")}{line("Insurance Company", value("insuranceCompany"), "insurance-line")}{line("Date of Loss", value("incidentDate"), "loss-line")}</div>
       <div className="authorization-line-row">{line("Year", vehicleYear, "year-line")}{line("Make", vehicleMake, "make-line")}{line("Model", vehicleModel, "model-line")}{line("Type", value("vehicleBodyClass"), "type-line")}{line("License No.", vehiclePlate, "vehicle-license-line")}</div>
       <div className="authorization-line-row">{line("Vehicle Identification Number", vehicleVin, "vin-line")}{line("Color", vehicle?.color || value("vehicleColor"), "color-line")}</div>
@@ -1606,7 +1810,7 @@ function AuthorizationForm({ form, customer, vehicle, jobId }: { form: ClaimForm
     {section("Authorization To Dismantle", <p>I (Above Owner) hereby authorize MASTERCRAFT AUTO REPAIR &amp; COLLISION to dismantle my vehicle prior/after Insurance Co. inspection to see any hidden and related damage. MASTERCRAFT AUTO REPAIR &amp; COLLISION hourly rate of $75.00 per hour maximum time of dismantling <span className="authorization-blank">__________</span> hours. I also allow MASTERCRAFT AUTO REPAIR &amp; COLLISION to place my vehicle in any one of their location while in their possession.</p>)}
     {section("Direction of Payment", <p>I (Above Owner) hereby authorize <span className="authorization-blank">______________________________</span> on my claim# <span className="authorization-blank">__________________</span> to directly pay MASTERCRAFT AUTO REPAIR &amp; COLLISION. I understand that by signing this authorization, I will give permission to also make 2 party check.</p>)}
     {section("Department of Motor Vehicles Notification", <p>I Authorize MASTERCRAFT AUTO REPAIR &amp; COLLISION to charge $150.00 per day storage for above vehicle upon completion of repairs or if vehicle redeemed a total loss.</p>)}
-    <table className="authorization-signature-table"><thead><tr><th>Owner/person in charge (Print Name)</th><th>Signature</th><th>Date</th></tr></thead><tbody><tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></tbody></table><div className="authorization-signed-fields">{line("Address where signed", "")}{line("City", "")}{line("State / Zip-Code", "")}</div><p className="authorization-final">ALL OF THE ABOVE ENTRIES MUST BE MADE AT THE TIME THE AUTHORIZATION TO REPAIR IS SIGNED.</p>
+    <div className="authorization-signing-block"><table className="authorization-signature-table"><thead><tr><th>Owner/person in charge (Print Name)</th><th>Signature</th><th>Date</th></tr></thead><tbody><tr><td>{customerName || "\u00a0"}</td><td><span className="authorization-mark">x</span></td><td>&nbsp;</td></tr></tbody></table><div className="authorization-signed-fields">{line("Address where signed", "38-21 23rd St")}{line("City", "Long Island City")}{line("State / Zip-Code", "NY 11101")}</div><p className="authorization-final">ALL OF THE ABOVE ENTRIES MUST BE MADE AT THE TIME THE AUTHORIZATION TO REPAIR IS SIGNED.</p></div>
   </article></div>;
 }
 
@@ -2733,7 +2937,10 @@ function CreateModal({
             {input("lastName", "Last name", true)}
             {input("phone", "Phone")}
             {input("email", "Email")}
-            {input("address", "Address")}
+            {input("address", "Street address")}
+            {input("city", "City")}
+            {input("state", "State")}
+            {input("zipCode", "ZIP code")}
           </>
         )}
         {type === "vehicle" && (

@@ -6,6 +6,7 @@ BACKUP_ROOT="${BACKUP_ROOT:-/opt/autoshop/backups/daily}"
 DB_CONTAINER="${DB_CONTAINER:-collision-shop-db}"
 API_CONTAINER="${API_CONTAINER:-collision-shop-api}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
+RCLONE_REMOTE="${RCLONE_REMOTE:-gdrive-crypt:}"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="${BACKUP_ROOT}/autoshop-${TIMESTAMP}"
 STAGING_DIR="${BACKUP_ROOT}/.partial-${TIMESTAMP}-$$"
@@ -21,6 +22,7 @@ container_running() {
 
 container_running "$DB_CONTAINER" || fail "Database container '$DB_CONTAINER' is not running"
 container_running "$API_CONTAINER" || fail "API container '$API_CONTAINER' is not running"
+command -v rclone >/dev/null || fail "rclone is not installed"
 
 DB_NAME="$(docker exec "$DB_CONTAINER" printenv POSTGRES_DB)"
 DB_USER="$(docker exec "$DB_CONTAINER" printenv POSTGRES_USER)"
@@ -70,6 +72,23 @@ echo "Backup completed and verified: ${BACKUP_DIR}"
 cat "${BACKUP_DIR}/manifest.txt"
 cat "${BACKUP_DIR}/checksums.sha256"
 
+REMOTE_DIR="${RCLONE_REMOTE%/}/${BACKUP_DIR##*/}"
+REMOTE_FAILED=0
+if ! rclone lsf "$RCLONE_REMOTE" --max-depth 1 >/dev/null; then
+  echo "ERROR: Local backup completed, but encrypted Google Drive remote '${RCLONE_REMOTE}' is unavailable." >&2
+  REMOTE_FAILED=1
+else
+  echo "Uploading encrypted backup to ${REMOTE_DIR}"
+  if rclone copy "$BACKUP_DIR" "$REMOTE_DIR" \
+    --checkers 4 --transfers 2 --retries 3 --low-level-retries 10 \
+    && rclone check "$BACKUP_DIR" "$REMOTE_DIR" --download --one-way; then
+    echo "Encrypted Google Drive copy verified: ${REMOTE_DIR}"
+  else
+    echo "ERROR: Local backup completed, but Google Drive upload or verification failed." >&2
+    REMOTE_FAILED=1
+  fi
+fi
+
 while IFS= read -r -d '' candidate; do
   name="${candidate##*/}"
   if [[ "$name" =~ ^autoshop-[0-9]{8}T[0-9]{6}Z$ ]]; then
@@ -77,3 +96,5 @@ while IFS= read -r -d '' candidate; do
     rm -rf -- "$candidate"
   fi
 done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'autoshop-????????T??????Z' -mtime "+${RETENTION_DAYS}" -print0)
+
+(( REMOTE_FAILED == 0 )) || fail "Local backup succeeded; offsite Google Drive backup did not. See the preceding rclone error."

@@ -29,6 +29,9 @@ export function createCustomersRouter(prisma: PrismaClient) {
         phone: optionalText(req.body.phone, 'phone'),
         email: optionalText(req.body.email, 'email'),
         address: optionalText(req.body.address, 'address'),
+        city: optionalText(req.body.city, 'city'),
+        state: optionalText(req.body.state, 'state'),
+        zipCode: optionalText(req.body.zipCode, 'zipCode'),
       },
     });
     res.status(201).json(customer);
@@ -64,6 +67,9 @@ export function createCustomersRouter(prisma: PrismaClient) {
         phone: req.body.phone === undefined ? undefined : optionalText(req.body.phone, 'phone'),
         email: req.body.email === undefined ? undefined : optionalText(req.body.email, 'email'),
         address: req.body.address === undefined ? undefined : optionalText(req.body.address, 'address'),
+        city: req.body.city === undefined ? undefined : optionalText(req.body.city, 'city'),
+        state: req.body.state === undefined ? undefined : optionalText(req.body.state, 'state'),
+        zipCode: req.body.zipCode === undefined ? undefined : optionalText(req.body.zipCode, 'zipCode'),
       },
     });
     res.json(customer);

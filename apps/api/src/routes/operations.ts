@@ -6,6 +6,7 @@ import multer from 'multer';
 import PDFDocument from 'pdfkit';
 import { PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
+import type { DocuSealFieldPlacement } from '../docuseal.js';
 import { optionalText, requiredText } from '../validation.js';
 
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
@@ -70,8 +71,9 @@ export function createOperationsRouter(prisma: PrismaClient) {
     const authorizationId = randomUUID();
     const fileName = `repair-authorization-${job.jobNumber.replace(/[^a-zA-Z0-9_-]+/g, '_')}-${authorizationId}.pdf`;
     await mkdir(uploadDirectory, { recursive: true });
-    await writeFile(path.join(uploadDirectory, fileName), await createAuthorizationPdf(job));
-    const authorization = await prisma.repairAuthorization.create({ data: { id: authorizationId, jobId: job.id, fileName, filePath: path.relative(process.cwd(), path.join(uploadDirectory, fileName)), status: 'generated' } });
+    const generated = await createAuthorizationPdf(job);
+    await writeFile(path.join(uploadDirectory, fileName), generated.pdf);
+    const authorization = await prisma.repairAuthorization.create({ data: { id: authorizationId, jobId: job.id, fileName, filePath: path.relative(process.cwd(), path.join(uploadDirectory, fileName)), docusealFields: JSON.stringify(generated.fieldPlacements), status: 'generated' } });
     res.status(201).json({ ...authorization, downloadUrl: `/api/repair-authorizations/${authorization.id}/download` });
   }));
 
@@ -210,7 +212,15 @@ function vehicleLabel(vehicle: { year: number | null; make: string | null; model
 function pdfEscape(value: string) { return value.replace(/([\\()])/g, '\\$1'); }
 async function createAuthorizationPdf(job: {
   jobNumber: string;
-  customer: { firstName: string; lastName: string; phone: string | null; address: string | null };
+  customer: {
+    firstName: string;
+    lastName: string;
+    phone: string | null;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    zipCode: string | null;
+  };
   vehicle: { year: number | null; make: string | null; model: string | null; bodyClass: string | null; vin: string | null; licensePlate: string | null; color: string | null } | null;
   claim: {
     claimNumber: string | null; customerAddress: string | null; customerPhone: string | null; customerInsurance: string | null;
@@ -223,22 +233,48 @@ async function createAuthorizationPdf(job: {
   const chunks: Buffer[] = [];
   document.on('data', (chunk: Buffer) => chunks.push(chunk));
   const finished = new Promise<Buffer>((resolve) => document.on('end', () => resolve(Buffer.concat(chunks))));
+  const fieldPlacements: DocuSealFieldPlacement[] = [];
   const pageWidth = 544;
   const customerName = `${job.customer.firstName} ${job.customer.lastName}`;
   const claim = job.claim;
   const vehicle = job.vehicle;
+  const customerAddress = splitAuthorizationAddress(job.customer.address || claim?.customerAddress || '');
+  const claimAddress = splitAuthorizationAddress(claim?.customerAddress || job.customer.address || '');
+  const addressLine = job.customer.city || job.customer.state || job.customer.zipCode
+    ? customerAddress.street
+    : claimAddress.street;
+  const city = job.customer.city || customerAddress.city || claimAddress.city;
+  const state = job.customer.state || customerAddress.state || claimAddress.state;
+  const zipCode = job.customer.zipCode || customerAddress.zipCode || claimAddress.zipCode;
   const field = (label: string, content: string, x: number, width: number) => {
     document.font('Times-Roman').fontSize(8.5).text(`${label}:`, x, y, { continued: true });
     document.text(` ${content || ' '}`, { continued: false });
     document.moveTo(x + 1, y + 11).lineTo(x + width, y + 11).strokeColor('#555').stroke();
   };
-  const section = (title: string, text: string) => {
+  const section = (title: string, text: string, renderBody?: (bodyY: number) => void) => {
     y += 15;
     document.font('Times-Bold').fontSize(10.5).text(title, 34, y, { width: pageWidth, align: 'center', underline: true });
     y += 13;
-    document.font('Times-Roman').fontSize(8.7).text(text, 34, y, { width: pageWidth, lineGap: 0.2, align: 'left' });
+    const bodyY = y;
+    document.font('Times-Roman').fontSize(8.7);
+    if (renderBody) renderBody(bodyY);
+    else document.text(text, 34, bodyY, { width: pageWidth, lineGap: 0.2, align: 'left' });
     y += document.heightOfString(text, { width: pageWidth, lineGap: 0.2 });
-    document.font('Times-Roman').fontSize(8.5).text('Initial here: ____________________', 390, y + 4, { width: 188, align: 'right' });
+    const initialText = 'Initial here: x ____________________';
+    const initialUnderline = '____________________';
+    document.font('Times-Roman').fontSize(8.5);
+    document.text(initialText, 390, y + 4, { width: 188, align: 'right' });
+    const initialTextX = 390 + 188 - document.widthOfString(initialText);
+    fieldPlacements.push({
+      name: `${title} initials`,
+      type: 'initials',
+      required: true,
+      x: initialTextX + document.widthOfString('Initial here: x '),
+      y: y + 5,
+      w: document.widthOfString(initialUnderline),
+      h: 9,
+      page: 1,
+    });
   };
   let y = 34;
   document.font('Times-Bold').fontSize(15).text('MASTERCRAFT AUTO REPAIR & COLLISION', 34, y, { width: pageWidth, align: 'center' });
@@ -252,22 +288,74 @@ async function createAuthorizationPdf(job: {
   y += 16; document.font('Times-Bold').fontSize(11).text('Recognized By All Insurance Companies', 34, y, { width: pageWidth, align: 'center', underline: true });
   y += 17;
   field('Date', new Date().toLocaleDateString('en-US'), 34, 102); field('Name (Person in Charge)', customerName, 145, 285); field('Claim#', claim?.claimNumber || '', 440, 138); y += 16;
-  field('Address', claim?.customerAddress || job.customer.address || '', 34, 300); field('City', '', 340, 238); y += 16;
-  field('State', '', 34, 105); field('Zip Code', '', 145, 120); field('Phone', claim?.customerPhone || job.customer.phone || '', 270, 205); field('Alt. Phone', '', 480, 98); y += 16;
+  field('Address', addressLine, 34, 300); field('City', city, 340, 238); y += 16;
+  field('State', state, 34, 105); field('Zip Code', zipCode, 145, 120); field('Phone', claim?.customerPhone || job.customer.phone || '', 270, 205); field('Alt. Phone', '', 480, 98); y += 16;
   field('License No.', claim?.driverLicense || '', 34, 155); field('Insurance Company', claim?.customerInsurance || '', 195, 255); field('Date of Loss', claim?.incidentDate ? claim.incidentDate.toLocaleDateString('en-US') : '', 455, 123); y += 16;
   field('Year', String(vehicle?.year || claim?.vehicleYear || ''), 34, 80); field('Make', vehicle?.make || claim?.vehicleMake || '', 118, 112); field('Model', vehicle?.model || claim?.vehicleModel || '', 235, 145); field('Type', vehicle?.bodyClass || claim?.vehicleBodyClass || '', 385, 105); field('License No.', vehicle?.licensePlate || claim?.vehicleLicensePlate || '', 495, 83); y += 16;
   field('Vehicle Identification Number', vehicle?.vin || claim?.vehicleVin || '', 34, 370); field('Color', vehicle?.color || claim?.vehicleColor || '', 410, 168);
   section('Designated Representative Authorization', 'I (Above Owner) insured by: ______________________________ hereby authorize MASTERCRAFT AUTO REPAIR & COLLISION as my/our designated representative to reach an agreed price with the insurance company as to the reasonable cost to repair my/our vehicle. The designated authorization is in conformance with New York State Department Regulations No.64 and is NOT an authorization to repair.');
   section('Authorization To Repair', 'I (Above Owner) hereby authorize MASTERCRAFT AUTO REPAIR & COLLISION to test drive my vehicle while the vehicle is in their possession.\n\nAS AGREED TO REPAIR FOR INSURANCE COMPANY PRICE ONLY AND AS PER SHOP ESTIMATE\nTO OWNER OR PERSON IN CHARGE OF DAMAGE VEHICLE:\n\nPlease read all printed matter before signing, all complaints of quality of repairs must be made to the New York State Department of Motor Vehicle. No Towing Company or Insurance may require that repair be made to a motor vehicle in a particular place or repair shop. You have the right to have your motor vehicle repaired in the shop of your choice.\n1. Do Not Sign this "Authorization to Repair" at the scene of an accident. You can not be required to do so\n    SIGN ONLY AT:\n    (a) The place to which the vehicle is towed to, or\n    (b) Your home or place designated by the person in charge of the disabled vehicle, or\n    (c) The hospital, if you are hospitalized by not before twenty-four (24) hours after the accident unless you are discharged from hospital before that period of time.\n2. Before signing your name to the bottom of this form, print/write in your own handwriting in the spaces provided I authorize the repair of the vehicle indicated above.');
   section('Authorization To Dismantle', 'I (Above Owner) hereby authorize MASTERCRAFT AUTO REPAIR & COLLISION to dismantle my vehicle prior/after Insurance Co. inspection to see any hidden and related damage. MASTERCRAFT AUTO REPAIR & COLLISION hourly rate of $75.00 per hour maximum time of dismantling __________ hours. I also allow MASTERCRAFT AUTO REPAIR & COLLISION to place my vehicle in any one of their location while in their possession.');
-  section('Direction of Payment', 'I (Above Owner) hereby authorize ______________________________ on my claim# __________________ to directly pay MASTERCRAFT AUTO REPAIR & COLLISION. I understand that by signing this authorization, I will give permission to also make 2 party check.');
+  const paymentPrefix = 'I (Above Owner) hereby authorize ';
+  const paymentInsuranceBlank = '______________________________';
+  const paymentMiddle = ' on my claim# ';
+  const paymentClaimBlank = '______________________________';
+  const paymentFirstLineEnd = ' to directly pay';
+  const paymentRemainder = ' MASTERCRAFT AUTO REPAIR & COLLISION. I understand that by signing this authorization, I will give permission to also make 2 party check.';
+  const paymentText = `${paymentPrefix}${paymentInsuranceBlank}${paymentMiddle}${paymentClaimBlank}${paymentFirstLineEnd}${paymentRemainder}`;
+  section('Direction of Payment', paymentText, (bodyY) => {
+    document.font('Times-Roman').fontSize(8.7);
+    const firstFieldX = 34 + document.widthOfString(paymentPrefix);
+    const secondFieldX = firstFieldX + document.widthOfString(paymentInsuranceBlank) + document.widthOfString(paymentMiddle);
+    document.text(paymentPrefix, 34, bodyY);
+    document.text(paymentInsuranceBlank, firstFieldX, bodyY);
+    document.text(paymentMiddle, firstFieldX + document.widthOfString(paymentInsuranceBlank), bodyY);
+    document.text(paymentClaimBlank, secondFieldX, bodyY);
+    document.text(paymentFirstLineEnd, secondFieldX + document.widthOfString(paymentClaimBlank), bodyY);
+    const continuationY = bodyY + document.currentLineHeight(true);
+    document.text(paymentRemainder.trimStart(), 34, continuationY, { width: pageWidth, lineGap: 0.2, align: 'left' });
+    for (const [name, x, w] of [
+      ['Insurance Company', firstFieldX, document.widthOfString(paymentInsuranceBlank)],
+      ['Claim Number', secondFieldX, document.widthOfString(paymentClaimBlank)],
+    ] as const) {
+      fieldPlacements.push({ name, type: 'text', required: true, x, y: bodyY + 1, w, h: 10, page: 1 });
+    }
+  });
   section('Department of Motor Vehicles Notification', 'I Authorize MASTERCRAFT AUTO REPAIR & COLLISION to charge $150.00 per day storage for above vehicle upon completion of repairs or if vehicle redeemed a total loss.');
   y += 9;
   const tableY = y;
   document.font('Times-Bold').fontSize(8.5); document.rect(34, tableY, pageWidth, 24).stroke(); document.moveTo(218, tableY).lineTo(218, tableY + 24).stroke(); document.moveTo(402, tableY).lineTo(402, tableY + 24).stroke();
-  document.text('Owner/person in charge (Print Name)', 39, tableY + 5); document.text('Signature', 223, tableY + 5); document.text('Date', 407, tableY + 5);
-  y = tableY + 45; field('Address where signed', '', 34, 270); field('City', '', 310, 125); field('State / Zip-Code', '', 440, 138);
+  document.text('Owner/person in charge (Print Name)', 39, tableY + 5); document.font('Times-Roman').fontSize(8.5).text(customerName || ' ', 39, tableY + 15, { width: 175 }); document.font('Times-Bold').fontSize(8.5).text('Signature', 223, tableY + 5); document.text('Date', 407, tableY + 5);
+  y = tableY + 45; field('Address where signed', '38-21 23rd St', 34, 270); field('City', 'Long Island City', 310, 125); field('State / Zip-Code', 'NY 11101', 440, 138);
   y += 23; document.font('Times-Bold').fontSize(8.7).text('ALL OF THE ABOVE ENTRIES MUST BE MADE AT THE TIME THE AUTHORIZATION TO REPAIR IS SIGNED.', 34, y, { width: pageWidth, align: 'center' });
+  fieldPlacements.push(
+    { name: 'Signature', type: 'signature', required: true, x: 223, y: tableY + 14.5, w: 173, h: 8.5, page: 1 },
+    { name: 'Date', type: 'date', required: true, x: 407, y: tableY + 14.5, w: 166, h: 8.5, page: 1 },
+  );
   document.end();
-  return finished;
+  return { pdf: await finished, fieldPlacements };
+}
+
+function splitAuthorizationAddress(value: string) {
+  const parts = value.split(',').map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) return { street: value.trim(), city: '', state: '', zipCode: '' };
+
+  const lastPart = parts[parts.length - 1];
+  const zipMatch = lastPart.match(/\b\d{5}(?:-\d{4})?\b/);
+  const stateMatch = lastPart.match(/\b([A-Z]{2})\b/i);
+  const stateIndex = stateMatch ? parts.length - 1 : zipMatch && parts.length > 1
+    ? parts.length - 2
+    : -1;
+  const stateValue = stateMatch?.[1] || (stateIndex >= 0 ? parts[stateIndex].match(/\b([A-Z]{2})\b/i)?.[1] : '');
+  if (!stateValue || stateIndex < 1) {
+    return { street: value.trim(), city: '', state: '', zipCode: zipMatch?.[0] || '' };
+  }
+
+  const cityIndex = stateIndex - 1;
+  return {
+    street: parts.slice(0, cityIndex).join(', '),
+    city: parts[cityIndex],
+    state: stateValue.toUpperCase(),
+    zipCode: zipMatch?.[0] || '',
+  };
 }
