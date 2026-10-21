@@ -20,7 +20,7 @@ export interface Mv104ClaimSource {
   policeReportFiled: boolean;
   atFaultDriverName: string | null;
   atFaultDriverLicense: string | null;
-  atFaultDlState: string | null;
+  atFaultDriverDlState: string | null;
   atFaultPlate: string | null;
   atFaultPlateState: string | null;
   atFaultVehicleYear: number | null;
@@ -101,7 +101,7 @@ export function buildMv104Defaults(claim: Mv104ClaimSource, now = new Date()): M
     ...emptyParty(),
     driverName: upper(claim.atFaultDriverName),
     dlNumber: upper(claim.atFaultDriverLicense),
-    dlState: stateCode(claim.atFaultDlState),
+    dlState: stateCode(claim.atFaultDriverDlState),
     state: '',
     registrantName: upper(claim.atFaultDriverName),
     plate: upper(claim.atFaultPlate),

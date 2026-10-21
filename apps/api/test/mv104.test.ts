@@ -76,7 +76,7 @@ test('prefill from a claim leaves unknown facts blank and reports what is still 
     claimNumber: 'C-100', incidentDate: new Date('2026-08-07T00:00:00Z'), driverLicense: 'd123', customerName: null,
     customerInsurance: 'GEICO', customerPolicyNumber: 'P1', vehicleYear: 2019, vehicleMake: 'Honda', vehicleModel: 'Civic',
     vehicleVin: 'VIN1', vehicleLicensePlate: 'abc1', vehiclePlateState: 'ny', policeReportNumber: null, policeDepartment: null,
-    policeReportFiled: false, atFaultDriverName: null, atFaultDriverLicense: null, atFaultDlState: null, atFaultPlate: null,
+    policeReportFiled: false, atFaultDriverName: null, atFaultDriverLicense: null, atFaultDriverDlState: null, atFaultPlate: null,
     atFaultPlateState: null, atFaultVehicleYear: null, atFaultVehicleMake: null, atFaultVehicleModel: null, atFaultVehicleVin: null,
     atFaultInsurance: null, atFaultPolicyNumber: null,
     customer: { firstName: 'Jane', lastName: 'Doe', address: '1 Main St', city: 'Queens', state: 'NY', zipCode: '11101' },
