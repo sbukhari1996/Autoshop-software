@@ -66,6 +66,25 @@ export function createOperationsRouter(prisma: PrismaClient) {
     res.json(updated);
   }));
 
+  // Storage billing: mark a job as a total loss and/or set the date it arrived in storage.
+  router.patch('/jobs/:jobId/storage', asyncHandler(async (req, res) => {
+    const job = await ensureJob(prisma, routeParam(req, 'jobId'));
+    const data: { totalLoss?: boolean; totalLossDate?: Date | null; arrivalDate?: Date | null } = {};
+    if (req.body.totalLoss !== undefined) {
+      if (typeof req.body.totalLoss !== 'boolean') throw new ApiError(400, 'totalLoss must be true or false');
+      data.totalLoss = req.body.totalLoss;
+      data.totalLossDate = req.body.totalLoss ? (job.totalLossDate || new Date()) : null;
+    }
+    if (req.body.arrivalDate !== undefined) {
+      const raw = req.body.arrivalDate === null || req.body.arrivalDate === '' ? null : requiredText(req.body.arrivalDate, 'arrivalDate');
+      const parsed = raw ? new Date(`${raw.slice(0, 10)}T12:00:00`) : null;
+      if (parsed && Number.isNaN(parsed.getTime())) throw new ApiError(400, 'arrivalDate must be a valid date');
+      data.arrivalDate = parsed;
+    }
+    const updated = await prisma.job.update({ where: { id: job.id }, data });
+    res.json(updated);
+  }));
+
   router.post('/jobs/:jobId/authorization.pdf', asyncHandler(async (req, res) => {
     const job = await prisma.job.findUnique({ where: { id: routeParam(req, 'jobId') }, include: { customer: true, vehicle: true, claim: true } });
     if (!job) throw new ApiError(404, 'Job not found');

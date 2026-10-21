@@ -283,6 +283,8 @@ model Job {
   arrivalDate    DateTime?
   inspectionDate DateTime?
   dueDate        DateTime?
+  totalLoss      Boolean   @default(false)
+  totalLossDate  DateTime?
   totalRevenue   Float     @default(0)
   totalExpenses  Float     @default(0)
   notes          String?

@@ -7,6 +7,7 @@ import { BookkeepingView } from "./BookkeepingView";
 import { InvoiceView, type Invoice } from "./InvoiceView";
 import { ReportsDashboard } from "./ReportsDashboard";
 import { TowingReceiptView } from "./TowingReceiptView";
+import { StorageReceiptView } from "./StorageReceiptView";
 import { CompanyTodoList, type CompanyTodo } from "./CompanyTodoList";
 import { Mv104Form } from "./Mv104Form";
 
@@ -20,6 +21,7 @@ type View =
   | "Documents"
   | "Invoices"
   | "Towing Receipts"
+  | "Storage Receipts"
   | "Bookkeeping"
   | "Reports";
 const humanize = (value: string) => value.replace(/_/g, " ");
@@ -261,6 +263,7 @@ const navItems: Array<{ label: View; icon: string }> = [
   { label: "Documents", icon: "folder" },
   { label: "Invoices", icon: "file" },
   { label: "Towing Receipts", icon: "truck" },
+  { label: "Storage Receipts", icon: "truck" },
   { label: "Bookkeeping", icon: "chart" },
   { label: "Reports", icon: "chart" },
 ];
@@ -898,6 +901,8 @@ function App() {
                                 ? "Create repair invoices, record payments, and keep balances current."
                               : view === "Towing Receipts"
                                 ? "Print towing receipts with customer and vehicle details from your records."
+                              : view === "Storage Receipts"
+                                ? "Bill storage for total-loss vehicles held more than a week, with the customer and insurance pulled from your records."
                               : "Measure shop throughput, revenue, and follow-up work."}
               </p>
             </div>
@@ -945,6 +950,13 @@ function App() {
           {view === "Documents" && <DocumentView documents={documents} customers={customers} jobs={jobs} claims={claims} onUploaded={loadData} />}
           {view === "Invoices" && <InvoiceView invoices={invoices} customers={customers} jobs={jobs} claims={claims} request={fetchJson} apiUrl={API_URL} onChanged={loadData} focus={focus} onFocusHandled={() => setFocus(null)} />}
           {view === "Towing Receipts" && <TowingReceiptView customers={customers} vehicles={vehicles} />}
+          {view === "Storage Receipts" && (
+            <StorageReceiptView
+              jobs={jobs}
+              request={fetchJson}
+              onRefresh={async () => setJobs(await fetchJson<Job[]>("/jobs"))}
+            />
+          )}
           {view === "Bookkeeping" && <BookkeepingView data={finance} request={fetchJson} onChanged={() => void loadData()} />}
           {view === "Reports" && (
             <ReportView reports={reports} onNavigate={navigate} invoices={invoices} jobs={jobs} claims={claims} entries={reportEntries} />
@@ -2609,6 +2621,7 @@ const pageAliases: Partial<Record<View, string[]>> = {
   Documents: ["files", "paperwork"],
   Invoices: ["invoice", "billing", "bills"],
   "Towing Receipts": ["towing receipt", "receipt", "tow"],
+  "Storage Receipts": ["storage receipt", "storage", "total loss", "storage charges"],
   Bookkeeping: ["accounting", "finance", "expenses"],
   Reports: ["report", "analytics"],
 };

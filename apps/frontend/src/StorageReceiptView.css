@@ -1,0 +1,5 @@
+.sr-banner { margin: 0; padding: 10px 14px; border-radius: 8px; font-size: .9rem; border-left: 4px solid var(--line); background: var(--surface-2, #f5f7fa); color: var(--text); }
+.sr-banner.sr-ok { border-left-color: #1e7a46; background: #eaf6ee; }
+.sr-banner.sr-warn { border-left-color: var(--orange); background: #fff6e8; }
+.sr-days { color: var(--muted); white-space: nowrap; }
+.tr-segment button:disabled { opacity: .5; cursor: default; }
