@@ -5,6 +5,7 @@ import "./ui-refresh.css";
 import { EstimateBuilder } from "./EstimateBuilder";
 import { BookkeepingView } from "./BookkeepingView";
 import { InvoiceView, type Invoice } from "./InvoiceView";
+import { ReportsDashboard } from "./ReportsDashboard";
 import { TowingReceiptView } from "./TowingReceiptView";
 import { CompanyTodoList, type CompanyTodo } from "./CompanyTodoList";
 
@@ -531,6 +532,7 @@ function App() {
   const [documents, setDocuments] = React.useState<DocumentsData | null>(null);
   const [invoices, setInvoices] = React.useState<Invoice[]>([]);
   const [reports, setReports] = React.useState<ReportsData | null>(null);
+  const [reportEntries, setReportEntries] = React.useState<FinanceEntry[]>([]);
   const [finance, setFinance] = React.useState<FinanceData | null>(null);
   const [modal, setModal] = React.useState<
     "customer" | "vehicle" | "claim" | "job" | null
@@ -694,7 +696,20 @@ function App() {
         setFinance({ entries, recurring, summary });
         setJobs(await fetchJson<Job[]>("/jobs"));
       }
-      if (view === "Reports") setReports(await fetchJson("/reports"));
+      if (view === "Reports") {
+        const [reportResult, invoiceResult, jobResult, claimResult, entryResult] = await Promise.all([
+          fetchJson<ReportsData>("/reports"),
+          fetchJson<Invoice[]>("/invoices"),
+          fetchJson<Job[]>("/jobs"),
+          fetchJson<Claim[]>("/claims"),
+          fetchJson<FinanceEntry[]>("/finance/entries"),
+        ]);
+        setReports(reportResult);
+        setInvoices(invoiceResult);
+        setJobs(jobResult);
+        setClaims(claimResult);
+        setReportEntries(entryResult);
+      }
     } catch (loadError) {
       setError(
         loadError instanceof Error ? loadError.message : "Unable to load data",
@@ -931,7 +946,7 @@ function App() {
           {view === "Towing Receipts" && <TowingReceiptView customers={customers} vehicles={vehicles} />}
           {view === "Bookkeeping" && <BookkeepingView data={finance} request={fetchJson} onChanged={() => void loadData()} />}
           {view === "Reports" && (
-            <ReportView reports={reports} onNavigate={navigate} />
+            <ReportView reports={reports} onNavigate={navigate} invoices={invoices} jobs={jobs} claims={claims} entries={reportEntries} />
           )}
         </div>
       </main>
@@ -2484,113 +2499,30 @@ function DocumentView({
 function ReportView({
   reports,
   onNavigate,
+  invoices,
+  jobs,
+  claims,
+  entries,
 }: {
   reports: ReportsData | null;
   onNavigate: (view: View) => void;
+  invoices: Invoice[];
+  jobs: Job[];
+  claims: Claim[];
+  entries: FinanceEntry[];
 }) {
-  const metrics = reports?.metrics || {
-    openJobs: 0,
-    inspections: 0,
-    customers: 0,
-    revenue: 0,
-    expenses: 0,
-  };
-  const margin = metrics.revenue - metrics.expenses;
   return (
-    <>
-      <section className="metric-grid">
-        <MetricSummary
-          label="Gross revenue"
-          value={`$${metrics.revenue.toLocaleString()}`}
-          note="From repair jobs"
-          icon="chart"
-          tone="green"
-        />
-        <MetricSummary
-          label="Shop expenses"
-          value={`$${metrics.expenses.toLocaleString()}`}
-          note="Recorded job expenses"
-          icon="wrench"
-          tone="orange"
-        />
-        <MetricSummary
-          label="Net contribution"
-          value={`$${margin.toLocaleString()}`}
-          note="Revenue less expenses"
-          icon="arrow"
-          tone="blue"
-        />
-        <MetricSummary
-          label="Documents"
-          value={reports?.documentCount || 0}
-          note="Claim and job records"
-          icon="folder"
-          tone="purple"
-        />
-      </section>
-      <div className="dashboard-grid report-grid">
-        <div className="surface">
-          <SurfaceHeading
-            title="Workload by stage"
-            subtitle="Current repair jobs grouped by status"
-          />
-          {reports?.jobsByStatus.length ? (
-            <div className="status-list">
-              {reports.jobsByStatus.map((entry) => (
-                <div className="status-row" key={entry.status}>
-                  <span>{humanize(entry.status)}</span>
-                  <strong>{entry.count}</strong>
-                  <div className="status-bar">
-                    <i
-                      style={{
-                        width: `${Math.min(100, (entry.count / Math.max(...reports.jobsByStatus.map((item) => item.count))) * 100)}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState
-              text="No repair jobs to summarize yet."
-              action="Open jobs"
-              onAction={() => onNavigate("Jobs")}
-            />
-          )}
-        </div>
-        <div className="surface">
-          <SurfaceHeading
-            title="Pipeline signals"
-            subtitle="Operational totals from this workspace"
-          />
-          <div className="report-facts">
-            <div>
-              <span>Active jobs</span>
-              <strong>{metrics.openJobs}</strong>
-            </div>
-            <div>
-              <span>Scheduled inspections</span>
-              <strong>{metrics.inspections}</strong>
-            </div>
-            <div>
-              <span>Customers</span>
-              <strong>{metrics.customers}</strong>
-            </div>
-            <div>
-              <span>Estimate value</span>
-              <strong>
-                ${(reports?.estimateTotals.total || 0).toLocaleString()}
-              </strong>
-              <small>
-                {reports?.estimateTotals.count || 0} saved estimates
-              </small>
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
+    <ReportsDashboard
+      summary={reports}
+      invoices={invoices}
+      jobs={jobs}
+      claims={claims}
+      entries={entries}
+      onNavigate={onNavigate}
+    />
   );
 }
+
 function MetricSummary({
   label,
   value,
