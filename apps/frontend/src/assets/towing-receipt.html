@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Towing Service Receipt</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single letter-size sheet on a neutral backdrop; navy and amber carry the brand, the rest stays paper-white for print. */
+:root {
+  --ink: #16202C;
+  --muted: #5E6976;
+  --paper: #FFFFFF;
+  --backdrop: #E9ECF0;
+  --navy: #132A44;
+  --amber: #F2A516;
+  --line: #D6DCE4;
+  --tint: #F5F7FA;
+  color-scheme: light;
+}
+body {
+  margin: 0;
+  background: var(--backdrop);
+  color: var(--ink);
+  font: 14px/1.5 "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding-top: 24px;
+  padding-bottom: 24px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+* { box-sizing: border-box; }
+input, select, textarea { font: inherit; color: var(--ink); }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.sheet {
+  max-width: 860px;
+  margin: 0 auto;
+  background: var(--paper);
+  box-shadow: 0 1px 2px rgba(19,42,68,.08), 0 14px 40px rgba(19,42,68,.12);
+  min-width: 0;
+}
+.stripe {
+  height: 10px;
+  background: repeating-linear-gradient(-45deg, var(--navy) 0 14px, var(--amber) 14px 28px);
+  print-color-adjust: exact; -webkit-print-color-adjust: exact;
+}
+.inner { padding: 34px 44px 36px; }
+
+/* Header */
+header.top { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+.brand { display: flex; gap: 16px; align-items: center; min-width: 0; }
+.co-name {
+  display: block; resize: none; overflow: hidden; border: 0; background: transparent; width: 100%; min-width: 0; margin: 0;
+  font: 700 34px/1.05 "Barlow Condensed", "Arial Narrow", sans-serif; letter-spacing: .02em; text-transform: uppercase; color: var(--navy); padding: 0;
+}
+.co-name::placeholder, .ph::placeholder { color: #A7B0BC; }
+.co-meta { display: grid; gap: 2px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.co-meta input { border: 0; background: transparent; padding: 0; font-size: 12.5px; color: var(--muted); width: 100%; }
+
+.doc { text-align: right; min-width: 0; }
+.doc-title {
+  font: 700 46px/.92 "Barlow Condensed", "Arial Narrow", sans-serif; letter-spacing: .04em; text-transform: uppercase; color: var(--navy);
+  padding-bottom: 8px; border-bottom: 4px solid var(--amber); display: inline-block;
+}
+.refs { display: grid; grid-template-columns: auto minmax(0, 170px); gap: 6px 12px; margin-top: 14px; font-size: 13px; justify-content: end; }
+.refs label { color: var(--muted); text-align: right; align-self: center; }
+.refs input { border: 0; border-bottom: 1px solid var(--line); background: transparent; padding: 3px 2px; text-align: right; min-width: 0; width: 100%; }
+
+/* Sections */
+.sec-h {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  font: 700 14px/1 "Barlow Condensed", "Arial Narrow", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--navy);
+  border-bottom: 2px solid var(--navy); padding-bottom: 7px; margin: 30px 0 14px;
+}
+.sec-h small { font: 500 11px "IBM Plex Sans", sans-serif; letter-spacing: .02em; text-transform: none; color: var(--muted); }
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px 28px; }
+.field { min-width: 0; }
+.lbl { display: block; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; font-weight: 500; }
+.f {
+  display: block; width: 100%; min-width: 0; border: 0; border-bottom: 1px solid var(--line); background: transparent;
+  padding: 5px 0; font-size: 14px;
+}
+.f:focus { outline: none; border-bottom: 2px solid var(--amber); padding-bottom: 4px; }
+.f::placeholder { color: #A7B0BC; }
+.span-2 { grid-column: 1 / -1; }
+
+/* Services */
+.wrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+table { width: 100%; border-collapse: collapse; min-width: 640px; }
+th {
+  text-align: left; font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); font-weight: 600;
+  padding: 9px 8px; border-bottom: 1px solid var(--navy); white-space: nowrap;
+}
+td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th.num, td.num { text-align: right; }
+td.num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 13px; }
+td.chk, th.chk { width: 36px; text-align: center; }
+td.chk input { width: 16px; height: 16px; accent-color: var(--navy); cursor: pointer; }
+.svc-name { font-weight: 500; }
+.cell {
+  display: block; width: 100%; min-width: 0; border: 0; background: transparent; padding: 4px 0; font-size: 14px;
+}
+.cell::placeholder { color: #A7B0BC; }
+td.num .cell { text-align: right; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px; }
+td.when .cell { font-size: 12.5px; min-width: 176px; }
+tr.off .svc-name, tr.off .amt { color: var(--muted); }
+tr.off .svc-name { font-weight: 400; }
+tbody tr:nth-child(even) td { background: var(--tint); }
+tbody tr:nth-child(even) td.chk, tbody tr:nth-child(even) td.svc-cell { background: var(--tint); }
+
+/* Bottom: payment and totals */
+.bottom { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 28px; margin-top: 22px; align-items: start; }
+.pay .cols { grid-template-columns: 1fr 1fr; }
+.notes { width: 100%; border: 1px solid var(--line); background: var(--tint); padding: 8px 10px; resize: vertical; min-height: 84px; font-size: 13px; }
+.totals { border-top: 2px solid var(--navy); }
+.trow { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.trow .label { color: var(--muted); }
+.trow .val { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; font-size: 14px; }
+.taxrate { display: inline-flex; align-items: center; gap: 4px; }
+.taxrate input { width: 62px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: right; font-family: "IBM Plex Mono", monospace; padding: 2px 0; }
+.grand {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 10px; padding: 14px 16px;
+  background: var(--navy); color: #fff; print-color-adjust: exact; -webkit-print-color-adjust: exact;
+}
+.grand .label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #C9D3E0; }
+.grand .val { font: 700 32px/1 "Barlow Condensed", "Arial Narrow", sans-serif; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+.balance { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px 0; font-weight: 600; }
+.balance .val { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+.balance .amber { display: inline-block; width: 10px; height: 10px; background: var(--amber); margin-right: 8px; vertical-align: 1px; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+.paid-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0 0; }
+.paid-row .f { width: 130px; text-align: right; font-family: "IBM Plex Mono", monospace; }
+
+/* Footer */
+.sigs { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 36px; margin-top: 40px; }
+.sig { border-top: 1px solid var(--ink); padding-top: 6px; font-size: 11.5px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+.fine {
+  margin-top: 26px; padding-top: 14px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  font-size: 11.5px; color: var(--muted);
+}
+.fine strong { color: var(--navy); font-weight: 600; }
+
+@media (max-width: 680px) {
+  .inner { padding: 26px 20px 28px; }
+  .doc { text-align: left; width: 100%; }
+  .refs { justify-content: start; grid-template-columns: auto 1fr; }
+  .refs label { text-align: left; }
+  .refs input { text-align: left; }
+  .bottom { grid-template-columns: 1fr; }
+  .pay .cols { grid-template-columns: 1fr; }
+  .doc-title { font-size: 40px; }
+}
+
+@media print {
+  @page { size: letter; margin: 0; }
+  :root { --muted: #3F4A58; --line: #B8C0CB; }
+  body { background: #fff; padding: 0 !important; color: #000; }
+  .sheet { box-shadow: none; max-width: none; }
+  .inner { padding: 0.3in 0.45in 0.15in; }
+  .stripe { height: 8px; }
+  .co-name { font-size: 27px; }
+  .doc-title { font-size: 40px; }
+  .sec-h { margin: 16px 0 10px; }
+  .cols { gap: 10px 24px; }
+  .lbl { font-size: 10.5px; color: var(--muted); }
+  .f, .cell, .co-name, .refs input, .paid-row .f { color: #000; }
+  /* placeholders are hints for the screen only; never print them */
+  ::placeholder { color: transparent !important; }
+  .f:placeholder-shown { border-bottom: 1px solid #8F9AA8; }
+  .f, .cell, .refs input, .paid-row .f { appearance: none; -webkit-appearance: none; }
+  select.f { background: transparent; }
+  .taxrate input { display: none; }
+  input.empty, select.empty { color: transparent !important; }
+  .taxrate { display: inline-block; }
+  .notes { appearance: none; border: 1px solid #B8C0CB; background: transparent; resize: none; min-height: 56px; }
+  .wrap { overflow: visible; }
+  table { min-width: 0; }
+  th { border-bottom: 1px solid #000; }
+  td { border-bottom: 1px solid var(--line); padding: 6px 6px; }
+  tbody tr:nth-child(even) td { background: transparent; }
+  td.chk input { accent-color: #000; }
+  .trow { padding: 6px 0; }
+  .grand { padding: 12px 14px; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .balance .amber, .stripe, .grand { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  .sigs { margin-top: 26px; }
+  .fine { margin-top: 16px; padding-top: 10px; }
+  tr { break-inside: avoid; }
+  tr.off { display: none; }
+  tbody tr:nth-child(even) td, tbody tr:nth-child(even) td.chk { background: transparent !important; }
+  input::-webkit-calendar-picker-indicator { display: none !important; }
+  .f { padding: 0; font-size: 12.5px; }
+  .field { min-width: 0; }
+  .vehicle-grid { gap: 2px 24px; }
+  .lbl { margin-bottom: 0; }
+  .cols { gap: 2px 24px; }
+  .sec-h { margin: 10px 0 6px; padding-bottom: 4px; }
+  .doc-title { font-size: 32px; }
+  .refs { gap: 2px 12px; margin-top: 8px; }
+  .co-meta { margin-top: 3px; }
+  .bottom { margin-top: 10px; gap: 20px; }
+  .notes { min-height: 34px; }
+  .sigs { margin-top: 10px; gap: 28px; }
+  .fine { margin-top: 8px; padding-top: 6px; }
+}
+</style>
+
+</head>
+<body>
+<div class="sheet">
+  <div class="stripe" aria-hidden="true"></div>
+  <div class="inner">
+
+    <header class="top">
+      <div class="brand">
+        <div style="min-width:0">
+          <textarea class="co-name" rows="2" aria-label="Company name">PREMIER AUTOMOTIVE TOWING INC.</textarea>
+          <div class="co-meta">
+            <input type="text" value="3199 Albany Post Rd, Buchanan, NY 10511" aria-label="Company address">
+            <input type="text" value="Phone: +1 347-552-4686" aria-label="Company phone">
+          </div>
+        </div>
+      </div>
+      <div class="doc">
+        <div class="doc-title">Towing Receipt</div>
+        <div class="refs">
+          <label for="rno">Receipt no.</label>
+          <input id="rno" class="ph" type="text" placeholder="0001">
+          <label for="rdate">Date issued</label>
+          <input id="rdate" type="date" aria-label="Date issued">
+          <label for="job">Job / dispatch no.</label>
+          <input id="job" class="ph" type="text" placeholder="Optional">
+        </div>
+      </div>
+    </header>
+
+    <div class="sec-h">Billed to <small>Shop account, unless the customer pays</small></div>
+    <div class="cols">
+      <div class="field span-2">
+        <label class="lbl" for="billname">Bill to (shop)</label>
+        <input id="billname" class="f" type="text" value="Mastercraft Auto Repair &amp; Collision" aria-label="Bill to shop name">
+      </div>
+      <div class="field span-2">
+        <label class="lbl" for="billaddr">Shop address</label>
+        <input id="billaddr" class="f" type="text" value="38-21 23rd St, Long Island City, NY 11101" aria-label="Shop address">
+      </div>
+      <div class="field">
+        <label class="lbl" for="billphone">Shop phone</label>
+        <input id="billphone" class="f ph" type="tel" placeholder="(000) 000-0000">
+      </div>
+      <div class="field">
+        <label class="lbl" for="cname">Customer (vehicle owner)</label>
+        <input id="cname" class="f ph" type="text" placeholder="Full name">
+      </div>
+      <div class="field">
+        <label class="lbl" for="cphone">Customer phone</label>
+        <input id="cphone" class="f ph" type="tel" placeholder="(000) 000-0000">
+      </div>
+      <div class="field">
+        <label class="lbl" for="caddr">Customer address</label>
+        <input id="caddr" class="f ph" type="text" placeholder="Street, City, State ZIP">
+      </div>
+    </div>
+
+    <div class="sec-h">Vehicle &amp; route <small>Tick the services performed</small></div>
+    <div class="cols">
+      <div class="field span-2">
+        <label class="lbl" for="veh">Vehicle (year, make, model, color)</label>
+        <input id="veh" class="f ph" type="text" placeholder="e.g. 2019 Honda Accord, silver">
+      </div>
+      <div class="field">
+        <label class="lbl" for="vin">VIN (last 6)</label>
+        <input id="vin" class="f ph" type="text" maxlength="6" placeholder="" style="text-transform:uppercase">
+      </div>
+      <div class="field">
+        <label class="lbl" for="plate">License plate</label>
+        <input id="plate" class="f ph" type="text" placeholder="">
+      </div>
+      <div class="field">
+        <label class="lbl" for="pickup">Pickup location</label>
+        <input id="pickup" class="f ph" type="text" placeholder="Where the vehicle was picked up">
+      </div>
+      <div class="field">
+        <label class="lbl" for="dropoff">Drop-off location</label>
+        <input id="dropoff" class="f ph" type="text" placeholder="Where the vehicle was delivered">
+      </div>
+      <div class="field">
+        <label class="lbl" for="miles">Total driven miles</label>
+        <input id="miles" class="f ph" type="number" min="0" step="0.1" placeholder="0">
+      </div>
+    </div>
+
+    <div class="sec-h">Services <small>Tick each service, set when it happened, and enter the rate</small></div>
+    <div class="wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="chk">Done</th>
+            <th>Service</th>
+            <th>Date</th>
+            <th class="num">Qty</th>
+            <th class="num">Rate</th>
+            <th class="num">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" checked aria-label="Include pull-out fee"></td>
+            <td class="svc-name">Pull-out fee</td>
+            <td class="when"><input class="cell" type="date" aria-label="Pull-out fee date"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Pull-out fee quantity"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="150.00" aria-label="Pull-out fee rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" checked aria-label="Include winch into towable position"></td>
+            <td class="svc-name">Winch into towable position</td>
+            <td class="when"><input class="cell" type="date" aria-label="Winch date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Winch quantity"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="115.00" aria-label="Winch rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" checked aria-label="Include tow fee"></td>
+            <td class="svc-name">Tow fee (light duty)</td>
+            <td class="when"><input class="cell" type="date" aria-label="Tow date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Tow quantity"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="150.00" aria-label="Tow rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" aria-label="Include flatbed tow"></td>
+            <td class="svc-name">Flatbed tow</td>
+            <td class="when"><input class="cell" type="date" aria-label="Flatbed date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Flatbed quantity"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="0" aria-label="Flatbed rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" aria-label="Include heavy-duty tow"></td>
+            <td class="svc-name">Heavy-duty tow</td>
+            <td class="when"><input class="cell" type="date" aria-label="Heavy-duty date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Heavy-duty quantity"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="0" aria-label="Heavy-duty rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" aria-label="Include jump start"></td>
+            <td class="svc-name">Jump start</td>
+            <td class="when"><input class="cell" type="date" aria-label="Jump start date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Jump start quantity"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="0" aria-label="Jump start rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" aria-label="Include lockout service"></td>
+            <td class="svc-name">Lockout service</td>
+            <td class="when"><input class="cell" type="date" aria-label="Lockout date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Lockout quantity"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="0" aria-label="Lockout rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" aria-label="Include tire change or flat repair"></td>
+            <td class="svc-name">Tire change / flat repair</td>
+            <td class="when"><input class="cell" type="date" aria-label="Tire service date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Tire service quantity"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="0" aria-label="Tire service rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" aria-label="Include fuel delivery"></td>
+            <td class="svc-name">Fuel delivery</td>
+            <td class="when"><input class="cell" type="date" aria-label="Fuel delivery date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Fuel delivery quantity"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="0" aria-label="Fuel delivery rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" aria-label="Include storage per day"></td>
+            <td class="svc-name">Storage (per day)</td>
+            <td class="when"><input class="cell" type="date" aria-label="Storage start date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Storage days"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="0" aria-label="Storage daily rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" aria-label="Include mileage"></td>
+            <td class="svc-name">Mileage (per mile)</td>
+            <td class="when"><input class="cell" type="date" aria-label="Mileage date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="0" aria-label="Miles towed"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="0" aria-label="Mileage rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" aria-label="Include after-hours surcharge"></td>
+            <td class="svc-name">After-hours / weekend surcharge</td>
+            <td class="when"><input class="cell" type="date" aria-label="Surcharge date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Surcharge quantity"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="0" aria-label="Surcharge rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+          <tr class="svc">
+            <td class="chk"><input class="chk-in" type="checkbox" aria-label="Include custom service"></td>
+            <td class="svc-name"><input class="cell ph" type="text" placeholder="Other service (type name)" aria-label="Custom service name"></td>
+            <td class="when"><input class="cell" type="date" aria-label="Custom service date and time"></td>
+            <td class="num"><input class="cell qty" type="number" min="0" step="1" value="1" aria-label="Custom service quantity"></td>
+            <td class="num"><input class="cell rate" type="number" min="0" step="0.01" value="0" aria-label="Custom service rate"></td>
+            <td class="num amt">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="bottom">
+      <div class="pay">
+        <div class="sec-h" style="margin-top:0">Payment <small>How the customer paid</small></div>
+        <div class="cols">
+          <div class="field">
+            <label class="lbl" for="method">Payment method</label>
+            <select id="method" class="f">
+              <option value="">Select</option>
+              <option>Cash</option>
+              <option>Card</option>
+              <option>Zelle</option>
+              <option>Check</option>
+              <option>Invoice / account</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="lbl" for="ref">Reference no.</label>
+            <input id="ref" class="f ph" type="text" placeholder="Transaction or check no.">
+          </div>
+        </div>
+        <div class="sec-h">Notes</div>
+        <textarea class="notes" aria-label="Notes" placeholder="Anything the customer should know: storage terms, photos taken, damage noted at pickup."></textarea>
+      </div>
+
+      <div class="totals">
+        <div class="trow"><span class="label">Subtotal</span><span class="val" id="sub">$0.00</span></div>
+        <div class="trow">
+          <span class="label" id="taxLbl">Sales tax (8.75%)</span>
+          <span class="taxrate">
+            <input id="taxRate" type="number" min="0" step="0.001" value="8.75" aria-label="Sales tax rate percent">
+            <span class="val" id="tax">$0.00</span>
+          </span>
+        </div>
+        <div class="grand">
+          <span class="label">Total due</span>
+          <span class="val" id="total">$0.00</span>
+        </div>
+        <div class="paid-row">
+          <label class="lbl" for="paid" style="margin:0">Amount paid</label>
+          <input id="paid" class="f" type="number" min="0" step="0.01" value="0" aria-label="Amount paid">
+        </div>
+        <div class="balance">
+          <span><span class="amber"></span>Balance due</span>
+          <span class="val" id="balance">$0.00</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sigs">
+      <div class="sig">Authorized by (company)</div>
+      <div class="sig">Customer signature</div>
+    </div>
+
+    <div class="fine">
+      <span><strong>Thank you for choosing us.</strong> Please keep this receipt for your records.</span>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  var money = function (n) {
+    return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  };
+  var $ = function (id) { return document.getElementById(id); };
+
+  function recalc() {
+    var sub = 0;
+    var rows = document.querySelectorAll("tr.svc");
+    for (var i = 0; i < rows.length; i++) {
+      var tr = rows[i];
+      var on = tr.querySelector(".chk-in").checked;
+      var q = parseFloat(tr.querySelector(".qty").value) || 0;
+      var r = parseFloat(tr.querySelector(".rate").value) || 0;
+      var amt = on ? q * r : 0;
+      sub += amt;
+      tr.querySelector(".amt").textContent = on ? money(amt) : "—";
+      tr.classList.toggle("off", !on);
+    }
+    var pct = parseFloat($("taxRate").value) || 0;
+    var tax = Math.round(sub * (pct / 100) * 100) / 100;
+    var total = sub + tax;
+    var paid = parseFloat($("paid").value) || 0;
+    $("sub").textContent = money(sub);
+    $("taxLbl").textContent = "Sales tax (" + Number(pct.toFixed(3)) + "%)";
+    $("tax").textContent = money(tax);
+    $("total").textContent = money(total);
+    $("balance").textContent = money(total - paid);
+  }
+
+  function markEmpty() {
+    var els = document.querySelectorAll('input[type="date"], input[type="date"], select');
+    for (var j = 0; j < els.length; j++) {
+      els[j].classList.toggle("empty", els[j].value === "");
+    }
+  }
+
+  document.addEventListener("input", markEmpty);
+  document.addEventListener("change", markEmpty);
+  markEmpty();
+
+  document.addEventListener("input", recalc);
+  document.addEventListener("change", recalc);
+  recalc();
+})();
+</script>
+<script>
+(function () {
+  var shopName = document.getElementById("billname").value;
+  var shopAddress = document.getElementById("billaddr").value;
+  function setField(id, value) {
+    var el = document.getElementById(id);
+    if (!el || typeof value !== "string") return;
+    el.value = value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  window.addEventListener("message", function (event) {
+    var data = event.data || {};
+    if (data.type === "towing-print") { window.print(); return; }
+    if (data.type !== "towing-prefill") return;
+    var v = data.values || {};
+    setField("cname", v.customerName);
+    setField("cphone", v.customerPhone);
+    setField("caddr", v.customerAddress);
+    setField("veh", v.vehicle);
+    setField("vin", v.vin);
+    setField("plate", v.plate);
+    if (v.billTo === "customer") {
+      setField("billname", v.customerName);
+      setField("billaddr", v.customerAddress);
+    } else if (v.billTo === "shop") {
+      setField("billname", shopName);
+      setField("billaddr", shopAddress);
+    }
+  });
+})();
+</script>
+</body>
+</html>

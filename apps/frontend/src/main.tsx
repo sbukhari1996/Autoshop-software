@@ -4,6 +4,7 @@ import "./styles.css";
 import { EstimateBuilder } from "./EstimateBuilder";
 import { BookkeepingView } from "./BookkeepingView";
 import { InvoiceView, type Invoice } from "./InvoiceView";
+import { TowingReceiptView } from "./TowingReceiptView";
 import { CompanyTodoList, type CompanyTodo } from "./CompanyTodoList";
 
 type View =
@@ -15,6 +16,7 @@ type View =
   | "Estimates"
   | "Documents"
   | "Invoices"
+  | "Towing Receipts"
   | "Bookkeeping"
   | "Reports";
 type Customer = {
@@ -254,6 +256,7 @@ const navItems: Array<{ label: View; icon: string }> = [
   { label: "Estimates", icon: "file" },
   { label: "Documents", icon: "folder" },
   { label: "Invoices", icon: "file" },
+  { label: "Towing Receipts", icon: "truck" },
   { label: "Bookkeeping", icon: "chart" },
   { label: "Reports", icon: "chart" },
 ];
@@ -266,6 +269,7 @@ const icons: Record<string, string> = {
   wrench:
     "M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.2 2.2-2.4-.6-.6-2.4 2.2-2.2z",
   file: "M6 2h9l3 3v17H6zM14 2v4h4M9 13h6M9 17h6",
+  truck: "M3 7h11v9H3zM14 10h4l3 3v3h-7zM7 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM17 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
   folder: "M3 6h7l2 2h9v11H3z",
   chart: "M4 19V5M4 19h17M8 16v-4M12 16V8M16 16v-6",
   search: "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3",
@@ -654,6 +658,14 @@ function App() {
         setJobs(jobResult);
         setClaims(claimResult);
       }
+      if (view === "Towing Receipts") {
+        const [customerResult, vehicleResult] = await Promise.all([
+          fetchJson<Customer[]>("/customers"),
+          fetchJson<Vehicle[]>("/vehicles"),
+        ]);
+        setCustomers(customerResult);
+        setVehicles(vehicleResult);
+      }
       if (view === "Bookkeeping") {
         const [entries, recurring, summary] = await Promise.all([
           fetchJson<FinanceEntry[]>("/finance/entries"),
@@ -857,6 +869,8 @@ function App() {
                               ? "                              Keep customer, claim, and job paperwork visible to the office."
                               : view === "Invoices"
                                 ? "Create repair invoices, record payments, and keep balances current."
+                              : view === "Towing Receipts"
+                                ? "Print towing receipts with customer and vehicle details from your records."
                               : "Measure shop throughput, revenue, and follow-up work."}
               </p>
             </div>
@@ -901,6 +915,7 @@ function App() {
           )}
           {view === "Documents" && <DocumentView documents={documents} customers={customers} jobs={jobs} claims={claims} onUploaded={loadData} />}
           {view === "Invoices" && <InvoiceView invoices={invoices} customers={customers} jobs={jobs} claims={claims} request={fetchJson} apiUrl={API_URL} onChanged={loadData} />}
+          {view === "Towing Receipts" && <TowingReceiptView customers={customers} vehicles={vehicles} />}
           {view === "Bookkeeping" && <BookkeepingView data={finance} request={fetchJson} onChanged={() => void loadData()} />}
           {view === "Reports" && (
             <ReportView reports={reports} onNavigate={navigate} />
