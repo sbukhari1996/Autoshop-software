@@ -1355,3 +1355,11 @@ select:focus-visible, textarea:focus-visible {
 .estimate-line-table::-webkit-scrollbar { width: 12px; height: 12px; }
 .estimate-line-table::-webkit-scrollbar-track { background: #e3e9e7; }
 .estimate-line-table::-webkit-scrollbar-thumb { background: #647b88; border: 2px solid #e3e9e7; border-radius: 8px; }
+
+.directory-search { display: flex; align-items: center; gap: 8px; flex: 0 1 320px; min-width: min(100%, 300px); padding: 0 10px; border: 1px solid #234158; border-radius: 4px; background: #0d2131; color: #6e879a; }
+.directory-search:focus-within { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(211, 97, 36, 0.18); }
+.directory-search input[type="search"] { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; padding: 9px 0; font: inherit; font-size: .74rem; color: #dce6eb; }
+.directory-search input[type="search"]::placeholder { color: #55708a; }
+.directory-search input[type="search"]::-webkit-search-cancel-button { display: none; }
+.directory-search .icon { width: 15px; height: 15px; flex: 0 0 auto; }
+.directory-search-clear { border: 0; background: transparent; font-size: 17px; line-height: 1; color: #96aabb; cursor: pointer; padding: 0 2px; }
