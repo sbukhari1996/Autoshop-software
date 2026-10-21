@@ -8,6 +8,7 @@ import { InvoiceView, type Invoice } from "./InvoiceView";
 import { ReportsDashboard } from "./ReportsDashboard";
 import { TowingReceiptView } from "./TowingReceiptView";
 import { CompanyTodoList, type CompanyTodo } from "./CompanyTodoList";
+import { Mv104Form } from "./Mv104Form";
 
 type View =
   | "Dashboard"
@@ -1504,6 +1505,7 @@ function ClaimWorkspace({
     atFault: { loading: false, message: "", error: false },
   });
   const [printMode, setPrintMode] = React.useState(false);
+  const [mv104Open, setMv104Open] = React.useState(false);
   const [workspaceTab, setWorkspaceTab] = React.useState<"intake" | "records">("intake");
   const customerId = String(form.customerId || "");
   const availableVehicles = vehicles.filter((vehicle) => vehicle.customer.id === customerId);
@@ -1576,7 +1578,7 @@ function ClaimWorkspace({
       <section className={`modal claim-workspace ${printMode ? "authorization-mode" : ""}`} onClick={(event) => event.stopPropagation()}>
         <div className={`modal-heading claim-heading ${printMode ? "authorization-heading" : ""}`}>
           {!printMode && <div><p className="eyebrow">{claim ? "Edit claim" : "New intake"}</p><h2>{claim?.claimNumber || "Claim workspace"}</h2><p className="subheading">Customer, vehicle, insurer, and authorization record</p></div>}
-          <div className="claim-heading-actions">{claim && <button type="button" className="danger-button" onClick={async () => { if (!window.confirm("Delete this claim? This cannot be undone.")) return; setBusy(true); setError(""); try { await fetchJson(`/claims/${claim.id}`, { method: "DELETE" }); await onSaved(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete claim"); } finally { setBusy(false); } }}>Delete claim</button>}<button type="button" className="secondary-button" onClick={() => setPrintMode(!printMode)}>{printMode ? "Back to intake" : "Authorization form"}</button><button className="close-button" onClick={onClose}><Icon name="close" /></button></div>
+          <div className="claim-heading-actions">{claim && <button type="button" className="danger-button" onClick={async () => { if (!window.confirm("Delete this claim? This cannot be undone.")) return; setBusy(true); setError(""); try { await fetchJson(`/claims/${claim.id}`, { method: "DELETE" }); await onSaved(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete claim"); } finally { setBusy(false); } }}>Delete claim</button>}{claim && <button type="button" className="secondary-button" onClick={() => setMv104Open(true)}>MV-104 crash report</button>}<button type="button" className="secondary-button" onClick={() => setPrintMode(!printMode)}>{printMode ? "Back to intake" : "Authorization form"}</button><button className="close-button" onClick={onClose}><Icon name="close" /></button></div>
         </div>
         {error && <div className="error-banner">{error}</div>}
         {!printMode && claim && <div className="claim-workspace-tabs" role="tablist" aria-label="Claim workspace sections"><button type="button" className={workspaceTab === "intake" ? "active" : ""} onClick={() => setWorkspaceTab("intake")}>Claim intake</button><button type="button" className={workspaceTab === "records" ? "active" : ""} onClick={() => setWorkspaceTab("records")}>Documents &amp; job records</button></div>}
@@ -1600,6 +1602,7 @@ function ClaimWorkspace({
             <div className="claim-form-actions"><button type="button" className="secondary-button" onClick={() => setPrintMode(true)}>Preview authorization</button><button className="orange-button" disabled={busy}>{busy ? "Saving..." : claim ? "Save claim" : "Create claim"}</button></div>
           </form>
         ))}
+        {mv104Open && claim && <Mv104Form claimId={claim.id} apiUrl={String(API_URL)} onClose={() => setMv104Open(false)} />}
       </section>
     </div>
   );
