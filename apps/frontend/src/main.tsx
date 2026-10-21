@@ -1282,7 +1282,9 @@ function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer;
 }
 function VehicleView({ vehicles, customers, onChanged }: { vehicles: Vehicle[]; customers: Customer[]; onChanged: () => Promise<void> }) {
   const [selected, setSelected] = React.useState<Vehicle | null>(null);
-  return <><DataSurface title="Vehicle registry" subtitle="Click a vehicle to view or update its saved details" headers={["Vehicle", "Owner", "VIN", "License plate"]} rows={vehicles.map((vehicle) => [<div className="vehicle-cell"><Icon name="car" /><strong>{[vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || "Vehicle pending"}</strong></div>, `${vehicle.customer.firstName} ${vehicle.customer.lastName}`, <span className="mono">{vehicle.vin || "Not recorded"}</span>, vehicle.licensePlate ? `${vehicle.licensePlate}${vehicle.licenseState ? ` (${vehicle.licenseState})` : ""}` : "Not recorded"])} empty="No vehicles found. Add a vehicle from a customer intake." onRowClick={(index) => setSelected(vehicles[index])} />{selected && <VehicleEditModal vehicle={selected} customers={customers} onClose={() => setSelected(null)} onSaved={async () => { await onChanged(); setSelected(null); }} />}</>;
+  const [query, setQuery] = React.useState("");
+  const visibleVehicles = vehicles.filter((vehicle) => matchesSearch(query, [vehicle.year, vehicle.make, vehicle.model, vehicle.trim, vehicle.color, vehicle.vin, vehicle.licensePlate, vehicle.customer?.firstName, vehicle.customer?.lastName, vehicle.customer?.phone]));
+  return <><DataSurface search={{ value: query, onChange: setQuery, placeholder: "Search vehicle, owner, VIN, or plate", label: "Search vehicles" }} title="Vehicle registry" subtitle="Click a vehicle to view or update its saved details" headers={["Vehicle", "Owner", "VIN", "License plate"]} rows={visibleVehicles.map((vehicle) => [<div className="vehicle-cell"><Icon name="car" /><strong>{[vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || "Vehicle pending"}</strong></div>, `${vehicle.customer.firstName} ${vehicle.customer.lastName}`, <span className="mono">{vehicle.vin || "Not recorded"}</span>, vehicle.licensePlate ? `${vehicle.licensePlate}${vehicle.licenseState ? ` (${vehicle.licenseState})` : ""}` : "Not recorded"])} empty={query.trim() ? `No vehicles match "${query.trim()}".` : "No vehicles found. Add a vehicle from a customer intake."} onRowClick={(index) => setSelected(visibleVehicles[index])} />{selected && <VehicleEditModal vehicle={selected} customers={customers} onClose={() => setSelected(null)} onSaved={async () => { await onChanged(); setSelected(null); }} />}</>;
 }
 function VehicleEditModal({ vehicle, customers, onClose, onSaved }: { vehicle: Vehicle; customers: Customer[]; onClose: () => void; onSaved: () => Promise<void> }) {
   const [form, setForm] = React.useState({ customerId: vehicle.customer.id, year: String(vehicle.year || ''), make: vehicle.make || '', model: vehicle.model || '', trim: vehicle.trim || '', bodyClass: vehicle.bodyClass || '', vin: vehicle.vin || '', color: vehicle.color || '', licensePlate: vehicle.licensePlate || '', licenseState: vehicle.licenseState || '' });
@@ -1309,15 +1311,18 @@ function ClaimView({
 }) {
   const [selectedClaim, setSelectedClaim] = React.useState<Claim | null>(null);
   const [creating, setCreating] = React.useState(false);
+  const [query, setQuery] = React.useState("");
+  const visibleClaims = claims.filter((claim) => matchesSearch(query, [claim.claimNumber, claim.customerClaimNumber, claim.customer?.firstName, claim.customer?.lastName, claim.customer?.phone, claim.vehicle?.year, claim.vehicle?.make, claim.vehicle?.model, claim.vehicle?.licensePlate, claim.vehicle?.vin, claim.insuranceCompany, claim.claimStatus, ...(claim.jobs || []).map((job) => job.jobNumber)]));
   return (
     <>
       <div className="surface">
         <SurfaceHeading
           title="Claims desk"
           subtitle="Select a claim to complete intake, link repair work, or print authorization"
+          search={{ value: query, onChange: setQuery, placeholder: "Search claim, customer, vehicle, or carrier", label: "Search claims" }}
         />
         <div className="claim-list-action"><button className="orange-button" onClick={() => setCreating(true)}><Icon name="plus" /> New claim intake</button></div>
-        {claims.length ? (
+        {visibleClaims.length ? (
           <table className="data-table">
             <thead>
               <tr>
@@ -1329,7 +1334,7 @@ function ClaimView({
               </tr>
             </thead>
             <tbody>
-              {claims.map((claim) => (
+              {visibleClaims.map((claim) => (
                 <tr className="clickable-row" key={claim.id} onClick={() => setSelectedClaim(claim)}>
                   <td data-label="Claim"><strong className="mono">{claim.claimNumber || "UNNUMBERED"}</strong></td>
                   <td data-label="Customer / vehicle">
@@ -1345,7 +1350,7 @@ function ClaimView({
               ))}
             </tbody>
           </table>
-        ) : <EmptyState text="No claims have been entered yet. Start a claim intake to create the first record." />}
+        ) : <EmptyState text={query.trim() ? `No claims match "${query.trim()}".` : "No claims have been entered yet. Start a claim intake to create the first record."} />}
       </div>
       {(selectedClaim || creating) && (
         <ClaimWorkspace
@@ -1872,17 +1877,23 @@ function JobView({
   onChanged?: () => Promise<void>;
 }) {
   const [selectedJob, setSelectedJob] = React.useState<Job | null>(null);
+  const [query, setQuery] = React.useState("");
+  const visibleJobs = jobs.filter((job) => matchesSearch(query, [job.jobNumber, job.customer?.firstName, job.customer?.lastName, job.customer?.phone, job.vehicle?.year, job.vehicle?.make, job.vehicle?.model, job.vehicle?.licensePlate, job.vehicle?.vin, job.status]));
   return (
     <>
       <div className="surface">
         <SurfaceHeading
           title="Repair board"
           subtitle="Every active work order in one place"
+          search={{ value: query, onChange: setQuery, placeholder: "Search work order, customer, vehicle, or plate", label: "Search repair board" }}
         />
         <p className="records-muted">Jobs cannot be deleted here because linked claims, invoices, and repair history are protected by the backend.</p>
-        <JobTable jobs={jobs} onSelect={setSelectedJob} />
+        <JobTable jobs={visibleJobs} onSelect={setSelectedJob} />
         {jobs.length === 0 && (
           <EmptyState text="No repair jobs yet. Create a job from a claim or customer intake." />
+        )}
+        {jobs.length > 0 && visibleJobs.length === 0 && (
+          <EmptyState text={`No work orders match "${query.trim()}".`} />
         )}
       </div>
       {selectedJob && (
@@ -2563,6 +2574,7 @@ function DataSurface({
   rows,
   empty,
   onRowClick,
+  search,
 }: {
   title: string;
   subtitle: string;
@@ -2570,10 +2582,11 @@ function DataSurface({
   rows: React.ReactNode[][];
   empty: string;
   onRowClick?: (index: number) => void;
+  search?: SearchProps;
 }) {
   return (
     <div className="surface">
-      <SurfaceHeading title={title} subtitle={subtitle} />
+      <SurfaceHeading title={title} subtitle={subtitle} search={search} />
       <table className="data-table">
         <thead>
           <tr>
@@ -2596,12 +2609,41 @@ function DataSurface({
     </div>
   );
 }
+type SearchProps = { value: string; onChange: (value: string) => void; placeholder: string; label: string };
+
+function matchesSearch(query: string, parts: Array<string | number | null | undefined>) {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return parts.filter((part) => part !== null && part !== undefined && part !== "").join(" ").toLowerCase().includes(needle);
+}
+
+function ListSearch({ value, onChange, placeholder, label }: SearchProps) {
+  return (
+    <div className="directory-search">
+      <Icon name="search" />
+      <input
+        type="search"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => { if (event.key === "Escape") onChange(""); }}
+        placeholder={placeholder}
+        aria-label={label}
+      />
+      {value && (
+        <button type="button" className="directory-search-clear" onClick={() => onChange("")} aria-label="Clear search">×</button>
+      )}
+    </div>
+  );
+}
+
 function SurfaceHeading({
   title,
   subtitle,
+  search,
 }: {
   title: string;
   subtitle: string;
+  search?: SearchProps;
 }) {
   return (
     <div className="surface-heading">
@@ -2609,6 +2651,7 @@ function SurfaceHeading({
         <h2>{title}</h2>
         <p>{subtitle}</p>
       </div>
+      {search && <ListSearch {...search} />}
       <button className="filter-button">
         Filter <span>v</span>
       </button>
