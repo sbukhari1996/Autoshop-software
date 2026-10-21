@@ -16,6 +16,8 @@ COPY package.json ./
 COPY prisma ./prisma
 RUN npm install --omit=dev && npx prisma generate
 COPY --from=build /app/dist ./dist
+# The MV-104 filler reads assets/forms/mv104.pdf relative to dist/mv104, so the assets folder must ship too.
+COPY assets ./assets
 RUN mkdir -p /app/uploads
 EXPOSE 4000
 CMD ["node", "dist/server.js"]
