@@ -242,6 +242,7 @@ async function createInvoicePdf(invoice: {
   total: number;
   amountPaid: number;
   balanceDue: number;
+  notes: string | null;
   customerName: string | null;
   customerPhone: string | null;
   customerEmail: string | null;
@@ -263,164 +264,245 @@ async function createInvoicePdf(invoice: {
   lineItems: Array<{ description: string; quantity: number; unitPrice: number }>;
   payments: Array<{ date: Date; method: string; amount: number; notes: string | null }>;
 }) {
-  const money = (amount: number) => `$${amount.toFixed(2)}`;
+  // Mastercraft palette: the shop's orange accent over charcoal and warm greys.
+  const orange = '#D36124';
+  const charcoal = '#2B2B2B';
+  const ink = '#1A1A1A';
+  const muted = '#6B6B6B';
+  const rule = '#D8D8D8';
+  const tint = '#F5F3F1';
+  const pageWidth = 612;
+  const left = 40;
+  const width = 532;
+  const right = left + width;
+  const contentBottom = 698;
+  const footerY = 736;
+
+  const money = (amount: number) => amount.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
   const date = (value: Date | null) => value ? value.toLocaleDateString('en-US') : '';
   const vehicle = invoice.job?.vehicle;
   const claim = invoice.claim;
-  const doc = new PDFDocument({ size: 'LETTER', margin: 28, bufferPages: true });
+
+  const doc = new PDFDocument({
+    size: 'LETTER',
+    margins: { top: 40, bottom: 40, left, right: 40 },
+    bufferPages: true,
+    info: { Title: `Invoice ${invoice.invoiceNumber}`, Author: 'Mastercraft Auto Repair & Collision' },
+  });
   const chunks: Buffer[] = [];
   const result = new Promise<Buffer>((resolve, reject) => {
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
   });
-  const left = 36;
-  const pageWidth = 540;
-  const right = left + pageWidth;
-  const text = (value: string, x: number, y: number, options: { size?: number; bold?: boolean; color?: string; width?: number; align?: 'left' | 'right' | 'center' } = {}) => {
-    doc.font(options.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(options.size || 8).fillColor(options.color || '#171717').text(value, x, y, { width: options.width, align: options.align || 'left', lineBreak: false });
+
+  const setText = (size: number, options: { bold?: boolean; color?: string } = {}) => {
+    doc.font(options.bold ? 'Helvetica-Bold' : 'Helvetica').fontSize(size).fillColor(options.color || ink);
   };
-  const fit = (value: string | number | null | undefined, width: number, size = 7) => {
-    let result = value == null ? '' : String(value).replace(/\s+/g, ' ').trim();
-    doc.font('Helvetica').fontSize(size);
-    while (result && doc.widthOfString(result) > width) result = `${result.slice(0, -1).trimEnd()}`;
-    if (result !== String(value ?? '').replace(/\s+/g, ' ').trim() && width > 18) {
-      while (result && doc.widthOfString(`${result}...`) > width) result = result.slice(0, -1).trimEnd();
-      result = result ? `${result}...` : '';
+  const write = (value: string, x: number, y: number, w: number, options: { size?: number; bold?: boolean; color?: string; align?: 'left' | 'right' | 'center'; height?: number } = {}) => {
+    setText(options.size || 9, options);
+    doc.text(value, x, y, { width: w, align: options.align || 'left', height: options.height, ellipsis: true, lineBreak: true });
+  };
+  const caps = (value: string, x: number, y: number, w: number, color = muted) => {
+    doc.font('Helvetica-Bold').fontSize(6.8).fillColor(color);
+    doc.text(value.toUpperCase(), x, y, { width: w, characterSpacing: 0.6, lineBreak: false });
+  };
+
+  const drawFirstPageHeader = () => {
+    doc.rect(0, 0, pageWidth, 8).fill(orange);
+    write('MASTERCRAFT AUTO REPAIR & COLLISION', left, 30, 330, { size: 15, bold: true, color: charcoal });
+    write('38-21 23rd Street, Long Island City, NY 11101', left, 51, 330, { size: 8, color: muted });
+    write('718-603-0412  |  718-578-4563  |  shop@mastercraftautony.com', left, 62, 330, { size: 8, color: muted });
+    write('www.mastercraftautony.com  |  Facility No. 7136099  |  EIN 42-2914045', left, 73, 330, { size: 8, color: muted });
+
+    write('INVOICE', right - 200, 26, 200, { size: 26, bold: true, color: charcoal, align: 'right' });
+    const meta: Array<[string, string]> = [
+      ['Invoice no.', invoice.invoiceNumber],
+      ['Issue date', date(invoice.issueDate)],
+      ['Due date', date(invoice.dueDate) || '—'],
+    ];
+    meta.forEach(([label, value], index) => {
+      const y = 60 + index * 12;
+      write(label, right - 200, y, 110, { size: 8, color: muted });
+      write(value, right - 110, y, 110, { size: 8, bold: true, align: 'right' });
+    });
+    doc.rect(left, 96, width, 1.6).fill(orange);
+  };
+
+  const drawContinuationHeader = (pageNumber: number) => {
+    doc.rect(0, 0, pageWidth, 8).fill(orange);
+    write('MASTERCRAFT AUTO REPAIR & COLLISION', left, 24, 320, { size: 9, bold: true, color: charcoal });
+    write(`Invoice ${invoice.invoiceNumber}  ·  Page ${pageNumber}`, right - 220, 25, 220, { size: 8, color: muted, align: 'right' });
+    doc.rect(left, 42, width, 0.8).fill(rule);
+  };
+
+  // Titled block of label/value rows. Returns the y position below the block.
+  const detailBlock = (title: string, rows: Array<[string, string | number | null | undefined]>, x: number, y: number, w: number) => {
+    caps(title, x, y, w, orange);
+    doc.rect(x, y + 13, w, 0.8).fill(rule);
+    let rowY = y + 19;
+    for (const [label, value] of rows) {
+      write(label, x, rowY, 74, { size: 7.5, color: muted });
+      write(value == null || value === '' ? '' : String(value), x + 76, rowY, w - 76, { size: 8.5, bold: false, height: 11 });
+      rowY += 14;
     }
-    return result;
+    return rowY;
   };
-  const field = (label: string, value: string | number | null | undefined, x: number, y: number, width: number, height: number) => {
-    text(label.toUpperCase(), x + 4, y + 3, { size: 5.3, bold: true, color: '#555555', width: width - 8 });
-    text(fit(value, width - 8, 7), x + 4, y + 12, { size: 7, width: width - 8 });
-    doc.rect(x, y, width, height).lineWidth(0.35).stroke('#9b9b9b');
+
+  drawFirstPageHeader();
+
+  const customerName = invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : invoice.walkInCustomerName || invoice.customerName || claim?.customerName || 'Walk-in / counter sale';
+  const vehicleYear = vehicle?.year ?? claim?.vehicleYear ?? invoice.walkInVehicleYear;
+  const vehicleMake = vehicle?.make ?? claim?.vehicleMake ?? invoice.walkInVehicleMake;
+  const vehicleModel = vehicle?.model ?? claim?.vehicleModel ?? invoice.walkInVehicleModel;
+  const vehicleTrim = vehicle?.trim ?? claim?.vehicleTrim ?? invoice.walkInVehicleTrim ?? vehicle?.bodyClass ?? claim?.vehicleBodyClass;
+  const plate = [vehicle?.licensePlate ?? claim?.vehicleLicensePlate ?? invoice.walkInVehicleLicense, vehicle?.licenseState ?? claim?.vehiclePlateState ?? invoice.walkInVehicleState].filter(Boolean).join(' / ');
+  const insurance = claim?.insuranceCompany || claim?.customerInsurance;
+
+  const cardTop = 110;
+  const colWidth = 250;
+  const rightCol = left + width - colWidth;
+  const billEnd = detailBlock('Bill to', [
+    ['Customer', customerName],
+    ['Address', invoice.customer?.address || invoice.walkInCustomerAddress || invoice.customerAddress || claim?.customerAddress],
+    ['Phone', invoice.customer?.phone || invoice.walkInCustomerPhone || invoice.customerPhone || claim?.customerPhone],
+    ['Email', invoice.customer?.email || invoice.walkInCustomerEmail || invoice.customerEmail],
+    ['Claim no.', claim?.claimNumber || claim?.customerClaimNumber],
+    ['Insurance', insurance],
+  ], left, cardTop, colWidth);
+  const vehicleEnd = detailBlock('Vehicle', [
+    ['Year / make / model', [vehicleYear, vehicleMake, vehicleModel].filter(Boolean).join(' ')],
+    ['Style / color', [vehicleTrim, vehicle?.color ?? claim?.vehicleColor].filter(Boolean).join(' / ')],
+    ['VIN', vehicle?.vin ?? claim?.vehicleVin ?? invoice.walkInVehicleVin],
+    ['License plate', plate],
+    ['Job / RO no.', invoice.job?.jobNumber],
+    ['Adjuster', claim?.adjusterName],
+  ], rightCol, cardTop, colWidth);
+
+  // Line items table
+  const columns = {
+    no: { x: left, w: 28, align: 'left' as const },
+    description: { x: left + 28, w: 280, align: 'left' as const },
+    qty: { x: left + 308, w: 52, align: 'right' as const },
+    unit: { x: left + 360, w: 84, align: 'right' as const },
+    amount: { x: left + 444, w: 88, align: 'right' as const },
   };
-  const drawFormHeader = () => {
-    doc.rect(left, 25, 4, 55).fill('#d36124');
-    text('MASTERCRAFT AUTO REPAIR & COLLISION', left + 12, 27, { size: 13, bold: true, width: 330 });
-    text('38-21 23rd Street, Long Island City, NY 11101', left + 12, 45, { size: 7.5 });
-    text('718-603-0412  |  718-578-4563  |  shop@mastercraftautony.com', left + 12, 57, { size: 7.2 });
-    text('www.mastercraftautony.com  |  Facility No. 7136099  |  EIN 42-2914045', left + 12, 69, { size: 7 });
-    text('INVOICE', 404, 30, { size: 20, bold: true, width: 172, align: 'right' });
-    text(`Invoice No. ${fit(invoice.invoiceNumber, 135, 8)}`, 404, 56, { size: 8, bold: true, width: 172, align: 'right' });
-    text(`Date: ${date(invoice.issueDate)}`, 404, 69, { size: 7.5, width: 172, align: 'right' });
-
-    doc.rect(left, 89, pageWidth, 21).fill('#333333');
-    text('VEHICLE REPAIR INVOICE', left + 8, 96, { size: 10, bold: true, color: '#ffffff', width: pageWidth - 16 });
-    text(`INVOICE NO. ${invoice.invoiceNumber}`, left + 300, 96, { size: 8, bold: true, color: '#ffffff', width: 232, align: 'right' });
-
-    const boxY = 115;
-    const boxHeight = 78;
-    const half = pageWidth / 2;
-    const rowHeight = boxHeight / 4;
-    const customerName = invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : invoice.walkInCustomerName || invoice.customerName || claim?.customerName || 'Walk-in / counter sale';
-    field('Customer / insured', customerName, left, boxY, half, rowHeight);
-    field('Claim number', claim?.claimNumber || claim?.customerClaimNumber, left + half, boxY, half, rowHeight);
-    field('Address', invoice.customer?.address || invoice.walkInCustomerAddress || invoice.customerAddress || claim?.customerAddress, left, boxY + rowHeight, half, rowHeight);
-    field('Phone', invoice.customer?.phone || invoice.walkInCustomerPhone || invoice.customerPhone || claim?.customerPhone, left + half, boxY + rowHeight, half, rowHeight);
-    field('Email', invoice.customer?.email || invoice.walkInCustomerEmail || invoice.customerEmail, left, boxY + rowHeight * 2, half, rowHeight);
-    field('Job / repair order', invoice.job?.jobNumber, left + half, boxY + rowHeight * 2, half, rowHeight);
-    const vehicleYear = vehicle?.year ?? claim?.vehicleYear ?? invoice.walkInVehicleYear;
-    const vehicleMake = vehicle?.make ?? claim?.vehicleMake ?? invoice.walkInVehicleMake;
-    const vehicleModel = vehicle?.model ?? claim?.vehicleModel ?? invoice.walkInVehicleModel;
-    const vehicleTrim = vehicle?.trim ?? claim?.vehicleTrim ?? invoice.walkInVehicleTrim ?? vehicle?.bodyClass ?? claim?.vehicleBodyClass;
-    field('Year / make / model', [vehicleYear, vehicleMake, vehicleModel].filter(Boolean).join(' '), left, boxY + rowHeight * 3, half, rowHeight);
-    field('Style / color', [vehicleTrim, vehicle?.color ?? claim?.vehicleColor].filter(Boolean).join(' / '), left + half, boxY + rowHeight * 3, half, rowHeight);
-
-    const detailsY = boxY + boxHeight + 3;
-    const detailHeight = 20;
-    const widths = [145, 115, 140, 140];
-    const insurance = claim?.insuranceCompany || claim?.customerInsurance;
-    const policy = claim?.customerPolicyNumber;
-    const plate = [vehicle?.licensePlate ?? claim?.vehicleLicensePlate ?? invoice.walkInVehicleLicense, vehicle?.licenseState ?? claim?.vehiclePlateState ?? invoice.walkInVehicleState].filter(Boolean).join(' / ');
-    field('VIN', vehicle?.vin ?? claim?.vehicleVin ?? invoice.walkInVehicleVin, left, detailsY, widths[0], detailHeight);
-    field('License plate', plate, left + widths[0], detailsY, widths[1], detailHeight);
-    field('Insurance company', insurance, left + widths[0] + widths[1], detailsY, widths[2], detailHeight);
-    field('Insurance / policy no.', policy, left + widths[0] + widths[1] + widths[2], detailsY, widths[3], detailHeight);
-    field('Adjuster', claim?.adjusterName, left, detailsY + detailHeight, 180, detailHeight);
-    field('Adjuster phone', claim?.adjusterPhone, left + 180, detailsY + detailHeight, 150, detailHeight);
-    field('Odometer', '', left + 330, detailsY + detailHeight, 100, detailHeight);
-    field('Estimate prepared by', '', left + 430, detailsY + detailHeight, 110, detailHeight);
-  };
-  const drawItemsTable = (items: typeof invoice.lineItems, startIndex: number, pageNumber: number, pageCount: number, includeSummary: boolean) => {
-    const columns = [left, left + 22, left + 60, left + 102, left + 270, left + 318, left + 363, left + 415, left + 460, right];
-    let y = 278;
-    const headerHeight = 19;
-    const rowHeight = 17;
-    doc.rect(left, y, pageWidth, headerHeight).fill('#dedede');
-    const headings = ['No.', 'Repair', 'Replace', 'Description', 'Parts', 'Labor', 'Refinish', 'Sublet', 'Amount'];
-    headings.forEach((heading, index) => text(heading, columns[index] + 2, y + 6, { size: 5.8, bold: true, width: columns[index + 1] - columns[index] - 4, align: index > 3 ? 'right' : 'left' }));
-    y += headerHeight;
-    for (const [index, item] of items.entries()) {
-      if (index % 2 === 0) doc.rect(left, y, pageWidth, rowHeight).fill('#f4f4f4');
-      text(String(startIndex + index + 1), columns[0] + 2, y + 5, { size: 6.5, width: columns[1] - columns[0] - 4 });
-      for (const columnIndex of [1, 2]) {
-        const boxWidth = 6;
-        const boxX = columns[columnIndex] + (columns[columnIndex + 1] - columns[columnIndex] - boxWidth) / 2;
-        doc.rect(boxX, y + 5, boxWidth, boxWidth).lineWidth(0.4).stroke('#777777');
-      }
-      const description = `${item.quantity !== 1 ? `${item.quantity} x ` : ''}${item.description}`;
-      text(fit(description, columns[4] - columns[3] - 7, 6.4), columns[3] + 3, y + 5, { size: 6.4, width: columns[4] - columns[3] - 7 });
-      text(money(item.quantity * item.unitPrice), columns[8] + 2, y + 5, { size: 6.5, width: columns[9] - columns[8] - 5, align: 'right' });
-      doc.rect(left, y, pageWidth, rowHeight).lineWidth(0.3).stroke('#c2c2c2');
-      y += rowHeight;
+  let pageNumber = 1;
+  const drawTableHeader = (y: number) => {
+    doc.rect(left, y, width, 19).fill(charcoal);
+    const labels: Array<[keyof typeof columns, string]> = [['no', '#'], ['description', 'Description'], ['qty', 'Qty'], ['unit', 'Unit price'], ['amount', 'Amount']];
+    for (const [key, label] of labels) {
+      const column = columns[key];
+      doc.font('Helvetica-Bold').fontSize(7).fillColor('#FFFFFF');
+      doc.text(label.toUpperCase(), column.x + 6, y + 6.5, { width: column.w - 12, align: column.align, characterSpacing: 0.4, lineBreak: false });
     }
-    if (!items.length) {
-      text('No line items recorded', left + 6, y + 5, { size: 7, color: '#555555' });
-      doc.rect(left, y, pageWidth, rowHeight).lineWidth(0.3).stroke('#c2c2c2');
-      y += rowHeight;
-    }
-    if (includeSummary) {
-      y = 590;
-      const leftWidth = 324;
-      text(`PROPOSED COMPLETION DATE: ${date(invoice.dueDate) || '________________'}`, left + 2, y + 2, { size: 7, bold: true });
-      text('The charges above are for parts, labor, refinishing, and other work performed on the vehicle identified on this invoice.', left + 2, y + 16, { size: 6.5, width: leftWidth });
-      text('Please review the listed work and charges. Any additional or supplemental work will be documented separately.', left + 2, y + 34, { size: 6.5, width: leftWidth });
-      text('I acknowledge that the work listed above was performed and approve the charges shown.', left + 2, y + 56, { size: 6.3, width: leftWidth });
-      doc.moveTo(left + 2, y + 87).lineTo(left + 211, y + 87).stroke('#555555');
-      doc.moveTo(left + 231, y + 87).lineTo(left + leftWidth, y + 87).stroke('#555555');
-      text('Customer signature', left + 2, y + 90, { size: 5.8, color: '#555555' });
-      text('Date', left + 231, y + 90, { size: 5.8, color: '#555555' });
-
-      const totalsX = left + leftWidth + 8;
-      const totalsWidth = pageWidth - leftWidth - 8;
-      const summaryRows: Array<[string, number | null, boolean?]> = [
-        ['Paint hours @', null],
-        ['Labor hours @', null],
-        ['Parts', null],
-        ['Paint / materials', null],
-        ['Sublet items', null],
-        ['Towing / storage', null],
-        ['Subtotal', invoice.subtotal],
-        ['Sales tax', invoice.tax],
-        ['Total', invoice.total, true],
-        ['Amount paid', invoice.amountPaid],
-        ['Balance due', invoice.balanceDue, true],
-      ];
-      let totalY = y - 1;
-      const totalRowHeight = 11;
-      summaryRows.forEach(([label, amount, bold]) => {
-        if (bold) doc.rect(totalsX, totalY, totalsWidth, totalRowHeight).fill('#e9e9e9');
-        text(label, totalsX + 3, totalY + 2, { size: 6, bold: !!bold, width: totalsWidth - 63 });
-        text(amount == null ? '' : money(amount), totalsX + totalsWidth - 59, totalY + 2, { size: 6.2, bold: !!bold, width: 56, align: 'right' });
-        doc.rect(totalsX, totalY, totalsWidth, totalRowHeight).lineWidth(0.3).stroke('#aaaaaa');
-        totalY += totalRowHeight;
-      });
-      if (invoice.payments.length) {
-        const paymentSummary = invoice.payments.map((payment) => `${date(payment.date)} ${payment.method.replace('_', ' ')} ${money(payment.amount)}`).join('  |  ');
-        text(fit(`Payments: ${paymentSummary}`, pageWidth, 6), left, 716, { size: 6, color: '#555555', width: pageWidth, align: 'center' });
-      }
-    }
-    text(`Page ${pageNumber} of ${pageCount}`, left, 742, { size: 6, color: '#666666', width: pageWidth, align: 'center' });
+    return y + 19;
   };
 
-  const itemsPerPage = 17;
-  const pages = Math.max(1, Math.ceil(invoice.lineItems.length / itemsPerPage));
-  for (let pageIndex = 0; pageIndex < pages; pageIndex += 1) {
-    if (pageIndex > 0) doc.addPage();
-    drawFormHeader();
-    const startIndex = pageIndex * itemsPerPage;
-    drawItemsTable(invoice.lineItems.slice(startIndex, startIndex + itemsPerPage), startIndex, pageIndex + 1, pages, pageIndex === pages - 1);
+  let y = Math.max(billEnd, vehicleEnd) + 14;
+  y = drawTableHeader(y);
+  const items = invoice.lineItems.length ? invoice.lineItems : [];
+  if (!items.length) {
+    doc.rect(left, y, width, 22).fill(tint);
+    write('No line items recorded', left + 8, y + 7, 300, { size: 8.5, color: muted });
+    y += 22;
+  }
+  items.forEach((item, index) => {
+    setText(8.5);
+    const descriptionHeight = doc.heightOfString(item.description, { width: columns.description.w - 12 });
+    const rowHeight = Math.max(20, descriptionHeight + 10);
+    if (y + rowHeight > contentBottom) {
+      doc.addPage();
+      pageNumber += 1;
+      drawContinuationHeader(pageNumber);
+      y = drawTableHeader(64);
+    }
+    if (index % 2 === 0) doc.rect(left, y, width, rowHeight).fill(tint);
+    write(String(index + 1), columns.no.x + 6, y + 6, columns.no.w - 12, { size: 8, color: muted });
+    write(item.description, columns.description.x + 6, y + 6, columns.description.w - 12, { size: 8.5 });
+    write(String(item.quantity), columns.qty.x + 6, y + 6, columns.qty.w - 12, { size: 8.5, align: 'right' });
+    write(money(item.unitPrice), columns.unit.x + 6, y + 6, columns.unit.w - 12, { size: 8.5, align: 'right' });
+    write(money(item.quantity * item.unitPrice), columns.amount.x + 6, y + 6, columns.amount.w - 12, { size: 8.5, bold: true, align: 'right' });
+    doc.rect(left, y + rowHeight, width, 0.5).fill(rule);
+    y += rowHeight;
+  });
+
+  // Summary: notes and payments on the left, totals on the right.
+  y += 14;
+  const needed = 210;
+  if (y + needed > contentBottom) {
+    doc.addPage();
+    pageNumber += 1;
+    drawContinuationHeader(pageNumber);
+    y = 64;
+  }
+  const summaryTop = y;
+  const totalsX = left + 300;
+  const totalsWidth = width - 300;
+  const totalRows: Array<[string, string, boolean?]> = [
+    ['Subtotal', money(invoice.subtotal)],
+    ['Sales tax', money(invoice.tax)],
+    ['Total', money(invoice.total), true],
+    ['Amount paid', money(invoice.amountPaid)],
+  ];
+  let totalY = summaryTop;
+  for (const [label, value, bold] of totalRows) {
+    write(label, totalsX + 8, totalY + 5, totalsWidth - 100, { size: 8.5, bold: !!bold, color: bold ? charcoal : ink });
+    write(value, totalsX + totalsWidth - 100, totalY + 5, 92, { size: 8.5, bold: !!bold, align: 'right' });
+    doc.rect(totalsX, totalY + 18, totalsWidth, 0.5).fill(rule);
+    totalY += 19;
+  }
+  doc.rect(totalsX, totalY, totalsWidth, 26).fill(orange);
+  write('BALANCE DUE', totalsX + 10, totalY + 9, 120, { size: 8.5, bold: true, color: '#FFFFFF' });
+  write(money(invoice.balanceDue), totalsX + totalsWidth - 130, totalY + 7, 120, { size: 12, bold: true, color: '#FFFFFF', align: 'right' });
+  totalY += 26;
+
+  let leftY = summaryTop;
+  if (invoice.payments.length) {
+    caps('Payments received', left, leftY, 260, orange);
+    doc.rect(left, leftY + 13, 260, 0.8).fill(rule);
+    leftY += 19;
+    for (const payment of invoice.payments) {
+      write(`${date(payment.date)}  ·  ${payment.method.replace(/_/g, ' ')}${payment.notes ? ` · ${payment.notes}` : ''}`, left, leftY, 180, { size: 8 });
+      write(money(payment.amount), left + 180, leftY, 80, { size: 8, bold: true, align: 'right' });
+      leftY += 13;
+    }
+    leftY += 6;
+  }
+  if (invoice.notes) {
+    caps('Notes', left, leftY, 260, orange);
+    doc.rect(left, leftY + 13, 260, 0.8).fill(rule);
+    leftY += 19;
+    write(invoice.notes, left, leftY, 250, { size: 8 });
+    leftY += doc.heightOfString(invoice.notes, { width: 250 }) + 6;
+  }
+
+  // Completion and authorization
+  let authY = Math.max(totalY, leftY) + 22;
+  if (authY + 110 > contentBottom) {
+    doc.addPage();
+    pageNumber += 1;
+    drawContinuationHeader(pageNumber);
+    authY = 64;
+  }
+  caps('Completion & authorization', left, authY, width, orange);
+  doc.rect(left, authY + 13, width, 0.8).fill(rule);
+  write(`Proposed completion date: ${date(invoice.dueDate) || '____________________'}`, left, authY + 22, width, { size: 8.5, bold: true });
+  write('The charges above cover parts, labor, refinishing, and other work performed on the vehicle identified on this invoice. Any additional or supplemental work will be documented separately.', left, authY + 38, width, { size: 7.8, color: muted });
+  write('I acknowledge that the work listed above was performed and approve the charges shown.', left, authY + 64, width, { size: 7.8, color: ink });
+  doc.rect(left, authY + 98, 250, 0.8).fill('#555555');
+  doc.rect(left + 282, authY + 98, 250, 0.8).fill('#555555');
+  caps('Customer signature', left, authY + 103, 250);
+  caps('Date', left + 282, authY + 103, 250);
+
+  // Footer on every page, with page numbers filled in at the end.
+  const range = doc.bufferedPageRange();
+  const pageCount = range.count;
+  for (let index = 0; index < pageCount; index += 1) {
+    doc.switchToPage(range.start + index);
+    doc.rect(left, footerY - 8, width, 0.6).fill(rule);
+    write('Thank you for choosing Mastercraft Auto Repair & Collision.', left, footerY, 360, { size: 7.2, color: muted });
+    write(`Page ${index + 1} of ${pageCount}`, right - 140, footerY, 140, { size: 7.2, color: muted, align: 'right' });
   }
   doc.end();
   return result;
