@@ -516,6 +516,7 @@ function App() {
   const mobileNavToggleRef = React.useRef<HTMLButtonElement>(null);
   const mobileNavFirstItemRef = React.useRef<HTMLButtonElement>(null);
   const [search, setSearch] = React.useState("");
+  const [focus, setFocus] = React.useState<SearchFocus | null>(null);
   const [dashboard, setDashboard] = React.useState<DashboardData | null>(null);
   const [todos, setTodos] = React.useState<CompanyTodo[]>([]);
   const [customers, setCustomers] = React.useState<Customer[]>([]);
@@ -703,6 +704,10 @@ function App() {
     setView(nextView);
     setSearch("");
   };
+  const openRecord = (nextView: View, target: SearchFocus) => {
+    navigate(nextView);
+    setFocus(target);
+  };
   const newType =
     view === "Customers"
       ? "customer"
@@ -821,19 +826,7 @@ function App() {
             <strong>{view}</strong>
           </div>
           <div className="top-actions">
-            <label className="global-search">
-              <Icon name="search" />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && view === "Vehicles")
-                    void loadData();
-                }}
-                placeholder="Search anything..."
-              />
-              <kbd>CMD K</kbd>
-            </label>
+            <GlobalSearch onOpenPage={navigate} onOpenRecord={openRecord} />
             <button className="icon-button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen}>
               <Icon name="bell" />
               <i />
@@ -899,8 +892,8 @@ function App() {
               onTodosChanged={() => void loadData()}
             />
           )}
-          {view === "Customers" && <CustomerView customers={customers} claims={claims} vehicles={vehicles} jobs={jobs} onChanged={loadData} />}
-          {view === "Vehicles" && <VehicleView vehicles={vehicles} customers={customers} onChanged={loadData} />}
+          {view === "Customers" && <CustomerView customers={customers} claims={claims} vehicles={vehicles} jobs={jobs} onChanged={loadData} focus={focus} onFocusHandled={() => setFocus(null)} />}
+          {view === "Vehicles" && <VehicleView vehicles={vehicles} customers={customers} onChanged={loadData} focus={focus} onFocusHandled={() => setFocus(null)} />}
           {view === "Claims" && (
             <ClaimView
               claims={claims}
@@ -908,14 +901,16 @@ function App() {
               vehicles={vehicles}
               jobs={jobs}
               onChanged={loadData}
+              focus={focus}
+              onFocusHandled={() => setFocus(null)}
             />
           )}
-          {view === "Jobs" && <JobView jobs={jobs} onChanged={loadData} />}
+          {view === "Jobs" && <JobView jobs={jobs} onChanged={loadData} focus={focus} onFocusHandled={() => setFocus(null)} />}
           {view === "Estimates" && (
             <><EstimateBuilder key={estimateFormKey} jobs={jobs} request={fetchJson} onSaved={loadData} editEstimateId={editingEstimateId} onStartNew={() => { setEditingEstimateId(null); setEstimateFormKey((key) => key + 1); window.scrollTo({ top: 0, behavior: "smooth" }); }} onCancelEdit={() => { setEditingEstimateId(null); setEstimateFormKey((key) => key + 1); window.scrollTo({ top: 0, behavior: "smooth" }); }} /><EstimateRegister estimates={estimates} request={fetchJson} onChanged={loadData} onNavigate={navigate} onEdit={(id) => { setEditingEstimateId(id); setEstimateFormKey((key) => key + 1); window.scrollTo({ top: 0, behavior: "smooth" }); }} /></>
           )}
           {view === "Documents" && <DocumentView documents={documents} customers={customers} jobs={jobs} claims={claims} onUploaded={loadData} />}
-          {view === "Invoices" && <InvoiceView invoices={invoices} customers={customers} jobs={jobs} claims={claims} request={fetchJson} apiUrl={API_URL} onChanged={loadData} />}
+          {view === "Invoices" && <InvoiceView invoices={invoices} customers={customers} jobs={jobs} claims={claims} request={fetchJson} apiUrl={API_URL} onChanged={loadData} focus={focus} onFocusHandled={() => setFocus(null)} />}
           {view === "Towing Receipts" && <TowingReceiptView customers={customers} vehicles={vehicles} />}
           {view === "Bookkeeping" && <BookkeepingView data={finance} request={fetchJson} onChanged={() => void loadData()} />}
           {view === "Reports" && (
@@ -1189,11 +1184,19 @@ function Dashboard({
     </>
   );
 }
-function CustomerView({ customers, claims, vehicles, jobs, onChanged }: { customers: Customer[]; claims: Claim[]; vehicles: Vehicle[]; jobs: Job[]; onChanged: () => Promise<void> }) {
+function CustomerView({ customers, claims, vehicles, jobs, onChanged, focus, onFocusHandled }: { customers: Customer[]; claims: Claim[]; vehicles: Vehicle[]; jobs: Job[]; onChanged: () => Promise<void>; focus?: SearchFocus | null; onFocusHandled?: () => void }) {
   const [selectedCustomer, setSelectedCustomer] = React.useState<Customer | null>(null);
   const [selectedClaim, setSelectedClaim] = React.useState<Claim | null>(null);
   const [editingCustomer, setEditingCustomer] = React.useState(false);
   const [error, setError] = React.useState("");
+  React.useEffect(() => {
+    if (focus?.kind !== "customer") return;
+    const match = customers.find((customer) => customer.id === focus.id);
+    if (!match) return;
+    setSelectedCustomer(match);
+    setSelectedClaim(null);
+    onFocusHandled?.();
+  }, [focus, customers]);
   const [directorySearch, setDirectorySearch] = React.useState("");
   const directoryNeedle = directorySearch.trim().toLowerCase();
   const directoryDigits = directorySearch.replace(/\D/g, "");
@@ -1280,9 +1283,16 @@ function CustomerEditModal({ customer, onClose, onSaved }: { customer: Customer;
     </form>
   </div>;
 }
-function VehicleView({ vehicles, customers, onChanged }: { vehicles: Vehicle[]; customers: Customer[]; onChanged: () => Promise<void> }) {
+function VehicleView({ vehicles, customers, onChanged, focus, onFocusHandled }: { vehicles: Vehicle[]; customers: Customer[]; onChanged: () => Promise<void>; focus?: SearchFocus | null; onFocusHandled?: () => void }) {
   const [selected, setSelected] = React.useState<Vehicle | null>(null);
   const [query, setQuery] = React.useState("");
+  React.useEffect(() => {
+    if (focus?.kind !== "vehicle") return;
+    const match = vehicles.find((vehicle) => vehicle.id === focus.id);
+    if (!match) return;
+    setSelected(match);
+    onFocusHandled?.();
+  }, [focus, vehicles]);
   const visibleVehicles = vehicles.filter((vehicle) => matchesSearch(query, [vehicle.year, vehicle.make, vehicle.model, vehicle.trim, vehicle.color, vehicle.vin, vehicle.licensePlate, vehicle.customer?.firstName, vehicle.customer?.lastName, vehicle.customer?.phone]));
   return <><DataSurface search={{ value: query, onChange: setQuery, placeholder: "Search vehicle, owner, VIN, or plate", label: "Search vehicles" }} title="Vehicle registry" subtitle="Click a vehicle to view or update its saved details" headers={["Vehicle", "Owner", "VIN", "License plate"]} rows={visibleVehicles.map((vehicle) => [<div className="vehicle-cell"><Icon name="car" /><strong>{[vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || "Vehicle pending"}</strong></div>, `${vehicle.customer.firstName} ${vehicle.customer.lastName}`, <span className="mono">{vehicle.vin || "Not recorded"}</span>, vehicle.licensePlate ? `${vehicle.licensePlate}${vehicle.licenseState ? ` (${vehicle.licenseState})` : ""}` : "Not recorded"])} empty={query.trim() ? `No vehicles match "${query.trim()}".` : "No vehicles found. Add a vehicle from a customer intake."} onRowClick={(index) => setSelected(visibleVehicles[index])} />{selected && <VehicleEditModal vehicle={selected} customers={customers} onClose={() => setSelected(null)} onSaved={async () => { await onChanged(); setSelected(null); }} />}</>;
 }
@@ -1302,16 +1312,28 @@ function ClaimView({
   vehicles,
   jobs,
   onChanged,
+  focus,
+  onFocusHandled,
 }: {
   claims: Claim[];
   customers: Customer[];
   vehicles: Vehicle[];
   jobs: Job[];
   onChanged: () => Promise<void>;
+  focus?: SearchFocus | null;
+  onFocusHandled?: () => void;
 }) {
   const [selectedClaim, setSelectedClaim] = React.useState<Claim | null>(null);
   const [creating, setCreating] = React.useState(false);
   const [query, setQuery] = React.useState("");
+  React.useEffect(() => {
+    if (focus?.kind !== "claim") return;
+    const match = claims.find((claim) => claim.id === focus.id);
+    if (!match) return;
+    setCreating(false);
+    setSelectedClaim(match);
+    onFocusHandled?.();
+  }, [focus, claims]);
   const visibleClaims = claims.filter((claim) => matchesSearch(query, [claim.claimNumber, claim.customerClaimNumber, claim.customer?.firstName, claim.customer?.lastName, claim.customer?.phone, claim.vehicle?.year, claim.vehicle?.make, claim.vehicle?.model, claim.vehicle?.licensePlate, claim.vehicle?.vin, claim.insuranceCompany, claim.claimStatus, ...(claim.jobs || []).map((job) => job.jobNumber)]));
   return (
     <>
@@ -1872,12 +1894,23 @@ function LegacyAuthorizationForm({ form, customer, vehicle, jobLabel }: { form: 
 function JobView({
   jobs,
   onChanged = async () => undefined,
+  focus,
+  onFocusHandled,
 }: {
   jobs: Job[];
   onChanged?: () => Promise<void>;
+  focus?: SearchFocus | null;
+  onFocusHandled?: () => void;
 }) {
   const [selectedJob, setSelectedJob] = React.useState<Job | null>(null);
   const [query, setQuery] = React.useState("");
+  React.useEffect(() => {
+    if (focus?.kind !== "job") return;
+    const match = jobs.find((job) => job.id === focus.id);
+    if (!match) return;
+    setSelectedJob(match);
+    onFocusHandled?.();
+  }, [focus, jobs]);
   const visibleJobs = jobs.filter((job) => matchesSearch(query, [job.jobNumber, job.customer?.firstName, job.customer?.lastName, job.customer?.phone, job.vehicle?.year, job.vehicle?.make, job.vehicle?.model, job.vehicle?.licensePlate, job.vehicle?.vin, job.status]));
   return (
     <>
@@ -2609,6 +2642,185 @@ function DataSurface({
     </div>
   );
 }
+type SearchRecordKind = "customer" | "vehicle" | "claim" | "job" | "invoice";
+type SearchFocus = { kind: SearchRecordKind; id: string; nonce: number };
+type SearchItem = { id: string; title: string; subtitle: string };
+type GlobalSearchResults = { customers: SearchItem[]; vehicles: SearchItem[]; claims: SearchItem[]; jobs: SearchItem[]; invoices: SearchItem[] };
+
+const pageAliases: Partial<Record<View, string[]>> = {
+  Dashboard: ["home", "overview"],
+  Customers: ["clients", "customer list"],
+  Vehicles: ["cars", "vehicle registry"],
+  Claims: ["insurance", "claims desk"],
+  Jobs: ["repair board", "repair orders", "work orders", "repairs", "job"],
+  Estimates: ["estimate", "quotes"],
+  Documents: ["files", "paperwork"],
+  Invoices: ["invoice", "billing", "bills"],
+  "Towing Receipts": ["towing receipt", "receipt", "tow"],
+  Bookkeeping: ["accounting", "finance", "expenses"],
+  Reports: ["report", "analytics"],
+};
+
+// Optimal string alignment distance: insert, delete, replace, or swap two neighbouring letters, each counted once.
+function editDistance(a: string, b: string) {
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i += 1) {
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  }
+  return d[a.length][b.length];
+}
+
+// A typed word matches when it appears in the text, or is within a small typo distance of a word in it.
+function termMatches(term: string, text: string) {
+  const needle = term.toLowerCase();
+  if (text.includes(needle)) return true;
+  const allowed = Math.max(1, Math.floor(needle.length / 3));
+  return text.split(/[\s/&,.()-]+/).some((word) => word.length > 0 && (editDistance(needle, word) <= allowed || editDistance(needle, word.slice(0, needle.length)) <= allowed));
+}
+
+function matchingPages(query: string) {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return [] as View[];
+  return navItems
+    .filter((item) => {
+      const text = [item.label, ...(pageAliases[item.label] || [])].join(" ").toLowerCase();
+      return terms.every((term) => termMatches(term, text));
+    })
+    .map((item) => item.label);
+}
+
+function GlobalSearch({ onOpenPage, onOpenRecord }: { onOpenPage: (view: View) => void; onOpenRecord: (view: View, target: SearchFocus) => void }) {
+  const [query, setQuery] = React.useState("");
+  const [open, setOpen] = React.useState(false);
+  const [results, setResults] = React.useState<GlobalSearchResults | null>(null);
+  const [searching, setSearching] = React.useState(false);
+  const [active, setActive] = React.useState(0);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const trimmed = query.trim();
+
+  React.useEffect(() => {
+    if (trimmed.length < 2) {
+      setResults(null);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setResults(null);
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      fetchJson<GlobalSearchResults>(`/search?q=${encodeURIComponent(trimmed)}`)
+        .then((data) => { if (!cancelled) setResults(data); })
+        .catch(() => { if (!cancelled) setResults(null); })
+        .finally(() => { if (!cancelled) setSearching(false); });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [trimmed]);
+
+  React.useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        inputRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  type Entry = { key: string; group: string; title: string; subtitle?: string; run: () => void };
+  const entries: Entry[] = [];
+  if (trimmed) {
+    matchingPages(trimmed).slice(0, 6).forEach((view) => entries.push({ key: `page-${view}`, group: "Pages", title: view, run: () => onOpenPage(view) }));
+  }
+  const groups: Array<[keyof GlobalSearchResults, SearchRecordKind, View, string]> = [
+    ["customers", "customer", "Customers", "Customers"],
+    ["vehicles", "vehicle", "Vehicles", "Vehicles"],
+    ["claims", "claim", "Claims", "Claims"],
+    ["jobs", "job", "Jobs", "Repair orders"],
+    ["invoices", "invoice", "Invoices", "Invoices"],
+  ];
+  if (results) {
+    for (const [key, kind, view, label] of groups) {
+      for (const item of results[key]) {
+        entries.push({
+          key: `${kind}-${item.id}`,
+          group: label,
+          title: item.title,
+          subtitle: item.subtitle,
+          run: () => onOpenRecord(view, { kind, id: item.id, nonce: Date.now() }),
+        });
+      }
+    }
+  }
+  const activeIndex = Math.min(active, Math.max(entries.length - 1, 0));
+
+  function choose(entry: Entry | undefined) {
+    if (!entry) return;
+    entry.run();
+    setQuery("");
+    setOpen(false);
+    inputRef.current?.blur();
+  }
+
+  return (
+    <div
+      className="global-search-wrap"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
+      <label className="global-search">
+        <Icon name="search" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(event) => { setQuery(event.target.value); setActive(0); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") { event.preventDefault(); setActive((index) => Math.min(index + 1, entries.length - 1)); }
+            else if (event.key === "ArrowUp") { event.preventDefault(); setActive((index) => Math.max(index - 1, 0)); }
+            else if (event.key === "Enter") { event.preventDefault(); choose(entries[activeIndex]); }
+            else if (event.key === "Escape") { setOpen(false); setQuery(""); inputRef.current?.blur(); }
+          }}
+          placeholder="Search anything..."
+          aria-label="Search anything"
+          autoComplete="off"
+        />
+        <kbd>CMD K</kbd>
+      </label>
+      {open && trimmed && (
+        <div className="global-search-results" role="listbox" aria-label="Search results">
+          {searching && !results && <p className="global-search-empty">Searching...</p>}
+          {!searching && !entries.length && <p className="global-search-empty">No matches for "{trimmed}".</p>}
+          {entries.map((entry, index) => (
+            <React.Fragment key={entry.key}>
+              {(index === 0 || entries[index - 1].group !== entry.group) && <div className="global-search-group-label">{entry.group}</div>}
+              <button
+                type="button"
+                role="option"
+                aria-selected={index === activeIndex}
+                className={index === activeIndex ? "global-search-item active" : "global-search-item"}
+                onMouseEnter={() => setActive(index)}
+                onClick={() => choose(entry)}
+              >
+                <strong>{entry.title}</strong>
+                {entry.subtitle && <small>{entry.subtitle}</small>}
+              </button>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 type SearchProps = { value: string; onChange: (value: string) => void; placeholder: string; label: string };
 
 function matchesSearch(query: string, parts: Array<string | number | null | undefined>) {

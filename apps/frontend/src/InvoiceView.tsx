@@ -20,10 +20,18 @@ const freshLine = (): FormLine => ({ description: "", quantity: "1", unitPrice: 
 let activeInvoicePdfDownload: (() => void) | null = null;
 let activeInvoiceDelete: (() => void) | null = null;
 
-export function InvoiceView({ invoices, customers, jobs, claims, request, apiUrl, onChanged }: { invoices: Invoice[]; customers: Customer[]; jobs: Job[]; claims: Claim[]; request: Request; apiUrl: string; onChanged: () => Promise<void> }) {
+export function InvoiceView({ invoices, customers, jobs, claims, request, apiUrl, onChanged, focus, onFocusHandled }: { invoices: Invoice[]; customers: Customer[]; jobs: Job[]; claims: Claim[]; request: Request; apiUrl: string; onChanged: () => Promise<void>; focus?: { kind: string; id: string; nonce: number } | null; onFocusHandled?: () => void }) {
   const [selected, setSelected] = React.useState<Invoice | null>(null);
   const [creating, setCreating] = React.useState(false);
   const [paymentInvoice, setPaymentInvoice] = React.useState<Invoice | null>(null);
+  React.useEffect(() => {
+    if (focus?.kind !== "invoice") return;
+    const match = invoices.find((invoice) => invoice.id === focus.id);
+    if (!match) return;
+    setCreating(false);
+    setSelected(match);
+    onFocusHandled?.();
+  }, [focus, invoices]);
   const [query, setQuery] = React.useState("");
   const filtered = invoices.filter((invoice) => `${invoice.invoiceNumber} ${invoice.customer ? `${invoice.customer.firstName} ${invoice.customer.lastName}` : invoice.walkInCustomerName || "walk-in counter sale"} ${invoice.job?.jobNumber || ""}`.toLowerCase().includes(query.toLowerCase()));
   return <div className="invoice-workspace">
