@@ -3,7 +3,18 @@ import type { PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
 import { mv104Codes } from '../mv104/mv104Codes.js';
 import { fillMv104, type Mv104Input, type Mv104Party, type Mv104Person } from '../mv104/mv104Form.js';
-import { buildMv104Defaults, missingRequiredFields } from '../mv104/mv104Prefill.js';
+import { buildMv104Defaults, missingRequiredFields, type Mv104ClaimSource } from '../mv104/mv104Prefill.js';
+
+// Reserved id for a standalone MV-104 (not tied to a claim). Claim ids are never this value.
+export const STANDALONE_MV104 = 'standalone';
+const blankClaim: Mv104ClaimSource = {
+  claimNumber: null, incidentDate: null, driverLicense: null, customerName: null, customerInsurance: null,
+  customerPolicyNumber: null, vehicleYear: null, vehicleMake: null, vehicleModel: null, vehicleVin: null,
+  vehicleLicensePlate: null, vehiclePlateState: null, policeReportNumber: null, policeDepartment: null,
+  policeReportFiled: false, atFaultDriverName: null, atFaultDriverLicense: null, atFaultDriverDlState: null,
+  atFaultPlate: null, atFaultPlateState: null, atFaultVehicleYear: null, atFaultVehicleMake: null,
+  atFaultVehicleModel: null, atFaultVehicleVin: null, atFaultInsurance: null, atFaultPolicyNumber: null, customer: null,
+};
 
 const blankPerson: Mv104Person = { name: '', unit: '', position: '', safety: '', age: '', sex: '', injury: '', seriousInjuries: '', deathDate: '' };
 const compassPoints = ['N', 'E', 'S', 'W'] as const;
@@ -49,7 +60,8 @@ function routeParam(req: { params: Record<string, string | string[]> }, name: st
 export function createMv104Router(prisma: PrismaClient) {
   const router = Router();
 
-  const loadClaim = async (claimId: string) => {
+  const loadClaim = async (claimId: string): Promise<Mv104ClaimSource & { id: string }> => {
+    if (claimId === STANDALONE_MV104) return { ...blankClaim, id: STANDALONE_MV104 };
     const claim = await prisma.claim.findUnique({ where: { id: claimId }, include: { customer: true } });
     if (!claim) throw new ApiError(404, 'Claim not found');
     return claim;

@@ -10,6 +10,7 @@ import { TowingReceiptView } from "./TowingReceiptView";
 import { StorageReceiptView } from "./StorageReceiptView";
 import { CompanyTodoList, type CompanyTodo } from "./CompanyTodoList";
 import { Mv104Form } from "./Mv104Form";
+import { Mv104View } from "./Mv104View";
 
 type View =
   | "Dashboard"
@@ -22,6 +23,7 @@ type View =
   | "Invoices"
   | "Towing Receipts"
   | "Storage Receipts"
+  | "MV-104"
   | "Bookkeeping"
   | "Reports";
 const humanize = (value: string) => value.replace(/_/g, " ");
@@ -264,6 +266,7 @@ const navItems: Array<{ label: View; icon: string }> = [
   { label: "Invoices", icon: "file" },
   { label: "Towing Receipts", icon: "truck" },
   { label: "Storage Receipts", icon: "truck" },
+  { label: "MV-104", icon: "file" },
   { label: "Bookkeeping", icon: "chart" },
   { label: "Reports", icon: "chart" },
 ];
@@ -903,6 +906,8 @@ function App() {
                                 ? "Print towing receipts with customer and vehicle details from your records."
                               : view === "Storage Receipts"
                                 ? "Bill storage for total-loss vehicles held more than a week, with the customer and insurance pulled from your records."
+                              : view === "MV-104"
+                                ? "Fill the MV-104 crash report from a claim, or start a standalone form."
                               : "Measure shop throughput, revenue, and follow-up work."}
               </p>
             </div>
@@ -957,6 +962,7 @@ function App() {
               onRefresh={async () => setJobs(await fetchJson<Job[]>("/jobs"))}
             />
           )}
+          {view === "MV-104" && <Mv104View claims={claims} apiUrl={String(API_URL)} />}
           {view === "Bookkeeping" && <BookkeepingView data={finance} request={fetchJson} onChanged={() => void loadData()} />}
           {view === "Reports" && (
             <ReportView reports={reports} onNavigate={navigate} invoices={invoices} jobs={jobs} claims={claims} entries={reportEntries} />
