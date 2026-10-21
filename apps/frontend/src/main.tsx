@@ -575,6 +575,21 @@ function App() {
       return next;
     });
   };
+  React.useEffect(() => {
+    if (!notificationsOpen && !profileOpen) return;
+    const closeAll = () => { setNotificationsOpen(false); setProfileOpen(false); };
+    const onPointerDown = (event: MouseEvent) => {
+      if ((event.target as Element | null)?.closest?.("[data-popover-root]")) return;
+      closeAll();
+    };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") closeAll(); };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [notificationsOpen, profileOpen]);
   const toggleProfileMenu = (anchor: "sidebar" | "topbar") => {
     if (profileOpen && profileMenuAnchor === anchor) {
       setProfileOpen(false);
@@ -770,21 +785,12 @@ function App() {
             </button>
           ))}
         </nav>
-        <div className="sidebar-bottom">
+        <div className="sidebar-bottom" data-popover-root>
           <button className="nav-item" aria-label="Notifications" title="Notifications" onClick={() => setNotificationsOpen((open) => !open)} aria-expanded={notificationsOpen}>
             <Icon name="bell" />
             <span>Notifications</span>
             {(dashboard?.upcomingSchedule?.some((inspection) => !dismissedNotifications.includes(`inspection:${inspection.id}`)) || claims.some((claim) => ["new", "in_review"].includes(claim.claimStatus) && !dismissedNotifications.includes(`claim:${claim.id}`)) || jobs.some((job) => ["ready", "completed"].includes(job.status) && !dismissedNotifications.includes(`job:${job.id}`))) ? <b className="notification-dot" /> : null}
           </button>
-          {notificationsOpen && <div className="notification-panel">
-            <div className="notification-panel-heading"><div><strong>Notifications</strong><small>Shop activity that needs attention</small></div><button type="button" className="notification-close" onClick={() => setNotificationsOpen(false)} aria-label="Close notifications"><Icon name="close" /></button></div>
-            <div className="notification-list">
-              {(dashboard?.upcomingSchedule || []).filter((inspection) => !dismissedNotifications.includes(`inspection:${inspection.id}`)).slice(0, 4).map((inspection) => <button type="button" className="notification-item" key={`inspection-${inspection.id}`} onClick={() => { dismissNotification(`inspection:${inspection.id}`); setNotificationsOpen(false); navigate("Dashboard"); }}><span className="notification-icon orange"><Icon name="bell" /></span><span><strong>Inspection scheduled</strong><small>{inspection.customer.firstName} {inspection.customer.lastName} · {formatDateTime(inspection.scheduledFor)}</small></span></button>)}
-              {claims.filter((claim) => ["new", "in_review"].includes(claim.claimStatus) && !dismissedNotifications.includes(`claim:${claim.id}`)).slice(0, 4).map((claim) => <button type="button" className="notification-item" key={`claim-${claim.id}`} onClick={() => { dismissNotification(`claim:${claim.id}`); setNotificationsOpen(false); navigate("Claims"); }}><span className="notification-icon blue"><Icon name="shield" /></span><span><strong>Claim needs attention</strong><small>{claim.claimNumber || "Unnumbered claim"} · {claim.customer.firstName} {claim.customer.lastName}</small></span></button>)}
-              {jobs.filter((job) => ["ready", "completed"].includes(job.status) && !dismissedNotifications.includes(`job:${job.id}`)).slice(0, 3).map((job) => <button type="button" className="notification-item" key={`job-${job.id}`} onClick={() => { dismissNotification(`job:${job.id}`); setNotificationsOpen(false); navigate("Jobs"); }}><span className="notification-icon green"><Icon name="wrench" /></span><span><strong>Repair order update</strong><small>{job.jobNumber} · {job.status.replaceAll("_", " ")}</small></span></button>)}
-              {!dashboard?.upcomingSchedule?.some((inspection) => !dismissedNotifications.includes(`inspection:${inspection.id}`)) && !claims.some((claim) => ["new", "in_review"].includes(claim.claimStatus) && !dismissedNotifications.includes(`claim:${claim.id}`)) && !jobs.some((job) => ["ready", "completed"].includes(job.status) && !dismissedNotifications.includes(`job:${job.id}`)) && <p className="notification-empty">You are all caught up.</p>}
-            </div>
-          </div>}
           <button type="button" className="user-card" onClick={() => toggleProfileMenu("sidebar")} aria-label="Open profile menu" title="Open profile menu" aria-expanded={profileOpen && profileMenuAnchor === "sidebar"}>
             <div className="avatar">SB</div>
             <div>
@@ -796,6 +802,15 @@ function App() {
           {profileOpen && profileMenuAnchor === "sidebar" && <div className="profile-menu sidebar-profile-menu"><strong>{session.user.name || "Shop admin"}</strong><small>{session.user.email}</small><button type="button" onClick={() => { setProfileOpen(false); setPasswordDialogOpen(true); }}>Change password</button><button type="button" onClick={logout}>Log out</button></div>}
         </div>
       </aside>
+      {notificationsOpen && <div className="notification-panel" data-popover-root>
+            <div className="notification-panel-heading"><div><strong>Notifications</strong><small>Shop activity that needs attention</small></div><button type="button" className="notification-close" onClick={() => setNotificationsOpen(false)} aria-label="Close notifications"><Icon name="close" /></button></div>
+            <div className="notification-list">
+              {(dashboard?.upcomingSchedule || []).filter((inspection) => !dismissedNotifications.includes(`inspection:${inspection.id}`)).slice(0, 4).map((inspection) => <button type="button" className="notification-item" key={`inspection-${inspection.id}`} onClick={() => { dismissNotification(`inspection:${inspection.id}`); setNotificationsOpen(false); navigate("Dashboard"); }}><span className="notification-icon orange"><Icon name="bell" /></span><span><strong>Inspection scheduled</strong><small>{inspection.customer.firstName} {inspection.customer.lastName} · {formatDateTime(inspection.scheduledFor)}</small></span></button>)}
+              {claims.filter((claim) => ["new", "in_review"].includes(claim.claimStatus) && !dismissedNotifications.includes(`claim:${claim.id}`)).slice(0, 4).map((claim) => <button type="button" className="notification-item" key={`claim-${claim.id}`} onClick={() => { dismissNotification(`claim:${claim.id}`); setNotificationsOpen(false); navigate("Claims"); }}><span className="notification-icon blue"><Icon name="shield" /></span><span><strong>Claim needs attention</strong><small>{claim.claimNumber || "Unnumbered claim"} · {claim.customer.firstName} {claim.customer.lastName}</small></span></button>)}
+              {jobs.filter((job) => ["ready", "completed"].includes(job.status) && !dismissedNotifications.includes(`job:${job.id}`)).slice(0, 3).map((job) => <button type="button" className="notification-item" key={`job-${job.id}`} onClick={() => { dismissNotification(`job:${job.id}`); setNotificationsOpen(false); navigate("Jobs"); }}><span className="notification-icon green"><Icon name="wrench" /></span><span><strong>Repair order update</strong><small>{job.jobNumber} · {job.status.replaceAll("_", " ")}</small></span></button>)}
+              {!dashboard?.upcomingSchedule?.some((inspection) => !dismissedNotifications.includes(`inspection:${inspection.id}`)) && !claims.some((claim) => ["new", "in_review"].includes(claim.claimStatus) && !dismissedNotifications.includes(`claim:${claim.id}`)) && !jobs.some((job) => ["ready", "completed"].includes(job.status) && !dismissedNotifications.includes(`job:${job.id}`)) && <p className="notification-empty">You are all caught up.</p>}
+            </div>
+          </div>}
       <button
         type="button"
         className={mobileNavOpen ? "nav-overlay is-visible" : "nav-overlay"}
@@ -826,7 +841,7 @@ function App() {
             <Icon name="arrow" />
             <strong>{view}</strong>
           </div>
-          <div className="top-actions">
+          <div className="top-actions" data-popover-root>
             <GlobalSearch onOpenPage={navigate} onOpenRecord={openRecord} />
             <button className="icon-button" onClick={() => setNotificationsOpen((open) => !open)} aria-label="Notifications" aria-expanded={notificationsOpen}>
               <Icon name="bell" />
