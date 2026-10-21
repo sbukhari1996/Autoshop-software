@@ -20,7 +20,16 @@ const app = express();
 const prisma = new PrismaClient();
 const port = Number(process.env.PORT || 4000);
 
-app.use(cors());
+// Production traffic arrives through Caddy, so trust one proxy hop for the real client IP (login throttling).
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+// Only the listed browser origins may call the API cross-origin. Production is same-origin through Caddy.
+const allowedOrigins = (process.env.CORS_ORIGINS || (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5173,http://127.0.0.1:5173'))
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+app.use(cors({ origin: (origin, callback) => callback(null, !origin || allowedOrigins.includes(origin)) }));
 app.use(express.json());
 app.use(morgan('dev'));
 app.use('/api/auth', createAuthRouter(prisma));

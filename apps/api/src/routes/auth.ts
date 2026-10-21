@@ -3,11 +3,14 @@ import { PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
 import { hashPassword, requireAuth, signToken, verifyPassword, type AuthUser } from '../auth.js';
 import { requiredText } from '../validation.js';
+import { clearLoginFailures, isLoginBlocked, recordLoginFailure } from '../loginLimiter.js';
 
 export function createAuthRouter(prisma: PrismaClient) {
   const router = Router();
 
   router.post('/register', asyncHandler(async (req, res) => {
+    // Public sign-up is closed by default. Set ENABLE_PUBLIC_REGISTRATION=true only for initial setup.
+    if (process.env.ENABLE_PUBLIC_REGISTRATION !== 'true') throw new ApiError(403, 'Self-registration is disabled');
     const email = requiredText(req.body.email, 'email').trim().toLowerCase();
     const name = requiredText(req.body.name, 'name').trim();
     const password = requiredText(req.body.password, 'password').trim();
@@ -27,12 +30,15 @@ export function createAuthRouter(prisma: PrismaClient) {
   router.post('/login', asyncHandler(async (req, res) => {
     const email = requiredText(req.body.email, 'email').trim().toLowerCase();
     const password = requiredText(req.body.password, 'password').trim();
+    const ip = req.ip || 'unknown';
+    if (isLoginBlocked(email, ip)) throw new ApiError(429, 'Too many failed sign-in attempts. Try again in 15 minutes.');
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
+    if (!user || !(await verifyPassword(password, user.password))) {
+      recordLoginFailure(email, ip);
       throw new ApiError(401, 'Invalid email or password');
     }
 
-    if (!(await verifyPassword(password, user.password))) throw new ApiError(401, 'Invalid email or password');
+    clearLoginFailures(email);
     res.json({ user: publicUser(user), token: signToken({ sub: user.id, email: user.email, role: user.role }) });
   }));
 

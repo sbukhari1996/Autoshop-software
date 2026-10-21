@@ -25,8 +25,14 @@ export async function verifyPassword(password: string, stored: string): Promise<
   return expected.length === derived.length && timingSafeEqual(expected, derived);
 }
 
+const devSecret = 'local-development-auth-secret-change-me';
+
+if (process.env.NODE_ENV === 'production' && (!process.env.AUTH_SECRET || process.env.AUTH_SECRET.length < 32)) {
+  throw new Error('AUTH_SECRET must be set to at least 32 characters in production');
+}
+
 function secret() {
-  return process.env.AUTH_SECRET || 'local-development-auth-secret-change-me';
+  return process.env.AUTH_SECRET || devSecret;
 }
 
 export function signToken(payload: Omit<TokenPayload, 'exp'>): string {
@@ -71,7 +77,9 @@ export function requireRole(...allowed: OrganizationRole[]) {
 
 export function protectMutations(prisma: PrismaClient) {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (req.method === 'GET' || req.method === 'OPTIONS' || req.path === '/health' || req.path.startsWith('/auth')) return next();
+    // Every API route requires a signed token and an active membership, reads included.
+    // Only CORS preflight, the health check and the auth routes (which enforce their own rules) are public.
+    if (req.method === 'OPTIONS' || req.path === '/health' || req.path.startsWith('/auth')) return next();
     return requireAuth(req, res, (error) => {
       if (error) return next(error);
       const authUser = res.locals.user as TokenPayload;

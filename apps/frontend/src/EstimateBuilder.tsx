@@ -517,7 +517,9 @@ export function EstimateBuilder({
     setVinLoading(true);
     setVinMessage("");
     try {
-      const response = await fetch(`${API_URL}/vin/${encodeURIComponent(vin)}`);
+      const response = await fetch(`${API_URL}/vin/${encodeURIComponent(vin)}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("repairos_token") || ""}` },
+      });
       const result = await response.json();
       if (!response.ok)
         throw new Error(result.error || "VIN could not be decoded");
