@@ -1,6 +1,7 @@
 import React from "react";
 import { LineItemPresetPicker } from "./LineItemPresetPicker";
 import type { CollisionPresetItem } from "./collisionLineItemPresets";
+import { InvoicePreview, type InvoicePreviewData } from "./InvoicePreview";
 
 type Customer = { id: string; firstName: string; lastName: string; phone: string | null; email?: string | null; address?: string | null };
 type Job = { id: string; jobNumber: string; claimId?: string | null; customer: Customer };
@@ -119,6 +120,24 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
     const onlyBlankLine = lines.length === 1 && !lines[0].description && !lines[0].unitPrice;
     setLines(onlyBlankLine ? presetLines : [...lines, ...presetLines]);
   }
+  const selectedCustomer = customers.find((customer) => customer.id === customerId) || null;
+  const previewData: InvoicePreviewData = {
+    invoiceNumber: number,
+    issueDate,
+    dueDate,
+    billTo: selectedCustomer
+      ? { name: `${selectedCustomer.firstName} ${selectedCustomer.lastName}`, address: selectedCustomer.address, phone: selectedCustomer.phone, email: selectedCustomer.email }
+      : { name: walkInCustomerName, address: walkInCustomerAddress, phone: walkInCustomerPhone, email: walkInCustomerEmail },
+    vehicle: [walkInVehicleYear, walkInVehicleMake, walkInVehicleModel, walkInVehicleTrim].filter(Boolean).join(" "),
+    vin: walkInVehicleVin,
+    plate: [walkInVehicleLicense, walkInVehicleState].filter(Boolean).join(" "),
+    lines: lines.map((line) => ({ description: line.description, quantity: Number(line.quantity || 0), unitPrice: Number(line.unitPrice || 0) })),
+    taxRate: Number(taxRate || 0),
+    subtotal,
+    tax,
+    total,
+    amountPaid: invoice ? invoice.amountPaid : undefined,
+  };
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <form
@@ -126,103 +145,119 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
         onSubmit={mode === "payment" ? recordPayment : mode === "detail" && !editingExisting ? (event) => event.preventDefault() : save}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="modal-heading">
-          <div><p className="eyebrow">{mode === "create" ? "Receivable setup" : "Invoice record"}</p><h2>{mode === "create" ? "Create invoice" : invoice?.invoiceNumber || "Invoice"}</h2></div>
-          {mode === "detail" && editingExisting && <button className="orange-button invoice-edit-save" type="submit" disabled={busy}>{busy ? "Saving..." : "Save changes"}</button>}
-          <button type="button" className="close-button" onClick={onClose}><span aria-hidden="true">×</span></button>
+        <div className="modal-heading invoice-modal-heading">
+          <div><p className="eyebrow">{mode === "create" ? "New invoice" : "Invoice record"}</p><h2>{mode === "create" ? "Create invoice" : invoice?.invoiceNumber || "Invoice"}</h2></div>
+          <div className="invoice-modal-heading-actions">
+            {mode === "detail" && editingExisting && <button className="orange-button invoice-edit-save" type="submit" disabled={busy}>{busy ? "Saving..." : "Save changes"}</button>}
+            <button type="button" className="close-button" onClick={onClose} aria-label="Close"><span aria-hidden="true">×</span></button>
+          </div>
         </div>
         {error && <div className="error-banner">{error}</div>}
-        {mode === "detail" && invoice && !editingExisting ? (
-          <InvoiceDetail invoice={invoice} onEdit={() => setEditingExisting(true)} onPayment={onPayment} request={request} apiUrl={apiUrl} />
-        ) : mode === "payment" && invoice ? (
-          <PaymentForm payment={payment} setPayment={setPayment} balance={invoice.balanceDue} />
-        ) : (
-          <>
-            {!jobId && <>
-              <div className="records-section-heading"><h4>Vehicle details (optional)</h4></div>
-              <div className="vin-control-row">
-                <label>VIN<input value={walkInVehicleVin} onChange={(event) => setWalkInVehicleVin(event.target.value.toUpperCase())} autoComplete="off" /></label>
-                <button type="button" className="secondary-button" onClick={() => void decodeWalkInVin()} disabled={vinLoading}>{vinLoading ? "Decoding..." : "Decode VIN"}</button>
-              </div>
-              {vinMessage && <p className={vinMessage.startsWith("Decoded") ? "vin-success" : "vin-error"}>{vinMessage}</p>}
-              <div className="invoice-form-grid">
-                <label>Year<input type="number" min="1886" step="1" value={walkInVehicleYear} onChange={(event) => setWalkInVehicleYear(event.target.value)} /></label>
-                <label>Make<input value={walkInVehicleMake} onChange={(event) => setWalkInVehicleMake(event.target.value)} /></label>
-                <label>Model<input value={walkInVehicleModel} onChange={(event) => setWalkInVehicleModel(event.target.value)} /></label>
-                <label>Trim<input value={walkInVehicleTrim} onChange={(event) => setWalkInVehicleTrim(event.target.value)} /></label>
-                <label>License plate<input value={walkInVehicleLicense} onChange={(event) => setWalkInVehicleLicense(event.target.value.toUpperCase())} /></label>
-                <label>Plate state<input value={walkInVehicleState} onChange={(event) => setWalkInVehicleState(event.target.value.toUpperCase())} /></label>
-              </div>
-            </>}
-            <div className="invoice-form-grid">
-              <label>Existing customer (optional)
-                <select value={customerId} onChange={(event) => { setCustomerId(event.target.value); setJobId(""); setClaimId(""); }}>
-                  <option value="">No customer (walk-in / parts sale)</option>
-                  {customers.map((customer) => <option value={customer.id} key={customer.id}>{customer.firstName} {customer.lastName}{customer.phone ? ` · ${customer.phone}` : ""}</option>)}
-                </select>
-              </label>
-              <label>Invoice number<input value={number} onChange={(event) => setNumber(event.target.value)} placeholder="Auto-generated if blank" /></label>
-              <label>Issue date<input required type="date" value={issueDate} onChange={(event) => setIssueDate(event.target.value)} /></label>
-              <label>Due date<input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
-              <label>Linked job
-                <select value={jobId} onChange={(event) => { setJobId(event.target.value); const job = availableJobs.find((item) => item.id === event.target.value); if (job?.claimId) setClaimId(job.claimId); }} disabled={!customerId}>
-                  <option value="">No linked job</option>
-                  {availableJobs.map((job) => <option value={job.id} key={job.id}>{job.jobNumber}</option>)}
-                </select>
-              </label>
-              <label>Linked claim
-                <select value={claimId} onChange={(event) => setClaimId(event.target.value)} disabled={!customerId}>
-                  <option value="">No linked claim</option>
-                  {availableClaims.map((claim) => <option value={claim.id} key={claim.id}>{claim.claimNumber || "Unnumbered claim"}</option>)}
-                </select>
-              </label>
-              <label>Tax rate (%)<input min="0" step="0.001" type="number" value={taxRate} onChange={(event) => setTaxRate(event.target.value)} /></label>
-            </div>
-            {!customerId && <>
-              <div className="records-section-heading"><h4>Walk-in customer details</h4></div>
-              <div className="invoice-form-grid">
-                <label>Customer name<input value={walkInCustomerName} onChange={(event) => setWalkInCustomerName(event.target.value)} autoComplete="name" /></label>
-                <label>Phone<input type="tel" value={walkInCustomerPhone} onChange={(event) => setWalkInCustomerPhone(event.target.value)} autoComplete="tel" /></label>
-                <label>Email<input type="email" value={walkInCustomerEmail} onChange={(event) => setWalkInCustomerEmail(event.target.value)} autoComplete="email" /></label>
-                <label>Address<input value={walkInCustomerAddress} onChange={(event) => setWalkInCustomerAddress(event.target.value)} autoComplete="street-address" /></label>
-              </div>
-            </>}
-            <div className="invoice-lines">
-              <div className="records-section-heading">
-                <h4>Line items</h4>
-                <div className="estimate-actions">
-                  <button type="button" className="text-button" onClick={() => setPresetsOpen(true)}>Select from library</button>
-                  <button type="button" className="text-button" onClick={() => setLines([...lines, freshLine()])}>Add line +</button>
+        <div className={`invoice-split${mode === "payment" ? " is-single" : ""}`}>
+          <div className="invoice-form-pane">
+            {mode === "detail" && invoice && !editingExisting ? (
+              <InvoiceDetail invoice={invoice} onEdit={() => setEditingExisting(true)} onPayment={onPayment} request={request} apiUrl={apiUrl} />
+            ) : mode === "payment" && invoice ? (
+              <PaymentForm payment={payment} setPayment={setPayment} balance={invoice.balanceDue} />
+            ) : (
+              <>
+                {!jobId && <>
+                  <div className="records-section-heading"><h4>Vehicle details (optional)</h4></div>
+                  <div className="vin-control-row">
+                    <label>VIN<input value={walkInVehicleVin} onChange={(event) => setWalkInVehicleVin(event.target.value.toUpperCase())} autoComplete="off" /></label>
+                    <button type="button" className="secondary-button" onClick={() => void decodeWalkInVin()} disabled={vinLoading}>{vinLoading ? "Decoding..." : "Decode VIN"}</button>
+                  </div>
+                  {vinMessage && <p className={vinMessage.startsWith("Decoded") ? "vin-success" : "vin-error"}>{vinMessage}</p>}
+                  <div className="invoice-form-grid">
+                    <label>Year<input type="number" min="1886" step="1" value={walkInVehicleYear} onChange={(event) => setWalkInVehicleYear(event.target.value)} /></label>
+                    <label>Make<input value={walkInVehicleMake} onChange={(event) => setWalkInVehicleMake(event.target.value)} /></label>
+                    <label>Model<input value={walkInVehicleModel} onChange={(event) => setWalkInVehicleModel(event.target.value)} /></label>
+                    <label>Trim<input value={walkInVehicleTrim} onChange={(event) => setWalkInVehicleTrim(event.target.value)} /></label>
+                    <label>License plate<input value={walkInVehicleLicense} onChange={(event) => setWalkInVehicleLicense(event.target.value.toUpperCase())} /></label>
+                    <label>Plate state<input value={walkInVehicleState} onChange={(event) => setWalkInVehicleState(event.target.value.toUpperCase())} /></label>
+                  </div>
+                </>}
+                <div className="invoice-form-grid">
+                  <label>Existing customer (optional)
+                    <select value={customerId} onChange={(event) => { setCustomerId(event.target.value); setJobId(""); setClaimId(""); }}>
+                      <option value="">No customer (walk-in / parts sale)</option>
+                      {customers.map((customer) => <option value={customer.id} key={customer.id}>{customer.firstName} {customer.lastName}{customer.phone ? ` · ${customer.phone}` : ""}</option>)}
+                    </select>
+                  </label>
+                  <label>Invoice number<input value={number} onChange={(event) => setNumber(event.target.value)} placeholder="Auto-generated if blank" /></label>
+                  <label>Issue date<input required type="date" value={issueDate} onChange={(event) => setIssueDate(event.target.value)} /></label>
+                  <label>Due date<input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
+                  <label>Linked job
+                    <select value={jobId} onChange={(event) => { setJobId(event.target.value); const job = availableJobs.find((item) => item.id === event.target.value); if (job?.claimId) setClaimId(job.claimId); }} disabled={!customerId}>
+                      <option value="">No linked job</option>
+                      {availableJobs.map((job) => <option value={job.id} key={job.id}>{job.jobNumber}</option>)}
+                    </select>
+                  </label>
+                  <label>Linked claim
+                    <select value={claimId} onChange={(event) => setClaimId(event.target.value)} disabled={!customerId}>
+                      <option value="">No linked claim</option>
+                      {availableClaims.map((claim) => <option value={claim.id} key={claim.id}>{claim.claimNumber || "Unnumbered claim"}</option>)}
+                    </select>
+                  </label>
+                  <label>Tax rate (%)<input min="0" step="0.001" type="number" value={taxRate} onChange={(event) => setTaxRate(event.target.value)} /></label>
                 </div>
-              </div>
-              <LineItemPresetPicker open={presetsOpen} onClose={() => setPresetsOpen(false)} onAdd={addPresetLines} />
-              <div className="invoice-line-list">
-                {lines.map((line, index) => <div className="invoice-line" key={index}>
-                  <input required placeholder="Description" value={line.description} onChange={(event) => updateLine(index, "description", event.target.value)} />
-                  <input required min="0.01" step="0.01" type="number" placeholder="Qty" value={line.quantity} onChange={(event) => updateLine(index, "quantity", event.target.value)} />
-                  <input required min="0" step="0.01" type="number" placeholder="Unit price" value={line.unitPrice} onChange={(event) => updateLine(index, "unitPrice", event.target.value)} />
-                  <strong>{money(Number(line.quantity || 0) * Number(line.unitPrice || 0))}</strong>
-                  {lines.length > 1 && <button type="button" className="remove-line" onClick={() => setLines(lines.filter((_, lineIndex) => lineIndex !== index))}>×</button>}
-                </div>)}
-              </div>
-              <div className="invoice-totals">
-                <span>SUBTOTAL <b>{money(subtotal)}</b></span>
-                <span>SALES TAX <b>{money(tax)}</b></span>
-                <strong><span>TOTAL COST OF REPAIRS</span><b>{money(total)}</b></strong>
-                {invoice && <><span>AMOUNT PAID <b>{money(invoice.amountPaid)}</b></span><strong>BALANCE DUE <b>{money(Math.max(0, total - invoice.amountPaid))}</b></strong></>}
-              </div>
+                {!customerId && <>
+                  <div className="records-section-heading"><h4>Walk-in customer details</h4></div>
+                  <div className="invoice-form-grid">
+                    <label>Customer name<input value={walkInCustomerName} onChange={(event) => setWalkInCustomerName(event.target.value)} autoComplete="name" /></label>
+                    <label>Phone<input type="tel" value={walkInCustomerPhone} onChange={(event) => setWalkInCustomerPhone(event.target.value)} autoComplete="tel" /></label>
+                    <label>Email<input type="email" value={walkInCustomerEmail} onChange={(event) => setWalkInCustomerEmail(event.target.value)} autoComplete="email" /></label>
+                    <label>Address<input value={walkInCustomerAddress} onChange={(event) => setWalkInCustomerAddress(event.target.value)} autoComplete="street-address" /></label>
+                  </div>
+                </>}
+                <div className="invoice-lines">
+                  <div className="records-section-heading">
+                    <h4>Line items</h4>
+                    <div className="estimate-actions">
+                      <button type="button" className="text-button" onClick={() => setPresetsOpen(true)}>Select from library</button>
+                      <button type="button" className="text-button" onClick={() => setLines([...lines, freshLine()])}>+ Add line</button>
+                    </div>
+                  </div>
+                  <LineItemPresetPicker open={presetsOpen} onClose={() => setPresetsOpen(false)} onAdd={addPresetLines} />
+                  <div className="invoice-line-head" aria-hidden="true"><span>Description</span><span>Qty</span><span>Unit price</span><span>Amount</span><span /></div>
+                  <div className="invoice-line-list">
+                    {lines.map((line, index) => <div className="invoice-line" key={index}>
+                      <input required placeholder="Description" aria-label={`Line ${index + 1} description`} value={line.description} onChange={(event) => updateLine(index, "description", event.target.value)} />
+                      <input required min="0.01" step="0.01" type="number" placeholder="Qty" aria-label={`Line ${index + 1} quantity`} value={line.quantity} onChange={(event) => updateLine(index, "quantity", event.target.value)} />
+                      <input required min="0" step="0.01" type="number" placeholder="Unit price" aria-label={`Line ${index + 1} unit price`} value={line.unitPrice} onChange={(event) => updateLine(index, "unitPrice", event.target.value)} />
+                      <strong>{money(Number(line.quantity || 0) * Number(line.unitPrice || 0))}</strong>
+                      {lines.length > 1 ? <button type="button" className="remove-line" aria-label={`Remove line ${index + 1}`} onClick={() => setLines(lines.filter((_, lineIndex) => lineIndex !== index))}>×</button> : <span />}
+                    </div>)}
+                  </div>
+                  <div className="invoice-totals">
+                    <span>Subtotal <b>{money(subtotal)}</b></span>
+                    <span>Sales tax <b>{money(tax)}</b></span>
+                    <strong><span>Total cost of repairs</span><b>{money(total)}</b></strong>
+                  </div>
+                </div>
+              </>
+            )}
+            {mode === "detail" && !editingExisting && invoice && <p className="bookkeeping-note">Payments recorded here automatically populate Bookkeeping as income.</p>}
+            <div className="invoice-footer">
+              {mode === "create" && <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>}
+              {!(mode === "detail" && editingExisting) && <button
+                type={mode === "detail" && !editingExisting ? "button" : "submit"}
+                className="orange-button"
+                onClick={mode === "detail" && !editingExisting ? onClose : undefined}
+                disabled={busy}
+              >
+                {busy ? "Saving..." : mode === "payment" ? "Record payment" : mode === "create" ? "Save invoice" : mode === "detail" ? "Close" : "Save changes"}
+              </button>}
             </div>
-          </>
-        )}
-        {mode === "detail" && !editingExisting && invoice && <p className="bookkeeping-note">Payments recorded here automatically populate Bookkeeping as income.</p>}
-        {!(mode === "detail" && editingExisting) && <button
-          type={mode === "detail" && !editingExisting ? "button" : "submit"}
-          className="orange-button submit-button"
-          onClick={mode === "detail" && !editingExisting ? onClose : undefined}
-          disabled={busy}
-        >
-          {busy ? "Saving..." : mode === "payment" ? "Record payment" : mode === "create" ? "Create invoice" : mode === "detail" ? "Save changes" : "Close"}
-        </button>}
+          </div>
+          {mode !== "payment" && <aside className="invoice-preview-pane">
+            <div className="invoice-preview-toolbar">
+              <div><span>Live preview</span><small>Updates as you type. This is how the printed invoice will look.</small></div>
+              <button type="button" className="secondary-button" onClick={() => window.print()}>Print preview</button>
+            </div>
+            <InvoicePreview data={previewData} />
+          </aside>}
+        </div>
       </form>
     </div>
   );
@@ -287,7 +322,7 @@ function InvoiceReceipts({ invoiceId, initialDocuments, request, apiUrl }: { inv
   async function previewReceipt(receipt: InvoiceDocument) {
     setError("");
     try {
-      const response = await fetch(new URL(`invoices/${invoiceId}/documents/${receipt.id}/download`, `${apiUrl.replace(/\/$/, "")}/`).toString(), { headers: { Authorization: `******"repairos_token") || ""}` } });
+      const response = await fetch(new URL(`invoices/${invoiceId}/documents/${receipt.id}/download`, `${apiUrl.replace(/\/$/, "")}/`).toString(), { headers: { Authorization: `Bearer ${localStorage.getItem("repairos_token") || ""}` } });
       if (!response.ok) throw new Error("Unable to open receipt");
       const blob = await response.blob();
       if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);

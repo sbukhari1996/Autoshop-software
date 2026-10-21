@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "./styles.css";
+import "./ui-refresh.css";
 import { EstimateBuilder } from "./EstimateBuilder";
 import { BookkeepingView } from "./BookkeepingView";
 import { InvoiceView, type Invoice } from "./InvoiceView";

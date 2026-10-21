@@ -489,33 +489,53 @@ export function BookkeepingView({
       setError(paymentError instanceof Error ? paymentError.message : "Unable to undo recurring expense payment");
     }
   }
+  function closeRowMenu(event: React.MouseEvent<HTMLButtonElement>) {
+    (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open");
+  }
+  async function deleteRecurring(item: RecurringExpense) {
+    if (!window.confirm(`Delete recurring expense "${item.name}"?`)) return;
+    setError("");
+    try {
+      await request(`/finance/recurring/${item.id}`, { method: "DELETE" });
+      await onChanged();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Unable to delete recurring expense");
+    }
+  }
   function renderRecurringRows(items: RecurringExpense[], paymentPeriod: string) {
     if (!items.length) return <div className="empty-state">No recurring expenses scheduled for this month.</div>;
     return items.map((item) => {
       const payment = item.payments.find((record) => record.period === paymentPeriod);
+      const amount = payment?.amount ?? recurringAmountInMonth(item, paymentPeriod);
+      const status = !item.active ? "paused" : payment ? "paid" : "due";
+      const statusLabel = status === "paused" ? "Paused" : status === "paid" ? "Paid" : "Due";
       return (
-        <div className="recurring-row" key={`${paymentPeriod}-${item.id}`}>
+        <div className={`recurring-row is-${status}`} key={`${paymentPeriod}-${item.id}`}>
           <div className="recurring-name">
-            <span className={payment ? "active-dot" : "inactive-dot"} />
-            <div>
+            <span className={`recurring-dot is-${status}`} aria-hidden="true" />
+            <div className="recurring-text">
               <strong>{item.name}</strong>
-              <small>{item.category || "General"} · {item.frequency}</small>
-              {payment && <small>Paid {dateValue(payment.paidAt)}</small>}
-              {item.notes && <small>{item.notes}</small>}
+              <small>{item.category || "General"} · {item.frequency}{payment ? ` · paid ${dateValue(payment.paidAt)}` : ""}</small>
+              {item.notes && <small className="recurring-notes">{item.notes}</small>}
             </div>
           </div>
-          <strong>{currency(payment?.amount ?? recurringAmountInMonth(item, paymentPeriod))}</strong>
-          <button
-            type="button"
-            className={payment ? "toggle-button recurring-paid" : "secondary-button"}
-            disabled={!item.active}
-            onClick={() => void (payment ? unmarkRecurringPaid(item, payment) : markRecurringPaid(item, paymentPeriod))}
-          >
-            {!item.active ? "Paused" : payment ? "Paid · undo" : "Mark paid"}
-          </button>
-          <button type="button" className="toggle-button" onClick={() => void toggleRecurring(item)}>{item.active ? "Active" : "Resume"}</button>
-          <button type="button" className="secondary-button" onClick={() => openRecurringForm(item)}>Edit</button>
-          <button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete recurring expense "${item.name}"?`)) return; setError(""); try { await request(`/finance/recurring/${item.id}`, { method: "DELETE" }); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete recurring expense"); } }}>Delete</button>
+          <span className="recurring-amount">{currency(amount)}</span>
+          <span className={`recurring-status is-${status}`}>{statusLabel}</span>
+          <div className="recurring-action">
+            {payment
+              ? <button type="button" className="secondary-button" onClick={() => void unmarkRecurringPaid(item, payment)}>Undo payment</button>
+              : item.active
+                ? <button type="button" className="orange-button" onClick={() => void markRecurringPaid(item, paymentPeriod)}>Mark paid</button>
+                : <button type="button" className="secondary-button" disabled>Paused</button>}
+          </div>
+          <details className="row-menu">
+            <summary aria-label={`More actions for ${item.name}`}>⋯</summary>
+            <div className="row-menu-panel">
+              <button type="button" onClick={(event) => { closeRowMenu(event); openRecurringForm(item); }}>Edit</button>
+              <button type="button" onClick={(event) => { closeRowMenu(event); void toggleRecurring(item); }}>{item.active ? "Pause" : "Resume"}</button>
+              <button type="button" className="is-danger" onClick={(event) => { closeRowMenu(event); void deleteRecurring(item); }}>Delete</button>
+            </div>
+          </details>
         </div>
       );
     });
