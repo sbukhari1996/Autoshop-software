@@ -54,6 +54,8 @@ header.top { display: flex; justify-content: space-between; gap: 24px; flex-wrap
   font: 700 34px/1.05 "Barlow Condensed", "Arial Narrow", sans-serif; letter-spacing: .02em; text-transform: uppercase; color: var(--navy); padding: 0;
 }
 .co-name::placeholder, .ph::placeholder { color: #A7B0BC; }
+.logo { width: 104px; height: auto; flex: none; }
+@media print { .logo { width: 88px; } }
 .co-meta { display: grid; gap: 2px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
 .co-meta input { border: 0; background: transparent; padding: 0; font-size: 12.5px; color: var(--muted); width: 100%; }
 
@@ -219,11 +221,13 @@ tbody tr:nth-child(even) td.chk, tbody tr:nth-child(even) td.svc-cell { backgrou
 
     <header class="top">
       <div class="brand">
+        <img class="logo" src="__LOGO_SRC__" alt="Mastercraft Auto Repair &amp; Collision logo">
         <div style="min-width:0">
-          <textarea class="co-name" rows="2" aria-label="Company name">PREMIER AUTOMOTIVE TOWING INC.</textarea>
+          <textarea class="co-name" rows="2" aria-label="Company name">Mastercraft Auto Repair &amp; Collision</textarea>
           <div class="co-meta">
-            <input type="text" value="3199 Albany Post Rd, Buchanan, NY 10511" aria-label="Company address">
-            <input type="text" value="Phone: +1 347-552-4686" aria-label="Company phone">
+            <input type="text" value="38-21 23rd St, Long Island City, NY, 11101" aria-label="Company address">
+            <input type="text" value="Phone: +1 718-578-4563" aria-label="Company phone">
+            <input type="text" value="Email: Shop@mastercraftautony.com" aria-label="Company email">
           </div>
         </div>
       </div>

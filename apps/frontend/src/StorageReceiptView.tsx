@@ -1,5 +1,6 @@
 import React from "react";
-import receiptHtml from "./assets/storage-receipt.html?raw";
+import receiptTemplate from "./assets/storage-receipt.html?raw";
+import logoUrl from "./assets/mastercraft-logo.png";
 import "./TowingReceiptView.css";
 import "./StorageReceiptView.css";
 
@@ -63,8 +64,8 @@ type Prefill = {
   shopAddress?: string;
 };
 
-const SHOP_NAME = "PREMIER AUTOMOTIVE TOWING INC.";
-const SHOP_ADDRESS = "3199 Albany Post Rd, Buchanan, NY 10511";
+const SHOP_NAME = "Mastercraft Auto Repair & Collision";
+const SHOP_ADDRESS = "38-21 23rd St, Long Island City, NY, 11101";
 
 // "2026-08-07" or a full ISO timestamp -> local calendar date (no timezone shift).
 function calendarDate(value?: string | null): Date | null {
@@ -137,6 +138,7 @@ type RequestFn = <T>(path: string, options?: RequestInit) => Promise<T>;
 
 export function StorageReceiptView({ jobs, request, onRefresh }: { jobs: StorageJob[]; request: RequestFn; onRefresh: () => Promise<void> }) {
   const frameRef = React.useRef<HTMLIFrameElement>(null);
+  const receiptHtml = React.useMemo(() => receiptTemplate.replace("__LOGO_SRC__", logoUrl), []);
   const [jobId, setJobId] = React.useState("");
   const [billTo, setBillTo] = React.useState<BillTo>("insurance");
   const [busy, setBusy] = React.useState(false);
