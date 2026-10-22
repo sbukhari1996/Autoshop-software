@@ -1,5 +1,6 @@
 import React from "react";
 import { downloadMonthlyStatement } from "./monthlyStatement";
+import "./ledger-mobile.css";
 
 type FinanceEntry = {
   id: string;
@@ -763,7 +764,7 @@ export function BookkeepingView({
                       <span>{item.type === "income" ? "+" : "-"}{currency(item.amount)}</span>
                     </td>
                     <td data-label="Description">
-                      <strong>{item.description}</strong>
+                      <span className="ledger-desc"><span className={`ledger-type-icon ${item.type}`}><LedgerIcon type={item.type} /></span><strong>{item.description}</strong></span>
                       {item.notes && (
                         <small className="table-subtext">{item.notes}</small>
                       )}
@@ -795,6 +796,59 @@ export function BookkeepingView({
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="ledger-cards">
+            {filteredEntries.map((item) => (
+              <article key={item.id} className="ledger-card">
+                <label className="ledger-card-check">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${item.type}: ${item.description}`}
+                    checked={selectedEntryIds.includes(item.id)}
+                    onChange={(event) => setSelectedEntryIds((current) => event.target.checked
+                      ? [...current, item.id]
+                      : current.filter((id) => id !== item.id))}
+                  />
+                </label>
+                <button type="button" className="ledger-card-main" onClick={() => openEntryForm(item)} aria-label={`Edit ${item.type}: ${item.description}`}>
+                  <span className={`ledger-type-icon ${item.type}`}><LedgerIcon type={item.type} /></span>
+                  <span className="ledger-card-text">
+                    <strong>{item.description}</strong>
+                    <small>
+                      {dateValue(item.entryDate)} · {item.category || "Uncategorized"}
+                      {item.paymentMethod ? ` · ${item.paymentMethod.replace("_", " ")}` : ""}
+                    </small>
+                  </span>
+                  <span className={`ledger-card-amount ${item.type === "income" ? "finance-income" : "finance-expense"}`}>
+                    {item.type === "income" ? "+" : "-"}{currency(item.amount)}
+                  </span>
+                </button>
+                <div className="ledger-card-foot">
+                  <span className="ledger-card-receipts">
+                    {item.documents.length
+                      ? `${item.documents.length} receipt${item.documents.length === 1 ? "" : "s"}`
+                      : item.type === "expense" ? "No receipt yet" : ""}
+                  </span>
+                  <button type="button" className="secondary-button" onClick={() => openEntryForm(item)}>Edit</button>
+                  <button
+                    type="button"
+                    className="danger-button compact-danger"
+                    onClick={async () => {
+                      if (!window.confirm(`Delete ledger entry "${item.description}"?`)) return;
+                      setError("");
+                      try {
+                        await request(`/finance/entries/${item.id}`, { method: "DELETE" });
+                        await onChanged();
+                      } catch (deleteError) {
+                        setError(deleteError instanceof Error ? deleteError.message : "Unable to delete ledger entry");
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </article>
+            ))}
           </div>
           {!filteredEntries.length && (
             <div className="empty-state">
@@ -1234,6 +1288,16 @@ export function BookkeepingView({
     </div>
   );
 }
+// Arrow icon for a ledger entry: up for income, down for expense.
+function LedgerIcon({ type }: { type: "income" | "expense" }) {
+  const path = type === "income" ? "M12 19V5M5 12l7-7 7 7" : "M12 5v14M19 12l-7 7-7-7";
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+      <path d={path} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function Metric({
   label,
   value,

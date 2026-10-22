@@ -1,0 +1,85 @@
+/* Ledger: type icons on desktop, and phone-friendly transaction cards. */
+
+.ledger-type-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-right: 8px;
+  border-radius: 999px;
+  vertical-align: middle;
+  flex: none;
+}
+.ledger-type-icon.income { background: #e3f6ea; color: #15803d; }
+.ledger-type-icon.expense { background: #fde9df; color: #c2410c; }
+
+.ledger-cards { display: none; }
+
+@media (max-width: 760px) {
+  .finance-table-wrap { display: none; }
+
+  .ledger-cards { display: grid; gap: 10px; }
+
+  .ledger-card {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 6px 10px;
+    padding: 12px;
+    background: #fff;
+    border: 1px solid #e3eae8;
+    border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+  }
+  .ledger-card-check { align-self: start; padding-top: 8px; }
+  .ledger-card-check input { width: 18px; height: 18px; }
+
+  .ledger-card-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .ledger-card-main .ledger-type-icon { width: 34px; height: 34px; margin-right: 0; }
+  .ledger-card-text { display: grid; gap: 2px; min-width: 0; flex: 1; }
+  .ledger-card-text strong { color: #1f2a30; font-size: .97rem; overflow-wrap: anywhere; }
+  .ledger-card-text small { color: #6b7b82; font-size: .78rem; overflow-wrap: anywhere; }
+  .ledger-card-amount {
+    margin-left: auto;
+    padding-left: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .98rem;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .ledger-card .finance-income { color: #15803d !important; }
+  .ledger-card .finance-expense { color: #c2410c !important; }
+
+  .ledger-card-foot {
+    grid-column: 2;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed #e3eae8;
+  }
+  .ledger-card-receipts { flex: 1; min-width: 0; color: #6b7b82; font-size: .78rem; }
+  .ledger-card-foot button {
+    min-height: 38px;
+    padding: 0 14px;
+    border-radius: 10px;
+    font: inherit;
+    font-size: .84rem;
+    cursor: pointer;
+  }
+}
+
+.ledger-desc { display: inline-flex; align-items: center; max-width: 100%; }
