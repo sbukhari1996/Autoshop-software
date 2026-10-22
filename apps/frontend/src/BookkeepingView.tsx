@@ -654,7 +654,7 @@ export function BookkeepingView({
         />
       </section>
       <div className="dashboard-grid finance-grid">
-        <section className="surface">
+        <section className="surface ledger-panel">
           <div className="surface-heading">
             <div>
               <h2>Ledger</h2>
@@ -687,14 +687,19 @@ export function BookkeepingView({
                   {availableYears.map((year) => <option value={year} key={year}>{year}</option>)}
                 </select>
               </label>
-              <label>
-                Type
-                <select value={ledgerType} onChange={(event) => setLedgerType(event.target.value as "all" | FinanceEntry["type"])} aria-label="Filter ledger by transaction type">
-                  <option value="all">Income &amp; expenses</option>
-                  <option value="income">Income only</option>
-                  <option value="expense">Expenses only</option>
-                </select>
-              </label>
+              <div className="ledger-type-filter" role="group" aria-label="Filter ledger by transaction type">
+                {(["all", "income", "expense"] as const).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={ledgerType === option ? "active" : ""}
+                    aria-pressed={ledgerType === option}
+                    onClick={() => setLedgerType(option)}
+                  >
+                    {option === "all" ? "All" : option === "income" ? "Income" : "Expenses"}
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
                 className="secondary-button"
@@ -824,11 +829,29 @@ export function BookkeepingView({
                   </span>
                 </button>
                 <div className="ledger-card-foot">
-                  <span className="ledger-card-receipts">
-                    {item.documents.length
-                      ? `${item.documents.length} receipt${item.documents.length === 1 ? "" : "s"}`
-                      : item.type === "expense" ? "No receipt yet" : ""}
-                  </span>
+                  <div className="ledger-card-receipts">
+                    {item.documents.map((receipt) => (
+                      <span className="ledger-receipt-chip" key={receipt.id}>
+                        <button type="button" onClick={() => void accessEntryReceipt(item.id, receipt, false)}>
+                          {receipt.fileName}
+                        </button>
+                      </span>
+                    ))}
+                    {item.type === "expense" && (
+                      <label className="ledger-attach">
+                        {uploadingReceiptFor === item.id ? "Uploading…" : item.documents.length ? "Add receipt" : "Attach receipt"}
+                        <input
+                          type="file"
+                          disabled={uploadingReceiptFor === item.id}
+                          onChange={(event) => {
+                            const file = event.currentTarget.files?.[0];
+                            event.currentTarget.value = "";
+                            if (file) void uploadEntryReceipt(item.id, file);
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
                   <button type="button" className="secondary-button" onClick={() => openEntryForm(item)}>Edit</button>
                   <button
                     type="button"
