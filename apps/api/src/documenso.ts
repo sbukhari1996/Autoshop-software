@@ -11,6 +11,9 @@ export interface RepairAuthorizationSubmission {
   signerEmail: string;
   signerName: string;
   fieldPlacements?: AuthorizationFieldPlacement[];
+  documentTitle?: string;
+  emailSubject?: string;
+  emailMessage?: string;
 }
 
 const defaultDocumensoApiUrl = 'http://documenso:3000/api/v2';
@@ -68,7 +71,7 @@ export function buildDocumensoPayload(submission: RepairAuthorizationSubmission)
   }));
   return {
     type: 'DOCUMENT',
-    title: `Repair authorization ${submission.jobNumber}`,
+    title: submission.documentTitle ?? `Repair authorization ${submission.jobNumber}`,
     externalId: submission.authorizationId,
     visibility: 'ADMIN',
     recipients: [{
@@ -78,8 +81,8 @@ export function buildDocumensoPayload(submission: RepairAuthorizationSubmission)
       fields,
     }],
     meta: {
-      subject: `Please sign repair authorization ${submission.jobNumber}`,
-      message: 'Please review and sign the attached repair authorization.',
+      subject: submission.emailSubject ?? `Please sign repair authorization ${submission.jobNumber}`,
+      message: submission.emailMessage ?? 'Please review and sign the attached repair authorization.',
     },
   };
 }

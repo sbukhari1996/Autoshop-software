@@ -34,7 +34,7 @@ function coerce<T>(template: T, value: unknown): T {
   return template;
 }
 
-function mergeInput(defaults: Mv104Input, body: unknown): Mv104Input {
+export function mergeInput(defaults: Mv104Input, body: unknown): Mv104Input {
   const source = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>;
   const merged = coerce(defaults, source) as Mv104Input;
   merged.location.compass = Array.isArray(source.location && (source.location as Record<string, unknown>).compass)
@@ -55,6 +55,14 @@ function routeParam(req: { params: Record<string, string | string[]> }, name: st
   const value = req.params[name];
   if (typeof value !== 'string' || !value) throw new ApiError(400, `${name} is required`);
   return value;
+}
+
+// The claim (or a blank source for standalone forms) that prefills an MV-104.
+export async function loadMv104Source(prisma: PrismaClient, claimId: string | null): Promise<Mv104ClaimSource & { id: string }> {
+  if (!claimId || claimId === STANDALONE_MV104) return { ...blankClaim, id: STANDALONE_MV104 };
+  const claim = await prisma.claim.findUnique({ where: { id: claimId }, include: { customer: true } });
+  if (!claim) throw new ApiError(404, 'Claim not found');
+  return claim;
 }
 
 export function createMv104Router(prisma: PrismaClient) {

@@ -688,3 +688,22 @@ model InvoiceDocument {
   @@index([invoiceId])
   @@map("invoice_documents")
 }
+
+model Mv104Form {
+  id                  String    @id @default(cuid())
+  claimId             String?
+  title               String
+  status              String    @default("draft")
+  input               String
+  signerName          String?
+  signerEmail         String?
+  documensoEnvelopeId String?   @unique
+  documensoStatus     String?
+  sentAt              DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([claimId])
+  @@map("mv104_forms")
+}

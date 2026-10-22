@@ -92,3 +92,15 @@
   .mv-footer { flex-direction: column-reverse; }
   .mv-footer button { width: 100%; }
 }
+
+.mv-sign { border-top: 1px solid #e5e7eb; padding-top: 12px; margin-top: 14px; }
+.mv-sign h3 { font-size: 14px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.04em; color: #1f2937; }
+.mv-sign-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; margin-bottom: 10px; }
+.mv-sign-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.mv-sign-actions button { min-height: 40px; padding: 0 16px; border-radius: 8px; font: inherit; font-size: 14px; cursor: pointer; border: 1px solid #d1d5db; background: #fff; color: #111827; }
+.mv-sign-actions .primary-button { background: #1d4ed8; border-color: #1d4ed8; color: #fff; font-weight: 600; }
+.mv-sign-actions button:disabled { opacity: 0.6; cursor: wait; }
+.mv-saved-list { list-style: none; margin: 0; padding: 0; }
+.mv-saved-list li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid #e5e7eb; flex-wrap: wrap; }
+.mv-saved-list button { min-height: 36px; padding: 0 14px; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer; border: 1px solid #d1d5db; background: #fff; }
+@media (max-width: 720px) { .mv-sign-grid { grid-template-columns: minmax(0, 1fr); } }

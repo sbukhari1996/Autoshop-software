@@ -16,6 +16,16 @@ type Mv104Input = {
   signing: Record<string, string | boolean>;
 };
 type Defaults = { input: Mv104Input; codes: Codes };
+export type SavedForm = { id: string; title: string; status: string; claimId: string | null; signerName: string | null; signerEmail: string | null; input: Mv104Input };
+const EDITABLE_STATUSES = ["draft", "send_failed"];
+export const STATUS_LABELS: Record<string, string> = {
+  draft: "Draft",
+  sending: "Sending…",
+  sent: "Sent, waiting for the signer",
+  signed: "Signed",
+  send_failed: "Send failed, you can try again",
+  send_unknown: "Outcome unknown, check Documenso before retrying",
+};
 
 const STATES = ["NY", "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VA", "VT", "WA", "WV", "WI", "WY"];
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -73,19 +83,24 @@ function Check({ label, checked, onChange }: { label: string; checked: boolean; 
   );
 }
 
-export function Mv104Form({ claimId, apiUrl, onClose }: { claimId: string; apiUrl: string; onClose: () => void }) {
+export function Mv104Form({ claimId, apiUrl, onClose, saved, onSaved }: { claimId: string; apiUrl: string; onClose: () => void; saved?: SavedForm | null; onSaved?: () => void }) {
   const [defaults, setDefaults] = React.useState<Defaults | null>(null);
   const [input, setInput] = React.useState<Mv104Input | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
   const [loadError, setLoadError] = React.useState("");
+  const [formId, setFormId] = React.useState<string | null>(saved?.id ?? null);
+  const [status, setStatus] = React.useState<string>(saved?.status ?? "draft");
+  const [notice, setNotice] = React.useState("");
+  const [signerName, setSignerName] = React.useState(saved?.signerName ?? "");
+  const [signerEmail, setSignerEmail] = React.useState(saved?.signerEmail ?? "");
 
   React.useEffect(() => {
     let cancelled = false;
     const token = localStorage.getItem("repairos_token") || "";
     fetch(`${apiUrl}/claims/${claimId}/mv104/defaults`, { headers: { Authorization: `Bearer ${token}` } })
       .then(async (r) => { const body = await r.json(); if (!r.ok) throw new Error(body.error || "Unable to load MV-104"); return body as Defaults; })
-      .then((data) => { if (!cancelled) { setDefaults(data); setInput(data.input); } })
+      .then((data) => { if (!cancelled) { setDefaults(data); setInput(saved ? saved.input : data.input); } })
       .catch((e: Error) => { if (!cancelled) setLoadError(e.message); });
     return () => { cancelled = true; };
   }, [apiUrl, claimId]);
@@ -110,6 +125,95 @@ export function Mv104Form({ claimId, apiUrl, onClose }: { claimId: string; apiUr
   const cb = input.crash as Record<string, boolean>;
   const l = input.location as Record<string, string>;
   const lb = input.location as Record<string, boolean>;
+
+  const locked = formId !== null && !EDITABLE_STATUSES.includes(status);
+
+  function authHeaders(json = true): Record<string, string> {
+    const token = localStorage.getItem("repairos_token") || "";
+    return json ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` } : { Authorization: `Bearer ${token}` };
+  }
+  async function readJson(response: Response) {
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error || `Request failed (HTTP ${response.status})`);
+    return body;
+  }
+  const failure = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
+
+  // Creates the saved MV-104 on first save, then updates it.
+  async function saveDraft(): Promise<string | null> {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = formId
+        ? await fetch(`${apiUrl}/mv104-forms/${formId}`, { method: "PUT", headers: authHeaders(), body: JSON.stringify({ input }) })
+        : await fetch(`${apiUrl}/mv104-forms`, { method: "POST", headers: authHeaders(), body: JSON.stringify({ claimId, input }) });
+      const body = await readJson(response);
+      setFormId(body.id);
+      setNotice("Draft saved. Reopen it from the MV-104 page to keep editing.");
+      onSaved?.();
+      return body.id as string;
+    } catch (e) {
+      setError(failure(e, "Unable to save the draft"));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendForSignature() {
+    if (!signerName.trim() || !signerEmail.trim()) { setError("Enter the signer's name and email."); return; }
+    const id = formId ?? (await saveDraft());
+    if (!id) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${apiUrl}/mv104-forms/${id}/send`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ name: signerName.trim(), email: signerEmail.trim() }),
+      });
+      const body = await readJson(response);
+      setStatus(body.status);
+      setNotice("Sent for signature. Use Check status to see when it is signed.");
+      onSaved?.();
+    } catch (e) {
+      setError(failure(e, "Unable to send for signature"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshStatus() {
+    if (!formId) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const body = await readJson(await fetch(`${apiUrl}/mv104-forms/${formId}/refresh`, { method: "POST", headers: authHeaders() }));
+      setStatus(body.status);
+      setNotice(body.status === "signed" ? "Signed. You can download the signed copy." : "Not signed yet.");
+      onSaved?.();
+    } catch (e) {
+      setError(failure(e, "Unable to check status"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function downloadSigned() {
+    if (!formId) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`${apiUrl}/mv104-forms/${formId}/signed.pdf`, { headers: authHeaders(false) });
+      if (!response.ok) await readJson(response);
+      const url = URL.createObjectURL(await response.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "MV-104-signed.pdf";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(failure(e, "Unable to download the signed copy"));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function generate() {
     setBusy(true); setError("");
@@ -294,8 +398,38 @@ export function Mv104Form({ claimId, apiUrl, onClose }: { claimId: string; apiUr
           <p className="mv-note">The form must be signed by the driver or representative. Print it, sign and date it, and send the original to the Crash Records Center, 6 Empire State Plaza, PO Box 2925, Albany, NY 12220-0925, within 10 days.</p>
         </section>
       </div>
+      <section className="mv-sign">
+        <h3>Send for signature</h3>
+        {locked ? (
+          <>
+            <p className="mv-note">
+              Status: {STATUS_LABELS[status] || status}
+              {signerName ? ` · Signer: ${signerName}${signerEmail ? ` (${signerEmail})` : ""}` : ""}
+            </p>
+            <div className="mv-sign-actions">
+              <button type="button" className="secondary-button" onClick={refreshStatus} disabled={busy}>Check status</button>
+              {status === "signed" && <button type="button" className="primary-button" onClick={downloadSigned} disabled={busy}>Download signed PDF</button>}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="mv-note">
+              Sends this MV-104 to the signer with a signature box and a date box on page 1. The draft is saved first, and the signer enters the date when signing.
+            </p>
+            <div className="mv-sign-grid">
+              <label className="mv-field">Signer name<input value={signerName} onChange={(e) => setSignerName(e.target.value)} /></label>
+              <label className="mv-field">Signer email<input type="email" value={signerEmail} onChange={(e) => setSignerEmail(e.target.value)} /></label>
+            </div>
+            <div className="mv-sign-actions">
+              <button type="button" className="primary-button" onClick={sendForSignature} disabled={busy}>{busy ? "Sending…" : "Send for signature"}</button>
+            </div>
+          </>
+        )}
+        {notice && <p className="mv-note" role="status">{notice}</p>}
+      </section>
       <div className="mv-footer">
         <button type="button" className="secondary-button" onClick={onClose}>Cancel</button>
+        {!locked && <button type="button" className="secondary-button" onClick={saveDraft} disabled={busy}>{formId ? "Save changes" : "Save draft"}</button>}
         <button type="button" className="primary-button" onClick={generate} disabled={busy}>{busy ? "Generating…" : "Generate MV-104 PDF"}</button>
       </div>
     </Shell>
