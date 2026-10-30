@@ -8,6 +8,8 @@ import { InvoiceView, type Invoice } from "./InvoiceView";
 import { ReportsDashboard } from "./ReportsDashboard";
 import { TowingReceiptView } from "./TowingReceiptView";
 import { StorageReceiptView } from "./StorageReceiptView";
+import { SavedReceiptsView } from "./SavedReceiptsView";
+import type { ReceiptKind } from "./receiptFrame";
 import { CompanyTodoList, type CompanyTodo } from "./CompanyTodoList";
 import { Mv104Form } from "./Mv104Form";
 import { Mv104View } from "./Mv104View";
@@ -23,6 +25,7 @@ type View =
   | "Invoices"
   | "Towing Receipts"
   | "Storage Receipts"
+  | "Saved Receipts"
   | "MV-104"
   | "Bookkeeping"
   | "Reports";
@@ -266,6 +269,7 @@ const navItems: Array<{ label: View; icon: string }> = [
   { label: "Invoices", icon: "file" },
   { label: "Towing Receipts", icon: "truck" },
   { label: "Storage Receipts", icon: "truck" },
+  { label: "Saved Receipts", icon: "folder" },
   { label: "MV-104", icon: "file" },
   { label: "Bookkeeping", icon: "chart" },
   { label: "Reports", icon: "chart" },
@@ -522,6 +526,12 @@ function App() {
   const [session, setSession] = React.useState<Session | null>(null);
   const [sessionLoading, setSessionLoading] = React.useState(Boolean(token));
   const [view, setView] = React.useState<View>("Dashboard");
+  // A saved receipt chosen in Saved Receipts, opened in its receipt window.
+  const [openReceipt, setOpenReceipt] = React.useState<{ kind: ReceiptKind; id: string } | null>(null);
+  function openSavedReceipt(kind: ReceiptKind, id: string) {
+    setOpenReceipt({ kind, id });
+    setView(kind === "towing" ? "Towing Receipts" : "Storage Receipts");
+  }
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
   const mobileNavToggleRef = React.useRef<HTMLButtonElement>(null);
   const mobileNavFirstItemRef = React.useRef<HTMLButtonElement>(null);
@@ -906,6 +916,8 @@ function App() {
                                 ? "Print towing receipts with customer and vehicle details from your records."
                               : view === "Storage Receipts"
                                 ? "Bill storage for total-loss vehicles held more than a week, with the customer and insurance pulled from your records."
+                              : view === "Saved Receipts"
+                                ? "Every towing and storage receipt you saved. Open one to edit it, download it, or delete it."
                               : view === "MV-104"
                                 ? "Fill the MV-104 crash report from a claim, or start a standalone form."
                               : "Measure shop throughput, revenue, and follow-up work."}
@@ -954,14 +966,25 @@ function App() {
           )}
           {view === "Documents" && <DocumentView documents={documents} customers={customers} jobs={jobs} claims={claims} onUploaded={loadData} />}
           {view === "Invoices" && <InvoiceView invoices={invoices} customers={customers} jobs={jobs} claims={claims} request={fetchJson} apiUrl={API_URL} onChanged={loadData} focus={focus} onFocusHandled={() => setFocus(null)} />}
-          {view === "Towing Receipts" && <TowingReceiptView customers={customers} vehicles={vehicles} />}
+          {view === "Towing Receipts" && (
+            <TowingReceiptView
+              customers={customers}
+              vehicles={vehicles}
+              request={fetchJson}
+              openRequest={openReceipt?.kind === "towing" ? { id: openReceipt.id } : null}
+              onOpenHandled={() => setOpenReceipt(null)}
+            />
+          )}
           {view === "Storage Receipts" && (
             <StorageReceiptView
               jobs={jobs}
               request={fetchJson}
               onRefresh={async () => setJobs(await fetchJson<Job[]>("/jobs"))}
+              openRequest={openReceipt?.kind === "storage" ? { id: openReceipt.id } : null}
+              onOpenHandled={() => setOpenReceipt(null)}
             />
           )}
+          {view === "Saved Receipts" && <SavedReceiptsView request={fetchJson} onOpen={openSavedReceipt} />}
           {view === "MV-104" && <Mv104View claims={claims} apiUrl={String(API_URL)} />}
           {view === "Bookkeeping" && <BookkeepingView data={finance} request={fetchJson} onChanged={() => void loadData()} />}
           {view === "Reports" && (

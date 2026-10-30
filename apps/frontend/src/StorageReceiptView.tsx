@@ -1,8 +1,10 @@
 import React from "react";
-import receiptTemplate from "./assets/storage-receipt.html?raw";
-import logoUrl from "./assets/mastercraft-logo.png";
 import "./TowingReceiptView.css";
 import "./StorageReceiptView.css";
+import { ReceiptValues, receiptTemplate, sendToFrame } from "./receiptFrame";
+import { ReceiptToolbar, RequestFn, SavedRef } from "./ReceiptToolbar";
+
+const storageTemplate = receiptTemplate("storage");
 
 // A storage receipt is for a vehicle held after it was declared a total loss. The insurer pays storage
 // only after more than GRACE_DAYS days in storage.
@@ -134,15 +136,29 @@ function fullPrefill(job: StorageJob, billTo: BillTo): Prefill {
   };
 }
 
-type RequestFn = <T>(path: string, options?: RequestInit) => Promise<T>;
 
-export function StorageReceiptView({ jobs, request, onRefresh }: { jobs: StorageJob[]; request: RequestFn; onRefresh: () => Promise<void> }) {
+export function StorageReceiptView({
+  jobs,
+  request,
+  onRefresh,
+  openRequest,
+  onOpenHandled,
+}: {
+  jobs: StorageJob[];
+  request: RequestFn;
+  onRefresh: () => Promise<void>;
+  openRequest: { id: string } | null;
+  onOpenHandled: () => void;
+}) {
   const frameRef = React.useRef<HTMLIFrameElement>(null);
-  const receiptHtml = React.useMemo(() => receiptTemplate.replace("__LOGO_SRC__", logoUrl), []);
   const [jobId, setJobId] = React.useState("");
   const [billTo, setBillTo] = React.useState<BillTo>("insurance");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
+  const [saved, setSaved] = React.useState<SavedRef | null>(null);
+  const [frameKey, setFrameKey] = React.useState(0);
+  // Values of a saved receipt, put back into the form once the frame has loaded.
+  const restoreRef = React.useRef<ReceiptValues | null>(null);
 
   // Total-loss vehicles first, then the rest.
   const ordered = React.useMemo(
@@ -152,10 +168,34 @@ export function StorageReceiptView({ jobs, request, onRefresh }: { jobs: Storage
   const job = ordered.find((item) => item.id === jobId) || null;
   const eligibility = job ? storageEligibility(job) : null;
 
-  const post = (message: Record<string, unknown>) => {
-    frameRef.current?.contentWindow?.postMessage(message, "*");
-  };
-  const sendPrefill = (values: Prefill) => post({ type: "storage-prefill", values });
+  const sendPrefill = (values: Prefill) => sendToFrame(frameRef.current, { type: "storage-prefill", values });
+
+  // Opening a saved storage receipt from the Saved Receipts window.
+  React.useEffect(() => {
+    if (!openRequest) return;
+    void (async () => {
+      try {
+        const row = await request<SavedRef & { values: ReceiptValues }>(`/receipts/${openRequest.id}`);
+        restoreRef.current = row.values;
+        setSaved({ id: row.id, title: row.title });
+        setJobId("");
+        setError("");
+        setFrameKey((key) => key + 1);
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : "Unable to open the receipt");
+      } finally {
+        onOpenHandled();
+      }
+    })();
+  }, [openRequest?.id]);
+
+  function startNew() {
+    restoreRef.current = null;
+    setSaved(null);
+    setJobId("");
+    setError("");
+    setFrameKey((key) => key + 1);
+  }
 
   function chooseJob(id: string) {
     setJobId(id);
@@ -192,8 +232,13 @@ export function StorageReceiptView({ jobs, request, onRefresh }: { jobs: Storage
     }
   }
 
-  // Once the receipt has loaded, send whatever is already selected.
+  // Once the receipt has loaded, put back a saved receipt's values, or send whatever is already selected.
   function handleFrameLoad() {
+    if (restoreRef.current) {
+      sendToFrame(frameRef.current, { type: "receipt-restore", values: restoreRef.current });
+      restoreRef.current = null;
+      return;
+    }
     if (job) sendPrefill(fullPrefill(job, billTo));
   }
 
@@ -203,15 +248,12 @@ export function StorageReceiptView({ jobs, request, onRefresh }: { jobs: Storage
         <div className="tr-toolbar-head">
           <div>
             <p className="eyebrow">Storage receipts</p>
-            <h2>Storage charges for a total loss</h2>
+            <h2>{saved ? "Editing a storage receipt" : "Storage charges for a total loss"}</h2>
             <p className="subheading">
               Choose the vehicle in storage. Its customer, insurer and claim are pulled in, and the storage days are counted from the arrival date.
               Tick the charges that apply. Storage is billed to the insurer once a total-loss vehicle is in storage more than {STORAGE_GRACE_DAYS} days.
             </p>
           </div>
-          <button type="button" className="orange-button" onClick={() => post({ type: "storage-print" })}>
-            Print receipt
-          </button>
         </div>
 
         <div className="tr-controls">
@@ -270,14 +312,16 @@ export function StorageReceiptView({ jobs, request, onRefresh }: { jobs: Storage
             {eligibility.days !== null && <span className="sr-days"> {eligibility.days} day{eligibility.days === 1 ? "" : "s"} in storage</span>}
           </div>
         )}
+        <ReceiptToolbar kind="storage" frameRef={frameRef} saved={saved} request={request} onSaved={setSaved} onNew={startNew} />
         {error && <div className="sr-banner sr-warn" role="alert">{error}</div>}
       </div>
 
       <iframe
+        key={frameKey}
         ref={frameRef}
         className="tr-frame"
         title="Storage receipt"
-        srcDoc={receiptHtml}
+        srcDoc={storageTemplate}
         sandbox="allow-scripts allow-modals"
         onLoad={handleFrameLoad}
       />

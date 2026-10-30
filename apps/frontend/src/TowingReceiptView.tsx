@@ -1,6 +1,9 @@
 import React from "react";
-import receiptHtml from "./assets/towing-receipt.html?raw";
 import "./TowingReceiptView.css";
+import { ReceiptValues, receiptTemplate, sendToFrame } from "./receiptFrame";
+import { ReceiptToolbar, RequestFn, SavedRef } from "./ReceiptToolbar";
+
+const towingTemplate = receiptTemplate("towing");
 
 type CustomerRecord = {
   id: string;
@@ -64,20 +67,63 @@ function vehicleLabel(vehicle: VehicleRecord) {
   return `${name}${plate} — ${vehicle.customer.firstName} ${vehicle.customer.lastName}`;
 }
 
-export function TowingReceiptView({ customers, vehicles }: { customers: CustomerRecord[]; vehicles: VehicleRecord[] }) {
+export function TowingReceiptView({
+  customers,
+  vehicles,
+  request,
+  openRequest,
+  onOpenHandled,
+}: {
+  customers: CustomerRecord[];
+  vehicles: VehicleRecord[];
+  request: RequestFn;
+  openRequest: { id: string } | null;
+  onOpenHandled: () => void;
+}) {
   const frameRef = React.useRef<HTMLIFrameElement>(null);
   const [customerId, setCustomerId] = React.useState("");
   const [vehicleId, setVehicleId] = React.useState("");
   const [billTo, setBillTo] = React.useState<BillTo>("shop");
+  const [saved, setSaved] = React.useState<SavedRef | null>(null);
+  const [frameKey, setFrameKey] = React.useState(0);
+  const [loadError, setLoadError] = React.useState("");
+  // Values of a saved receipt, put back into the form once the frame has loaded.
+  const restoreRef = React.useRef<ReceiptValues | null>(null);
 
   const customer = customers.find((item) => item.id === customerId) || null;
   const vehicle = vehicles.find((item) => item.id === vehicleId) || null;
   const visibleVehicles = customerId ? vehicles.filter((item) => item.customer?.id === customerId) : vehicles;
 
-  const post = (message: Record<string, unknown>) => {
-    frameRef.current?.contentWindow?.postMessage(message, "*");
-  };
-  const sendPrefill = (values: PrefillValues) => post({ type: "towing-prefill", values });
+  // Opening a saved towing receipt from the Saved Receipts window.
+  React.useEffect(() => {
+    if (!openRequest) return;
+    void (async () => {
+      try {
+        const row = await request<SavedRef & { values: ReceiptValues }>(`/receipts/${openRequest.id}`);
+        restoreRef.current = row.values;
+        setSaved({ id: row.id, title: row.title });
+        setCustomerId("");
+        setVehicleId("");
+        setLoadError("");
+        setFrameKey((key) => key + 1);
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : "Unable to open the receipt");
+      } finally {
+        onOpenHandled();
+      }
+    })();
+  }, [openRequest?.id]);
+
+  function startNew() {
+    restoreRef.current = null;
+    setSaved(null);
+    setCustomerId("");
+    setVehicleId("");
+    setLoadError("");
+    setFrameKey((key) => key + 1);
+  }
+
+  const sendPrefill = (values: PrefillValues) => sendToFrame(frameRef.current, { type: "towing-prefill", values });
 
   function chooseCustomer(id: string) {
     setCustomerId(id);
@@ -104,8 +150,13 @@ export function TowingReceiptView({ customers, vehicles }: { customers: Customer
     sendPrefill(values);
   }
 
-  // Once the receipt has loaded, send whatever is already selected.
+  // Once the receipt has loaded, put back a saved receipt's values, or send whatever is already selected.
   function handleFrameLoad() {
+    if (restoreRef.current) {
+      sendToFrame(frameRef.current, { type: "receipt-restore", values: restoreRef.current });
+      restoreRef.current = null;
+      return;
+    }
     const values: PrefillValues = { billTo };
     if (customer) Object.assign(values, customerValues(customer));
     if (vehicle) Object.assign(values, vehicleValues(vehicle));
@@ -118,15 +169,12 @@ export function TowingReceiptView({ customers, vehicles }: { customers: Customer
         <div className="tr-toolbar-head">
           <div>
             <p className="eyebrow">Towing receipts</p>
-            <h2>Print a towing receipt</h2>
+            <h2>{saved ? "Editing a towing receipt" : "Create a towing receipt"}</h2>
             <p className="subheading">
               Pull the customer and vehicle from your records, or choose "Enter manually" and type them on the receipt.
-              Everything on the receipt stays editable.
+              Everything on the receipt stays editable. Saved receipts can be reopened from Saved Receipts.
             </p>
           </div>
-          <button type="button" className="orange-button" onClick={() => post({ type: "towing-print" })}>
-            Print receipt
-          </button>
         </div>
         <div className="tr-controls">
           <label className="tr-field">
@@ -164,12 +212,15 @@ export function TowingReceiptView({ customers, vehicles }: { customers: Customer
             </div>
           </div>
         </div>
+        <ReceiptToolbar kind="towing" frameRef={frameRef} saved={saved} request={request} onSaved={setSaved} onNew={startNew} />
+        {loadError && <div className="sr-banner sr-warn" role="alert">{loadError}</div>}
       </div>
       <iframe
+        key={frameKey}
         ref={frameRef}
         className="tr-frame"
         title="Towing receipt"
-        srcDoc={receiptHtml}
+        srcDoc={towingTemplate}
         sandbox="allow-scripts allow-modals"
         onLoad={handleFrameLoad}
       />
