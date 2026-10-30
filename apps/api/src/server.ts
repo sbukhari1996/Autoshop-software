@@ -15,6 +15,7 @@ import { createDocumensoRouter } from './routes/documenso.js';
 import { createMv104Router } from './routes/mv104.js';
 import { createMv104FormsRouter } from './routes/mv104Forms.js';
 import { createReceiptsRouter } from './routes/receipts.js';
+import { createNotesRouter } from './routes/notes.js';
 import { protectMutations } from './auth.js';
 import { errorHandler } from './errors.js';
 import { ensureDefaultAdmin } from './seed.js';
@@ -48,6 +49,7 @@ app.use('/api/invoices', createInvoicesRouter(prisma));
 app.use('/api/search', createSearchRouter(prisma));
 app.use('/api/todos', createTodosRouter(prisma));
 app.use('/api', createReceiptsRouter(prisma));
+app.use('/api', createNotesRouter(prisma));
 
 app.get('/api/health', (_req, res) => {
   res.json({

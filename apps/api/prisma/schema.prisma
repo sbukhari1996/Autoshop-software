@@ -721,3 +721,13 @@ model SavedReceipt {
   @@index([kind])
   @@map("saved_receipts")
 }
+
+model DashboardNote {
+  id        String   @id @default(cuid())
+  text      String
+  color     String   @default("yellow")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("dashboard_notes")
+}
