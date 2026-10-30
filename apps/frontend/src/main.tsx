@@ -1478,7 +1478,7 @@ const claimFlags = [
   ["policeReportFiled", "Police report filed"], ["witnessStatement", "Witness statement"], ["estimateAttached", "Estimate attached"], ["readyToSubmit", "Ready to submit"],
 ] as const;
 function claimFormFromClaim(claim: Claim | null, customer?: Customer, vehicle?: Vehicle | null): ClaimForm {
-  const source = claim || {};
+  const source: Partial<Claim> = claim || {};
   const customerName = customer ? `${customer.firstName} ${customer.lastName}` : source.customerName || "";
   const addressParts = customerAddressParts(String(source.customerAddress || customer?.address || ""));
   const selectedVehicle = vehicle || source.vehicle;
@@ -1489,7 +1489,7 @@ function claimFormFromClaim(claim: Claim | null, customer?: Customer, vehicle?: 
     customerAddress: addressParts.address, customerCity: addressParts.city || customer?.city || "",
     customerState: addressParts.state || customer?.state || "", customerZip: addressParts.zipCode || customer?.zipCode || "",
     insuranceCompany: source.insuranceCompany || "", policeReportFile: source.policeReportFile || "",
-    vehicleYear: source.vehicleYear ?? selectedVehicle?.year ?? "", vehicleMake: source.vehicleMake || selectedVehicle?.make || "", vehicleModel: source.vehicleModel || selectedVehicle?.model || "",
+    vehicleYear: String(source.vehicleYear ?? selectedVehicle?.year ?? ""), vehicleMake: source.vehicleMake || selectedVehicle?.make || "", vehicleModel: source.vehicleModel || selectedVehicle?.model || "",
     vehicleVin: source.vehicleVin || selectedVehicle?.vin || "", vehicleLicensePlate: source.vehicleLicensePlate || selectedVehicle?.licensePlate || "",
     incidentDate: source.incidentDate ? String(source.incidentDate).slice(0, 10) : "", adjusterVisitAt: toDateTimeLocal(source.adjusterVisitAt), dateSubmitted: source.dateSubmitted ? String(source.dateSubmitted).slice(0, 10) : "",
     status: source.claimStatus || "new", notes: source.notes || "",
@@ -1570,12 +1570,12 @@ function ClaimWorkspace({
       customerName: customer ? `${customer.firstName} ${customer.lastName}` : "", customerPhone: customer?.phone || "",
       customerAddress: customer?.address && (customer.city || customer.state || customer.zipCode) ? customer.address : customerAddress.address,
       customerCity: customer?.city || customerAddress.city, customerState: customer?.state || customerAddress.state, customerZip: customer?.zipCode || customerAddress.zipCode,
-      vehicleYear: firstVehicle?.year ?? "", vehicleMake: firstVehicle?.make || "", vehicleModel: firstVehicle?.model || "", vehicleVin: firstVehicle?.vin || "", vehicleTrim: "", vehicleBodyClass: "", vehicleLicensePlate: firstVehicle?.licensePlate || "",
+      vehicleYear: String(firstVehicle?.year ?? ""), vehicleMake: firstVehicle?.make || "", vehicleModel: firstVehicle?.model || "", vehicleVin: firstVehicle?.vin || "", vehicleTrim: "", vehicleBodyClass: "", vehicleLicensePlate: firstVehicle?.licensePlate || "",
     }));
   }
   function selectVehicle(value: string) {
     const vehicle = availableVehicles.find((item) => item.id === value);
-    setForm((current) => ({ ...current, vehicleId: value, vehicleYear: vehicle?.year ?? "", vehicleMake: vehicle?.make || "", vehicleModel: vehicle?.model || "", vehicleVin: vehicle?.vin || "", vehicleTrim: "", vehicleBodyClass: "", vehicleLicensePlate: vehicle?.licensePlate || "" }));
+    setForm((current) => ({ ...current, vehicleId: value, vehicleYear: String(vehicle?.year ?? ""), vehicleMake: vehicle?.make || "", vehicleModel: vehicle?.model || "", vehicleVin: vehicle?.vin || "", vehicleTrim: "", vehicleBodyClass: "", vehicleLicensePlate: vehicle?.licensePlate || "" }));
   }
   async function decodeVin(kind: "customer" | "atFault") {
     const vinKey = kind === "customer" ? "vehicleVin" : "atFaultVehicleVin";
@@ -1692,12 +1692,12 @@ function ClaimRecordsPanel({ claim, selectedJobId }: { claim: Claim; selectedJob
   }
   async function upload(event: React.FormEvent) {
     event.preventDefault();
-    if (!file) { setError("Choose a file before uploading."); return; }
+    if (!files.length) { setError("Choose a file before uploading."); return; }
     setBusy(true); setError("");
     const body = new FormData();
-    body.append("file", file); body.append("documentType", documentType); body.append("description", description);
+    files.forEach((item) => body.append("file", item)); body.append("documentType", documentType); body.append("description", description);
     body.append(target === "claim" ? "claimId" : "jobId", target === "claim" ? claim.id : target);
-    try { await fetchJson("/documents/upload", { method: "POST", body }); setFile(null); setDescription(""); await loadHub(); }
+    try { await fetchJson("/documents/upload", { method: "POST", body }); setFiles([]); setDescription(""); await loadHub(); }
     catch (uploadError) { setError(uploadError instanceof Error ? uploadError.message : "Unable to upload document"); }
     finally { setBusy(false); }
   }
@@ -1741,7 +1741,7 @@ function ClaimRecordsPanel({ claim, selectedJobId }: { claim: Claim; selectedJob
   return <div className="claim-records">
     <div className="records-heading"><div><p className="eyebrow">Claim file</p><h3>Documents &amp; job records</h3><p className="subheading">Keep the claim file, repair orders, estimates, and financial trail together.</p></div>{claim.photoFolderLink && <a className="secondary-button records-link" href={claim.photoFolderLink} target="_blank" rel="noreferrer">Open photo folder</a>}</div>
     {error && <div className="error-banner">{error}</div>}
-    <form className="records-upload" onSubmit={upload}><label>Attach to<select value={target} onChange={(event) => setTarget(event.target.value)}><option value="claim">Claim file</option>{jobs.map((job) => <option value={job.id} key={job.id}>{job.jobNumber} · {humanize(job.status)}</option>)}</select></label><label>Document type<select value={documentType} onChange={(event) => setDocumentType(event.target.value as typeof documentTypes[number])}>{documentTypes.map((type) => <option value={type} key={type}>{type.replaceAll("_", " ")}</option>)}</select></label><label>Description<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Optional note" /></label><label className="records-file">File<input type="file" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label><button className="orange-button" disabled={busy}>{busy ? "Uploading..." : "Upload record"}</button></form>
+    <form className="records-upload" onSubmit={upload}><label>Attach to<select value={target} onChange={(event) => setTarget(event.target.value)}><option value="claim">Claim file</option>{jobs.map((job) => <option value={job.id} key={job.id}>{job.jobNumber} · {humanize(job.status)}</option>)}</select></label><label>Document type<select value={documentType} onChange={(event) => setDocumentType(event.target.value as typeof documentTypes[number])}>{documentTypes.map((type) => <option value={type} key={type}>{type.replaceAll("_", " ")}</option>)}</select></label><label>Description<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Optional note" /></label><label className="records-file">File<input type="file" multiple onChange={(event) => setFiles(Array.from(event.target.files || []))} /></label><button className="orange-button" disabled={busy}>{busy ? "Uploading..." : "Upload record"}</button></form>
     {loading ? <p className="records-muted">Loading claim records...</p> : <>
       <section className="records-section"><div className="records-section-heading"><h4>Uploaded documents</h4><span>{documents.length} records</span></div>{documents.length ? <div className="records-list">{documents.map(({ document, owner }) => <div className="record-row" key={document.id}><div><strong>{document.fileName}</strong><small>{document.documentType || "other"}{document.description ? ` · ${document.description}` : ""}</small></div><span>{owner}</span><time>{formatDateTime(document.createdAt)}</time><div className="document-actions"><button type="button" onClick={() => void accessDocument(document, false)}>Open</button><button type="button" onClick={() => void accessDocument(document, true)}>Download</button><button type="button" className="danger-button" disabled={Boolean(deletingDocumentId)} onClick={() => void deleteDocument(document)}>{deletingDocumentId === document.id ? "Deleting..." : "Delete"}</button></div></div>)}</div> : <p className="records-muted">No local documents are attached yet.</p>}</section>
       <section className="records-section"><div className="records-section-heading"><h4>Invoices &amp; payments</h4><span>{linkedInvoices.length} linked</span></div>{linkedInvoices.length ? linkedInvoices.map((invoice) => <div className="record-summary invoice-record" key={invoice.id}><div><strong>{invoice.invoiceNumber} · {invoice.status}</strong><small>{invoice.job?.jobNumber || "Claim invoice"} · Total ${invoice.total.toFixed(2)} · Paid ${invoice.amountPaid.toFixed(2)} · Balance ${invoice.balanceDue.toFixed(2)}</small></div>{invoice.payments.length ? <div className="invoice-payment-list">{invoice.payments.map((payment) => <small key={payment.id}>{payment.method.replace("_", " ")} · ${payment.amount.toFixed(2)} · {formatDateTime(payment.date)}{payment.notes ? ` · ${payment.notes}` : ""}</small>)}</div> : <small>No payments recorded</small>}</div>) : <p className="records-muted">No invoices are linked to this claim or its repair orders yet.</p>}</section>
@@ -3317,18 +3317,18 @@ function CreateModal({
     </div>
   );
 }
-function Select({
+function Select<T extends Record<string, string>>({
   name,
   label,
   options,
   form,
   setForm,
 }: {
-  name: string;
+  name: keyof T & string;
   label: string;
   options: Array<{ value: string; label: string }>;
-  form: Record<string, string>;
-  setForm: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  form: T;
+  setForm: React.Dispatch<React.SetStateAction<T>>;
 }) {
   return (
     <label>
@@ -3336,7 +3336,7 @@ function Select({
       <select
         required
         value={form[name] || ""}
-        onChange={(event) => setForm({ ...form, [name]: event.target.value })}
+        onChange={(event) => setForm({ ...form, [name]: event.target.value } as T)}
       >
         <option value="">Select {label.toLowerCase()}</option>
         {options.map((option) => (
