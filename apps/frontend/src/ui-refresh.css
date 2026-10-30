@@ -863,3 +863,11 @@ input[type="search"] {
   .rpt-chart { overflow-x: auto; overscroll-behavior-x: contain; }
   .rpt-chart svg { min-width: 560px; }
 }
+
+/* Claim status categories, colour-coded in the claims table. */
+.status-pill.claim-status-new { color: #1d4f91; background: #e4efff; }
+.status-pill.claim-status-submitted { color: #8a5a00; background: #fff4d6; }
+.status-pill.claim-status-review { color: #a74d20; background: #ffede3; }
+.status-pill.claim-status-approved { color: #1e6b3c; background: #e2f5ea; }
+.status-pill.claim-status-denied { color: #9b1c1c; background: #fde4e4; }
+.status-pill.claim-status-closed { color: #4a4f55; background: #ebedf0; }

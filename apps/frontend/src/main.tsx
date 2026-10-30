@@ -57,8 +57,22 @@ type Vehicle = {
   color?: string | null;
   customer: Customer;
 };
+// Groups a claim's stored status into one of a few categories. A new claim with a submitted date counts as submitted.
+const CLAIM_STATUS_GROUPS = {
+  new: { key: "new", label: "New" },
+  submitted: { key: "submitted", label: "Submitted" },
+  in_review: { key: "review", label: "In review" },
+  approved: { key: "approved", label: "Approved" },
+  denied: { key: "denied", label: "Denied" },
+  closed: { key: "closed", label: "Closed" },
+} as const;
+function claimStatusGroup(claim: { claimStatus: string; dateSubmitted?: string | null }) {
+  const status = claim.claimStatus === "new" && claim.dateSubmitted ? "submitted" : claim.claimStatus;
+  return CLAIM_STATUS_GROUPS[status as keyof typeof CLAIM_STATUS_GROUPS] ?? { key: "new", label: humanize(claim.claimStatus) };
+}
 type Claim = {
   id: string;
+  createdAt?: string;
   customerId?: string;
   vehicleId?: string | null;
   claimNumber: string | null;
@@ -1430,6 +1444,7 @@ function ClaimView({
                 <th>Customer / vehicle</th>
                 <th>Carrier</th>
                 <th>Repair order</th>
+                <th>Created</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -1445,7 +1460,8 @@ function ClaimView({
                   </td>
                   <td data-label="Carrier">{claim.insuranceCompany || "Carrier pending"}</td>
                   <td data-label="Repair order">{claim.jobs?.[0]?.jobNumber || "Unlinked"}</td>
-                  <td data-label="Status"><span className={`status-pill ${claim.claimStatus === "approved" ? "green" : "orange"}`}>{humanize(claim.claimStatus)}</span></td>
+                  <td data-label="Created">{claim.createdAt ? new Date(claim.createdAt).toLocaleDateString("en-US") : "—"}</td>
+                  <td data-label="Status"><span className={`status-pill claim-status-${claimStatusGroup(claim).key}`}>{claimStatusGroup(claim).label}</span></td>
                 </tr>
               ))}
             </tbody>
