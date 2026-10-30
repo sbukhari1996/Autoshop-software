@@ -1,5 +1,6 @@
 import React from "react";
 import { downloadMonthlyStatement } from "./monthlyStatement";
+import "./ledger-mobile.css";
 
 type FinanceEntry = {
   id: string;
@@ -653,7 +654,7 @@ export function BookkeepingView({
         />
       </section>
       <div className="dashboard-grid finance-grid">
-        <section className="surface">
+        <section className="surface ledger-panel">
           <div className="surface-heading">
             <div>
               <h2>Ledger</h2>
@@ -686,14 +687,19 @@ export function BookkeepingView({
                   {availableYears.map((year) => <option value={year} key={year}>{year}</option>)}
                 </select>
               </label>
-              <label>
-                Type
-                <select value={ledgerType} onChange={(event) => setLedgerType(event.target.value as "all" | FinanceEntry["type"])} aria-label="Filter ledger by transaction type">
-                  <option value="all">Income &amp; expenses</option>
-                  <option value="income">Income only</option>
-                  <option value="expense">Expenses only</option>
-                </select>
-              </label>
+              <div className="ledger-type-filter" role="group" aria-label="Filter ledger by transaction type">
+                {(["all", "income", "expense"] as const).map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={ledgerType === option ? "active" : ""}
+                    aria-pressed={ledgerType === option}
+                    onClick={() => setLedgerType(option)}
+                  >
+                    {option === "all" ? "All" : option === "income" ? "Income" : "Expenses"}
+                  </button>
+                ))}
+              </div>
               <button
                 type="button"
                 className="secondary-button"
@@ -763,7 +769,7 @@ export function BookkeepingView({
                       <span>{item.type === "income" ? "+" : "-"}{currency(item.amount)}</span>
                     </td>
                     <td data-label="Description">
-                      <strong>{item.description}</strong>
+                      <span className="ledger-desc"><span className={`ledger-type-icon ${item.type}`}><LedgerIcon type={item.type} /></span><strong>{item.description}</strong></span>
                       {item.notes && (
                         <small className="table-subtext">{item.notes}</small>
                       )}
@@ -795,6 +801,77 @@ export function BookkeepingView({
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="ledger-cards">
+            {filteredEntries.map((item) => (
+              <article key={item.id} className="ledger-card">
+                <label className="ledger-card-check">
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${item.type}: ${item.description}`}
+                    checked={selectedEntryIds.includes(item.id)}
+                    onChange={(event) => setSelectedEntryIds((current) => event.target.checked
+                      ? [...current, item.id]
+                      : current.filter((id) => id !== item.id))}
+                  />
+                </label>
+                <button type="button" className="ledger-card-main" onClick={() => openEntryForm(item)} aria-label={`Edit ${item.type}: ${item.description}`}>
+                  <span className={`ledger-type-icon ${item.type}`}><LedgerIcon type={item.type} /></span>
+                  <span className="ledger-card-text">
+                    <strong>{item.description}</strong>
+                    <small>
+                      {dateValue(item.entryDate)} · {item.category || "Uncategorized"}
+                      {item.paymentMethod ? ` · ${item.paymentMethod.replace("_", " ")}` : ""}
+                    </small>
+                  </span>
+                  <span className={`ledger-card-amount ${item.type === "income" ? "finance-income" : "finance-expense"}`}>
+                    {item.type === "income" ? "+" : "-"}{currency(item.amount)}
+                  </span>
+                </button>
+                <div className="ledger-card-foot">
+                  <div className="ledger-card-receipts">
+                    {item.documents.map((receipt) => (
+                      <span className="ledger-receipt-chip" key={receipt.id}>
+                        <button type="button" onClick={() => void accessEntryReceipt(item.id, receipt, false)}>
+                          {receipt.fileName}
+                        </button>
+                      </span>
+                    ))}
+                    {item.type === "expense" && (
+                      <label className="ledger-attach">
+                        {uploadingReceiptFor === item.id ? "Uploading…" : item.documents.length ? "Add receipt" : "Attach receipt"}
+                        <input
+                          type="file"
+                          disabled={uploadingReceiptFor === item.id}
+                          onChange={(event) => {
+                            const file = event.currentTarget.files?.[0];
+                            event.currentTarget.value = "";
+                            if (file) void uploadEntryReceipt(item.id, file);
+                          }}
+                        />
+                      </label>
+                    )}
+                  </div>
+                  <button type="button" className="secondary-button" onClick={() => openEntryForm(item)}>Edit</button>
+                  <button
+                    type="button"
+                    className="danger-button compact-danger"
+                    onClick={async () => {
+                      if (!window.confirm(`Delete ledger entry "${item.description}"?`)) return;
+                      setError("");
+                      try {
+                        await request(`/finance/entries/${item.id}`, { method: "DELETE" });
+                        await onChanged();
+                      } catch (deleteError) {
+                        setError(deleteError instanceof Error ? deleteError.message : "Unable to delete ledger entry");
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </article>
+            ))}
           </div>
           {!filteredEntries.length && (
             <div className="empty-state">
@@ -1234,6 +1311,16 @@ export function BookkeepingView({
     </div>
   );
 }
+// Arrow icon for a ledger entry: up for income, down for expense.
+function LedgerIcon({ type }: { type: "income" | "expense" }) {
+  const path = type === "income" ? "M12 19V5M5 12l7-7 7 7" : "M12 5v14M19 12l-7 7-7-7";
+  return (
+    <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+      <path d={path} fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function Metric({
   label,
   value,

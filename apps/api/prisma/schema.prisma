@@ -707,3 +707,27 @@ model Mv104Form {
   @@index([claimId])
   @@map("mv104_forms")
 }
+
+model SavedReceipt {
+  id           String   @id @default(cuid())
+  kind         String
+  title        String
+  customerName String?
+  vehicleLabel String?
+  state        String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([kind])
+  @@map("saved_receipts")
+}
+
+model DashboardNote {
+  id        String   @id @default(cuid())
+  text      String
+  color     String   @default("yellow")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("dashboard_notes")
+}

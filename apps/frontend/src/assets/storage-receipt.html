@@ -561,5 +561,57 @@ tbody tr:nth-child(even) td.chk, tbody tr:nth-child(even) td.svc-cell { backgrou
   });
 })();
 </script>
+<script>
+// Saves, restores and exports the receipt's form values for the app. Values are keyed by element id,
+// or by position in the document when a field has no id.
+(function () {
+  function controls() { return Array.prototype.slice.call(document.querySelectorAll("input, select, textarea")); }
+  function keyOf(el, i) { return el.id ? el.id : "#" + i; }
+  function collect() {
+    var values = {};
+    controls().forEach(function (el, i) {
+      values[keyOf(el, i)] = el.type === "checkbox" ? el.checked : el.value;
+    });
+    return values;
+  }
+  function restore(values) {
+    controls().forEach(function (el, i) {
+      var key = keyOf(el, i);
+      if (!Object.prototype.hasOwnProperty.call(values, key)) return;
+      if (el.type === "checkbox") el.checked = values[key] === true;
+      else el.value = String(values[key]);
+      var row = el.closest && el.closest("tr.svc");
+      if (row) row.dataset.edited = "1";
+    });
+    document.body.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  function snapshot() {
+    var live = controls();
+    var clone = document.documentElement.cloneNode(true);
+    var copies = Array.prototype.slice.call(clone.querySelectorAll("input, select, textarea"));
+    copies.forEach(function (copy, i) {
+      var el = live[i];
+      if (!el) return;
+      if (copy.tagName === "TEXTAREA") copy.textContent = el.value;
+      else if (copy.tagName === "SELECT") {
+        Array.prototype.forEach.call(copy.options, function (opt) {
+          if (opt.value === el.value) opt.setAttribute("selected", "selected");
+          else opt.removeAttribute("selected");
+        });
+      } else if (copy.getAttribute("type") === "checkbox") {
+        if (el.checked) copy.setAttribute("checked", "checked");
+        else copy.removeAttribute("checked");
+      } else copy.setAttribute("value", el.value);
+    });
+    return "<!DOCTYPE html>\n" + clone.outerHTML;
+  }
+  window.addEventListener("message", function (event) {
+    var data = event.data || {};
+    if (data.type === "receipt-collect") parent.postMessage({ type: "receipt-state", values: collect() }, "*");
+    else if (data.type === "receipt-restore") restore(data.values || {});
+    else if (data.type === "receipt-html") parent.postMessage({ type: "receipt-snapshot", html: snapshot() }, "*");
+  });
+})();
+</script>
 </body>
 </html>
