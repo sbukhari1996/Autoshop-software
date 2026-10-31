@@ -216,6 +216,55 @@ function RentalLog({ agreements, onOpen }: { agreements: Agreement[]; onOpen: (a
   );
 }
 
+const escapeHtml = (value: string | number | null | undefined) =>
+  String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char] as string));
+
+// Printable rental agreement in a new tab. Print dialog > Save as PDF gives the download.
+// shortcut: terms are a draft list, replace with the shop's final wording.
+function openAgreement(a: Agreement) {
+  const row = (label: string, value: string | number | null | undefined) => `<tr><th>${label}</th><td>${escapeHtml(value || "-")}</td></tr>`;
+  const car = a.rentalCar;
+  const carLine = [car.name, [car.year, car.make, car.model, car.color].filter(Boolean).join(" "), [car.licensePlate, car.licenseState].filter(Boolean).join(" "), car.vin ? "VIN " + car.vin : ""].filter(Boolean).join(" · ");
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(a.agreementNumber)} Rental Agreement</title>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:32px;font-size:13px;line-height:1.45}
+h1{font-size:20px;margin:0}h2{font-size:14px;margin:18px 0 6px;border-bottom:1px solid #999;padding-bottom:3px}
+table{width:100%;border-collapse:collapse}th{text-align:left;width:34%;font-weight:600;padding:3px 8px 3px 0;vertical-align:top}td{padding:3px 0;vertical-align:top}
+.head{display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:8px}
+.cols{display:flex;gap:24px}.cols>div{flex:1}
+.sign{display:flex;gap:32px;margin-top:40px}.sign div{flex:1;border-top:1px solid #111;padding-top:4px}
+.bar{margin-bottom:12px}button{padding:8px 16px;font-size:14px}
+@media print{.bar{display:none}body{margin:16px}}
+</style></head><body>
+<div class="bar"><button onclick="window.print()">Print or save as PDF</button></div>
+<div class="head"><div><h1>Mastercraft Auto Repair &amp; Collision</h1><div>Rental Agreement</div></div><div style="text-align:right"><strong>${escapeHtml(a.agreementNumber)}</strong><br>Status: ${escapeHtml(AGREEMENT_STATUS[a.status]?.label ?? a.status)}</div></div>
+<div class="cols" style="margin-top:8px">
+<div><h2>Renter</h2><table>${row("Name", a.customerName)}${row("Phone", a.customerPhone)}${row("Email", a.customerEmail)}${row("Address", a.customerAddress)}</table></div>
+<div><h2>Claim and insurer</h2><table>${row("Claim number", a.claimNumber)}${row("Insurance company", a.insuranceCompany)}${row("Adjuster", a.adjusterName)}${row("Adjuster phone", a.adjusterPhone)}${row("Adjuster email", a.adjusterEmail)}</table></div>
+</div>
+<h2>Vehicle and rental period</h2>
+<table>${row("Vehicle", carLine)}${row("Pick-up date", dateText(a.startDate))}${row("Return date", dateText(a.endDate))}${row("Days", a.days)}
+${row("Mileage out / in", `${a.mileageOut ?? "-"} / ${a.mileageIn ?? "-"}`)}${row("Fuel out / in", `${a.fuelOut ?? "-"} / ${a.fuelIn ?? "-"}`)}${row("Condition out / in", `${a.conditionOut ?? "-"} / ${a.conditionIn ?? "-"}`)}${row("Damage notes", a.damageNotes)}</table>
+<h2>Charges</h2>
+<table>${row("Daily rate", money(a.dailyRate))}${row("Subtotal", `${money(a.subtotal)} (${a.days} days)`)}${row(`Tax (${a.taxRate}% on whole total)`, money(a.tax))}${row("Total", money(a.total))}</table>
+<h2>Terms</h2>
+<ol>
+<li>The renter must be at least 26 years old.</li>
+<li>Smoking in the vehicle carries a $125 fee.</li>
+<li>A $20 fuel charge applies per quarter tank needed when the vehicle is returned.</li>
+<li>The renter is responsible for lost keys.</li>
+<li>[Additional Mastercraft terms to be added.]</li>
+</ol>
+<h2>Renter consent</h2>
+<p>&#9744; I have read and agree to these terms. &nbsp; &#9744; I authorize Mastercraft to charge the rental amounts shown above.</p>
+<div class="sign"><div>Renter signature</div><div>Date</div><div>Mastercraft representative</div></div>
+</body></html>`;
+  const win = window.open("", "_blank");
+  if (!win) return; // pop-up blocked
+  win.document.write(html);
+  win.document.close();
+}
+
 function AgreementForm({
   existing,
   cars,
@@ -386,6 +435,7 @@ function AgreementForm({
         </fieldset>
         <div className="rental-actions">
           <button className="orange-button" disabled={busy}>{busy ? "Saving..." : existing ? "Save changes" : "Create agreement"}</button>
+          {existing && <button type="button" className="secondary-button" onClick={() => openAgreement(existing)}>View / print agreement</button>}
         </div>
       </form>
       {existing && (
