@@ -731,3 +731,71 @@ model DashboardNote {
 
   @@map("dashboard_notes")
 }
+
+model RentalCar {
+  id           String           @id @default(cuid())
+  name         String
+  vin          String?
+  licensePlate String?
+  licenseState String?
+  year         Int?
+  make         String?
+  model        String?
+  color        String?
+  dailyRate    Float            @default(0)
+  status       String           @default("available")
+  notes        String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  agreements   RentalAgreement[]
+
+  @@map("rental_cars")
+}
+
+model RentalAgreement {
+  id                  String    @id @default(cuid())
+  agreementNumber     String    @unique
+  rentalCarId         String
+  claimId             String?
+  customerId          String?
+  invoiceId           String?   @unique
+  status              String    @default("draft")
+  customerName        String
+  customerPhone       String?
+  customerEmail       String?
+  customerAddress     String?
+  insuranceCompany    String?
+  claimNumber         String?
+  adjusterName        String?
+  adjusterPhone       String?
+  adjusterEmail       String?
+  startDate           DateTime
+  endDate             DateTime
+  days                Int
+  dailyRate           Float
+  subtotal            Float
+  taxRate             Float     @default(0)
+  tax                 Float     @default(0)
+  total               Float     @default(0)
+  mileageOut          Int?
+  mileageIn           Int?
+  fuelOut             String?
+  fuelIn              String?
+  conditionOut        String?
+  conditionIn         String?
+  damageNotes         String?
+  notes               String?
+  documensoEnvelopeId String?   @unique
+  documensoStatus     String?
+  sentAt              DateTime?
+  signedAt            DateTime?
+  returnedAt          DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  rentalCar RentalCar @relation(fields: [rentalCarId], references: [id])
+
+  @@index([claimId])
+  @@index([rentalCarId])
+  @@map("rental_agreements")
+}

@@ -12,6 +12,7 @@ import { SavedReceiptsView } from "./SavedReceiptsView";
 import type { ReceiptKind } from "./receiptFrame";
 import { CompanyTodoList, type CompanyTodo } from "./CompanyTodoList";
 import { StickyNotes } from "./StickyNotes";
+import { RentalsView } from "./RentalsView";
 import { Mv104Form } from "./Mv104Form";
 import { Mv104View } from "./Mv104View";
 
@@ -27,6 +28,7 @@ type View =
   | "Towing Receipts"
   | "Storage Receipts"
   | "Saved Receipts"
+  | "Car Rental"
   | "MV-104"
   | "Bookkeeping"
   | "Reports";
@@ -285,6 +287,7 @@ const navItems: Array<{ label: View; icon: string }> = [
   { label: "Towing Receipts", icon: "truck" },
   { label: "Storage Receipts", icon: "truck" },
   { label: "Saved Receipts", icon: "folder" },
+  { label: "Car Rental", icon: "truck" },
   { label: "MV-104", icon: "file" },
   { label: "Bookkeeping", icon: "chart" },
   { label: "Reports", icon: "chart" },
@@ -931,6 +934,8 @@ function App() {
                                 ? "Print towing receipts with customer and vehicle details from your records."
                               : view === "Storage Receipts"
                                 ? "Bill storage for total-loss vehicles held more than a week, with the customer and insurance pulled from your records."
+                              : view === "Car Rental"
+                                ? "Rent out your cars while a customer's car is in repair. Rental agreements are billed to the insurer or customer."
                               : view === "Saved Receipts"
                                 ? "Every towing and storage receipt you saved. Open one to edit it, download it, or delete it."
                               : view === "MV-104"
@@ -1000,6 +1005,7 @@ function App() {
             />
           )}
           {view === "Saved Receipts" && <SavedReceiptsView request={fetchJson} onOpen={openSavedReceipt} />}
+          {view === "Car Rental" && <RentalsView claims={claims} request={fetchJson} />}
           {view === "MV-104" && <Mv104View claims={claims} apiUrl={String(API_URL)} />}
           {view === "Bookkeeping" && <BookkeepingView data={finance} request={fetchJson} onChanged={() => void loadData()} />}
           {view === "Reports" && (

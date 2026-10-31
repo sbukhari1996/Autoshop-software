@@ -225,7 +225,7 @@ function parseDate(value: unknown, field: string) { const result = new Date(Stri
 function positive(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result <= 0) throw new ApiError(400, 'amount must be a positive number'); return result; }
 function nonNegative(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result < 0) throw new ApiError(400, 'value must be a non-negative number'); return result; }
 function validate<T extends readonly string[]>(value: unknown, values: T, field: string) { const result = requiredText(value, field); if (!values.includes(result)) throw new ApiError(400, `${field} is invalid`); return result; }
-async function nextInvoiceNumber(tx: Prisma.TransactionClient) {
+export async function nextInvoiceNumber(tx: Prisma.TransactionClient) {
   while (true) {
     const [{ number }] = await tx.$queryRaw<Array<{ number: bigint }>>`SELECT nextval('invoice_number_seq') AS number`;
     const invoiceNumber = `INV-${number}`;
