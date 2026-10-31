@@ -2,6 +2,7 @@ import React from "react";
 import "./RentalsView.css";
 
 type Request = <T>(path: string, options?: RequestInit) => Promise<T>;
+type Download = (path: string) => Promise<Blob>;
 type RentalCar = { id: string; name: string; vin: string | null; licensePlate: string | null; licenseState: string | null; year: number | null; make: string | null; model: string | null; color: string | null; dailyRate: number; status: string; notes: string | null };
 type Agreement = {
   id: string; agreementNumber: string; rentalCarId: string; claimId: string | null; customerId: string | null; invoiceId: string | null; status: string;
@@ -9,7 +10,7 @@ type Agreement = {
   insuranceCompany: string | null; claimNumber: string | null; adjusterName: string | null; adjusterPhone: string | null; adjusterEmail: string | null;
   startDate: string; endDate: string; days: number; dailyRate: number; subtotal: number; taxRate: number; tax: number; total: number;
   mileageOut: number | null; mileageIn: number | null; fuelOut: string | null; fuelIn: string | null; conditionOut: string | null; conditionIn: string | null; damageNotes: string | null; notes: string | null;
-  createdAt: string; rentalCar: RentalCar;
+  createdAt: string; rentalCar: RentalCar; documensoEnvelopeId: string | null; signedAt: string | null;
 };
 // The parts of a claim and customer this screen reads. Names match the claims and customers the app already loads.
 type ClaimLike = { id: string; claimNumber: string | null; insuranceCompany: string | null; adjusterName?: string | null; adjusterPhone?: string | null; adjusterEmail?: string | null; customerId?: string; customer: { id: string; firstName: string; lastName: string; phone: string | null; email?: string | null; address?: string | null; city?: string | null; state?: string | null; zipCode?: string | null } };
@@ -23,12 +24,12 @@ const AGREEMENT_STATUS: Record<string, { label: string; className: string }> = {
 const CAR_STATUS: Record<string, string> = { available: "Available", in_repair: "In repair", out_of_service: "Out of service" };
 const FUEL = ["Full", "3/4", "1/2", "1/4"];
 const money = (value: number) => value.toLocaleString("en-US", { style: "currency", currency: "USD" });
-const dateText = (value: string) => new Date(value).toLocaleDateString("en-US");
+const dateText = (value: string) => new Date(value).toLocaleDateString("en-US", { timeZone: "UTC" });
 const JSON_HEADERS = { "Content-Type": "application/json" };
 const errorText = (error: unknown, fallback: string) => (error instanceof Error ? error.message : fallback);
 const dayCount = (start: string, end: string) => (start && end ? Math.max(1, Math.ceil((new Date(end).getTime() - new Date(start).getTime()) / 86400000)) : 0);
 
-export function RentalsView({ claims, request }: { claims: ClaimLike[]; request: Request }) {
+export function RentalsView({ claims, request, download }: { claims: ClaimLike[]; request: Request; download: Download }) {
   const [cars, setCars] = React.useState<RentalCar[]>([]);
   const [agreements, setAgreements] = React.useState<Agreement[]>([]);
   const [editing, setEditing] = React.useState<Agreement | "new" | null>(null);
@@ -48,6 +49,14 @@ export function RentalsView({ claims, request }: { claims: ClaimLike[]; request:
 
   React.useEffect(() => { void load(); }, [load]);
 
+  async function openPdf(agreement: Agreement) {
+    try {
+      saveBlob(await download(`/rental-agreements/${agreement.id}/pdf`), `${agreement.agreementNumber}-rental-agreement.pdf`);
+    } catch (pdfError) {
+      setError(errorText(pdfError, "Unable to download the PDF"));
+    }
+  }
+
   if (editing) {
     return (
       <AgreementForm
@@ -55,6 +64,7 @@ export function RentalsView({ claims, request }: { claims: ClaimLike[]; request:
         cars={cars}
         claims={claims}
         request={request}
+        download={download}
         onDone={async (message) => { setEditing(null); setNotice(message); await load(); }}
         onCancel={() => setEditing(null)}
       />
@@ -74,7 +84,7 @@ export function RentalsView({ claims, request }: { claims: ClaimLike[]; request:
           </div>
           <button type="button" className="orange-button" disabled={!cars.length} onClick={() => setEditing("new")}>New rental agreement</button>
         </div>
-        <RentalLog agreements={agreements} onOpen={setEditing} />
+        <RentalLog agreements={agreements} onOpen={setEditing} onPdf={openPdf} />
       </section>
     </section>
   );
@@ -166,7 +176,7 @@ function FleetPanel({ cars, request, onChanged, onError }: { cars: RentalCar[]; 
   );
 }
 
-function RentalLog({ agreements, onOpen }: { agreements: Agreement[]; onOpen: (agreement: Agreement) => void }) {
+function RentalLog({ agreements, onOpen, onPdf }: { agreements: Agreement[]; onOpen: (agreement: Agreement) => void; onPdf: (agreement: Agreement) => void }) {
   const [claimFilter, setClaimFilter] = React.useState("");
   const [statusFilter, setStatusFilter] = React.useState("");
   const shown = agreements.filter((item) => (!claimFilter || item.claimId === claimFilter) && (!statusFilter || item.status === statusFilter));
@@ -205,7 +215,7 @@ function RentalLog({ agreements, onOpen }: { agreements: Agreement[]; onOpen: (a
                 <td data-label="Total">{money(item.total)}</td>
                 <td data-label="Status"><span className={`status-pill ${AGREEMENT_STATUS[item.status]?.className ?? ""}`}>{AGREEMENT_STATUS[item.status]?.label ?? item.status}</span></td>
                 <td data-label="Invoice">{item.invoiceId ? "Created" : "None"}</td>
-                <td data-label="Copy"><button type="button" className="secondary-button rental-print" onClick={(event) => { event.stopPropagation(); openAgreement(item); }}>Print / PDF</button></td>
+                <td data-label="Copy"><button type="button" className="secondary-button rental-print" onClick={(event) => { event.stopPropagation(); onPdf(item); }}>PDF</button></td>
               </tr>
             ))}
           </tbody>
@@ -217,164 +227,14 @@ function RentalLog({ agreements, onOpen }: { agreements: Agreement[]; onOpen: (a
   );
 }
 
-const escapeHtml = (value: string | number | null | undefined) =>
-  String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char] as string));
-
-// Shop details printed on every agreement. Fill these in once.
-const SHOP = { name: "Mastercraft Auto Repair & Collision", address: "3821 23rd St", cityLine: "Long Island City, NY 11101", phone: "718-578-4563", email: "shop@mastercraftautony.com", county: "Queens" };
-
-// Printable loan and rental agreement in a new tab. Print dialog > Save as PDF gives the download.
-// shortcut: wording is a drafted template, have a New York attorney review before use.
-function openAgreement(a: Agreement) {
-  const car = a.rentalCar;
-  const carLine = [car.year, car.make, car.model, car.color].filter(Boolean).join(" ");
-  const plate = [car.licensePlate, car.licenseState].filter(Boolean).join(" ");
-  const billedTo = a.insuranceCompany ? `Insurance company: ${escapeHtml(a.insuranceCompany)}` : "Renter (customer pays)";
-  const row = (label: string, value: string | number | null | undefined) => `<tr><th>${label}</th><td>${escapeHtml(value ?? "")}</td></tr>`;
-  const fill = (label: string) => `<tr><th>${label}</th><td class="fill"></td></tr>`;
-  const clause = (no: string, text: string) => `<p class="c"><b>${no}</b>&nbsp; ${text}</p>`;
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(a.agreementNumber)} Vehicle Loan and Rental Agreement</title>
-<style>
-@page { size: Letter; margin: 0.7in 0.75in 0.9in; @bottom-left { content: "${escapeHtml(a.agreementNumber)} · ${SHOP.name}"; font: 8.5pt Arial, sans-serif; color: #333; } @bottom-right { content: "Renter initials: ________   Page " counter(page) " of " counter(pages); font: 8.5pt Arial, sans-serif; color: #333; } }
-body { font-family: "Times New Roman", Times, Georgia, serif; color: #111; font-size: 11pt; line-height: 1.38; margin: 0; }
-.bar { margin: 16px; font: 14px Arial, sans-serif; }
-.bar button { padding: 8px 16px; font-size: 14px; }
-.letterhead { text-align: center; border-bottom: 2px solid #111; padding-bottom: 8px; }
-.letterhead .shop { font-size: 17pt; font-weight: bold; letter-spacing: .04em; text-transform: uppercase; }
-.letterhead .addr { font-size: 9.5pt; color: #333; margin-top: 2px; }
-h1 { font-size: 15pt; text-align: center; letter-spacing: .08em; margin: 14px 0 2px; }
-.meta { text-align: center; font-size: 10pt; margin-bottom: 10px; }
-h2 { font-size: 11pt; text-transform: uppercase; letter-spacing: .04em; margin: 16px 0 6px; border-bottom: 1px solid #555; padding-bottom: 2px; page-break-after: avoid; }
-table { width: 100%; border-collapse: collapse; font-size: 10.5pt; margin-bottom: 4px; }
-th { text-align: left; font-weight: bold; width: 30%; padding: 3px 8px 3px 0; vertical-align: top; }
-td { padding: 3px 0; border-bottom: 1px dotted #888; vertical-align: top; }
-td.fill { height: 18px; }
-.two { display: flex; gap: 22px; }
-.two > div { flex: 1; }
-p.c { text-align: justify; margin: 0 0 6px 0; }
-p.c b { font-weight: bold; }
-.box { border: 1px solid #111; padding: 8px 10px; font-size: 10.5pt; margin: 8px 0; }
-.check p { margin: 4px 0 4px 0; text-align: justify; }
-.check span { display: inline-block; width: 13px; height: 13px; border: 1px solid #111; margin-right: 8px; vertical-align: -2px; }
-.sig { display: flex; gap: 28px; margin-top: 28px; page-break-inside: avoid; }
-.sig > div { flex: 1; }
-.sig .line { border-top: 1px solid #111; padding-top: 3px; font-size: 10pt; }
-.sig .space { height: 30px; }
-.keep { page-break-inside: avoid; }
-@media print { .bar { display: none; } }
-@media screen { body { max-width: 8.5in; margin: 0 auto 60px; padding: 0 0.5in; box-sizing: border-box; } }
-</style></head><body>
-<div class="bar"><button onclick="window.print()">Print or save as PDF</button></div>
-<div class="letterhead"><div class="shop">${escapeHtml(SHOP.name)}</div><div class="addr">${escapeHtml(SHOP.address)} · ${escapeHtml(SHOP.cityLine)}<br>Tel. ${escapeHtml(SHOP.phone)} · ${escapeHtml(SHOP.email)}</div></div>
-<h1>VEHICLE LOAN AND RENTAL AGREEMENT</h1>
-<div class="meta">Agreement No. <b>${escapeHtml(a.agreementNumber)}</b> &nbsp;·&nbsp; Issued ${dateText(a.createdAt)} &nbsp;·&nbsp; Status: ${escapeHtml(AGREEMENT_STATUS[a.status]?.label ?? a.status)}</div>
-
-<p class="c">This Vehicle Loan and Rental Agreement (the &ldquo;Agreement&rdquo;) is made between ${escapeHtml(SHOP.name)} (the &ldquo;Shop&rdquo;) and the person named below (the &ldquo;Renter&rdquo;). The Shop lends the vehicle described below (the &ldquo;Vehicle&rdquo;) to the Renter on the terms of this Agreement.</p>
-
-<h2>1. Parties, Vehicle and Rental Period</h2>
-<div class="two">
-<div><table>${row("Renter", a.customerName)}${row("Phone", a.customerPhone)}${row("Email", a.customerEmail)}${row("Address", a.customerAddress)}</table></div>
-<div><table>${row("Claim number", a.claimNumber)}${row("Insurance company", a.insuranceCompany)}${row("Adjuster", a.adjusterName)}${row("Adjuster phone", a.adjusterPhone)}${row("Adjuster email", a.adjusterEmail)}${fill("Days authorized by insurer")}</table></div>
-</div>
-<table>${row("Vehicle", `${car.name}${carLine ? ", " + carLine : ""}`)}${row("License plate", plate)}${row("VIN", car.vin)}
-${row("Pick-up date", dateText(a.startDate))}${row("Return date", dateText(a.endDate))}${row("Days rented", a.days)}${row("Billed to", billedTo)}</table>
-
-<h2>2. Insurance Authorization and Renter Responsibility</h2>
-${clause("2.1", "The Shop lends the Vehicle while the Renter&rsquo;s own vehicle is being repaired at the Shop, for the Rental Period above. The Renter may keep the Vehicle only for the period described in this Agreement.")}
-${clause("2.2", "If the Renter&rsquo;s insurance company authorizes a loan or rental, the Shop may bill that company at the daily rate shown in Section 3 for the number of days it authorizes. An authorization does not limit the Renter&rsquo;s obligations under this Agreement.")}
-${clause("2.3", "<b>Any day beyond the number of days the insurance company authorizes, and any amount the insurance company does not pay, is the Renter&rsquo;s personal responsibility.</b> The Renter agrees to pay those charges at the daily rate, plus applicable sales tax, when the Shop issues an invoice.")}
-${clause("2.4", "The Renter understands that an insurance company may stop authorizing a rental at any time, and that the Renter remains responsible for all charges after that date.")}
-
-<h2>3. Charges, Billing and Payment</h2>
-${clause("3.1", `The daily rate for this Agreement is <b>$${a.dailyRate.toFixed(2)}</b> per day. Each day or part of a day counts as one day. Sales tax is applied to the whole rental total at ${a.taxRate}%. The rental total on this Agreement is <b>$${a.total.toFixed(2)}</b>, including tax, before any fees under Sections 4 through 7.`)}
-${clause("3.2", "Charges are billed to the party shown in Section 1. Where charges are billed to an insurance company, the Renter remains liable for any part the company does not pay.")}
-${clause("3.3", "Invoices are due on receipt unless the Shop states otherwise in writing. Late payments may be charged interest at the maximum rate permitted by New York law.")}
-${clause("3.4", "The Renter authorizes the Shop to charge the Renter&rsquo;s payment method on file for any amount due under this Agreement that is not paid when due.")}
-${clause("3.5", "The rate on this Agreement may be changed only by a written amendment signed by both parties before the Vehicle is released.")}
-
-<h2>4. Return of Vehicle and Holding Over</h2>
-${clause("4.1", "The Renter must return the Vehicle to the Shop on the Return Date, at the Shop&rsquo;s place of business, with all keys, documents and accessories.")}
-${clause("4.2", "When the Renter&rsquo;s repairs are complete, the Shop may ask the Renter to return the Vehicle within twenty-four (24) hours after notice by telephone, voicemail, text message, email or in person. Notice sent to the contact information in Section 1 is sufficient.")}
-${clause("4.3", "If the Vehicle is kept after the Return Date or after the notice period in Section 4.2, each additional day is charged at the daily rate. The Renter remains responsible for the Vehicle during that time, including for any loss, damage or theft.")}
-${clause("4.4", "If the Vehicle is not returned when required, the Renter agrees to pay the Shop&rsquo;s reasonable costs to recover it, including towing, storage and attorney&rsquo;s fees.")}
-
-<h2>5. Use of the Vehicle</h2>
-${clause("5.1", "Only the Renter, or a driver approved in writing by the Shop, may drive the Vehicle.")}
-${clause("5.2", "The Renter shall not sublet, lend, rent or allow anyone else to possess or use the Vehicle; use the Vehicle for hire, towing, racing, speed contests or off-road driving; carry more passengers than seats or any hazardous material; or drive the Vehicle outside the State of New York without the Shop&rsquo;s written consent.")}
-${clause("5.3", "The Renter shall not operate the Vehicle while under the influence of alcohol, cannabis, narcotics or any other substance that impairs driving.")}
-${clause("5.4", "The Renter shall obey all traffic, parking and other laws. The Renter is responsible for all parking tickets, traffic violations, tolls, fines and impound fees assigned to the Vehicle while it is in the Renter&rsquo;s possession.")}
-
-<h2>6. Driver Qualifications</h2>
-${clause("6.1", "The driver must be at least twenty-six (26) years old, hold a valid driver&rsquo;s license for this class of vehicle, and present that license at pick-up.")}
-${clause("6.2", "The Renter confirms that the information about the Renter and the Renter&rsquo;s insurance in this Agreement is accurate, and will tell the Shop promptly of any change.")}
-
-<h2>7. Care, Fuel, Cleaning and Keys</h2>
-${clause("7.1", "The Renter shall keep the Vehicle in good condition, lock it when unattended, and protect it from loss or damage.")}
-${clause("7.2", "<b>Smoking is prohibited in the Vehicle.</b> A cleaning fee of <b>$125.00</b> applies to smoke odor or smoking residue. The Renter is also responsible for any cleaning or repair cost above that amount.")}
-${clause("7.3", "The Renter shall return the Vehicle with the same fuel level recorded at pick-up in Section 8. For each quarter tank of fuel needed to restore that level, the Renter shall pay a <b>$20.00</b> fuel service charge plus the cost of the fuel.")}
-${clause("7.4", "The Renter shall not remove, alter, or add any equipment, accessory or sticker to the Vehicle.")}
-${clause("7.5", "The Renter is responsible for any lost, stolen or damaged keys or key fobs, including the cost of replacing or reprogramming them.")}
-
-<h2>8. Vehicle Condition Report</h2>
-<p class="c">The Renter and the Shop have recorded the Vehicle&rsquo;s condition below. The Renter accepts the Vehicle in the condition recorded at pick-up, and any damage not recorded there will be presumed to have occurred during the rental.</p>
-<table>${fill("Mileage out")}${fill("Mileage in")}${row("Fuel out", a.fuelOut)}${fill("Fuel in")}${row("Condition out", a.conditionOut)}${fill("Condition in")}${row("Damage noted at pick-up", a.damageNotes)}${fill("Damage noted at return")}</table>
-
-<h2>9. Insurance; Responsibility for Damage and Loss</h2>
-${clause("9.1", "The Renter&rsquo;s own automobile insurance is primary for the Vehicle while it is in the Renter&rsquo;s possession. The Renter certifies that the Renter carries motor vehicle liability insurance meeting New York requirements, and that the Renter&rsquo;s policy covers the Renter while driving a loaned vehicle, to the extent the policy permits.")}
-${clause("9.2", "<b>The Renter is responsible for all damage to the Vehicle, regardless of fault,</b> including collision, theft, vandalism, weather, glass and undercarriage damage. This responsibility applies to the extent the Vehicle&rsquo;s damage is not paid by an insurance company that accepts the claim. The Renter is responsible for all deductibles and for any repair the insurance company does not pay.")}
-${clause("9.3", "If the Vehicle is lost, stolen, destroyed, or cannot be returned for any reason, the Renter shall pay the Vehicle&rsquo;s market value on the date of loss, the value of any missing accessories, and the Shop&rsquo;s reasonable loss-of-use charge at the daily rate for the period the Vehicle is unavailable.")}
-${clause("9.4", "The Shop provides no warranty, express or implied, about the Vehicle. Any insurance maintained by the Shop is excess over, and does not replace, the Renter&rsquo;s insurance and does not cover the Renter&rsquo;s liability.")}
-
-<h2>10. Accidents and Reporting</h2>
-${clause("10.1", "The Renter must notify the Shop within <b>twelve (12) hours</b> of any accident, theft, vandalism, fire or other damage involving the Vehicle, and must provide the Shop a full written report.")}
-${clause("10.2", "The Renter shall report any accident to the police and the New York Department of Motor Vehicles when required by the New York Vehicle and Traffic Law, and shall give the Shop a copy of each report.")}
-${clause("10.3", "The Renter shall not admit fault, make any settlement, or waive any claim concerning the Vehicle without the Shop&rsquo;s prior written consent, except where the law requires otherwise.")}
-${clause("10.4", "The Renter shall cooperate with the Shop and any insurance company in investigating and resolving any claim involving the Vehicle.")}
-
-<h2>11. Indemnification</h2>
-${clause("11.1", "To the fullest extent permitted by law, the Renter shall defend, indemnify and hold harmless the Shop, and its owners, employees and agents, from all claims, demands, suits, judgments, losses, damages, fines, penalties, attorney&rsquo;s fees and costs arising from the possession, use, operation, storage or condition of the Vehicle while it is in the Renter&rsquo;s possession or control, including claims for bodily injury or property damage. This obligation does not apply to the extent a loss is caused by the Shop&rsquo;s gross negligence or willful misconduct.")}
-
-<h2>12. Default and Remedies</h2>
-${clause("12.1", "The Renter is in default if the Renter fails to pay any amount when due, fails to return the Vehicle when required, breaks any term of this Agreement, or gives false information to the Shop.")}
-${clause("12.2", "After a default, the Shop may demand return of the Vehicle, end the rental, and use any remedy available under New York law, including recovery of the Vehicle.")}
-${clause("12.3", "To the extent permitted by law, the Renter shall pay the Shop&rsquo;s reasonable attorney&rsquo;s fees, collection costs and court costs incurred in enforcing this Agreement.")}
-${clause("12.4", "The Shop&rsquo;s rights are cumulative. A delay in enforcing any right is not a waiver of that right.")}
-
-<h2>13. Governing Law and Venue</h2>
-${clause("13.1", "This Agreement is governed by the laws of the State of New York.")}
-${clause("13.2", `Any legal action arising from this Agreement shall be brought in the courts located in ${escapeHtml(SHOP.county)} County, New York, and the parties consent to the jurisdiction of those courts.`)}
-
-<h2>14. General Terms</h2>
-${clause("14.1", "This Agreement, together with any invoice issued under it, is the entire agreement about the rental of the Vehicle and replaces any prior discussion about it.")}
-${clause("14.2", "This Agreement may be changed only in a writing signed by both parties. If any provision is found unenforceable, the rest of this Agreement remains in effect, and that provision applies to the maximum extent permitted by law.")}
-${clause("14.3", "Notices to the Renter may be sent to the contact information in Section 1. The Renter shall tell the Shop in writing of any change of address, telephone number or email.")}
-${clause("14.4", "A photocopy, scan or electronic signature of this Agreement has the same effect as the original. Sections 9 through 14 survive the return of the Vehicle.")}
-
-<div class="keep">
-<h2>15. Acknowledgment and Consent</h2>
-<div class="check">
-<p><span></span>I have read this Agreement, I understand it, and I agree to all of its terms.</p>
-<p><span></span>I understand that any day beyond the insurance-authorized period, and any amount the insurance company does not pay, is my personal responsibility (Section 2).</p>
-<p><span></span>I understand that I am responsible for damage to the Vehicle regardless of fault, to the extent it is not paid by insurance (Section 9).</p>
-<p><span></span>I have had the opportunity to consult an attorney before signing, and I sign this Agreement voluntarily.</p>
-</div>
-<div class="sig">
-<div><div class="space"></div><div class="line">Renter signature</div></div>
-<div><div class="space"></div><div class="line">Printed name</div></div>
-<div><div class="space"></div><div class="line">Date</div></div>
-</div>
-<div class="sig">
-<div><div class="space"></div><div class="line">Shop representative signature</div></div>
-<div><div class="space"></div><div class="line">Printed name and title</div></div>
-<div><div class="space"></div><div class="line">Date</div></div>
-</div>
-</div>
-
-</body></html>`;
-  const win = window.open("", "_blank");
-  if (!win) return; // pop-up blocked
-  win.document.write(html);
-  win.document.close();
+// Saves a file from the API to the user's downloads.
+function saveBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function AgreementForm({
@@ -382,6 +242,7 @@ function AgreementForm({
   cars,
   claims,
   request,
+  download,
   onDone,
   onCancel,
 }: {
@@ -389,6 +250,7 @@ function AgreementForm({
   cars: RentalCar[];
   claims: ClaimLike[];
   request: Request;
+  download: Download;
   onDone: (message: string) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -477,6 +339,61 @@ function AgreementForm({
     }
   }
 
+  async function getPdf(path: string, fileName: string) {
+    setBusy(true);
+    setError("");
+    try {
+      saveBlob(await download(path), fileName);
+    } catch (pdfError) {
+      setError(errorText(pdfError, "Unable to download the PDF"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendForSigning() {
+    if (!existing) return;
+    setBusy(true);
+    setError("");
+    try {
+      await request(`/rental-agreements/${existing.id}/send`, { method: "POST" });
+      await onDone(`Sent ${existing.agreementNumber} to ${existing.customerEmail} for signing.`);
+    } catch (sendError) {
+      setError(errorText(sendError, "Unable to send for signature"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function checkSigning() {
+    if (!existing) return;
+    setBusy(true);
+    setError("");
+    try {
+      await request(`/rental-agreements/${existing.id}/refresh`, { method: "POST" });
+      await onDone(`Checked signing status for ${existing.agreementNumber}.`);
+    } catch (checkError) {
+      setError(errorText(checkError, "Unable to check the signing status"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function uploadSigned(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!existing) return;
+    setBusy(true);
+    setError("");
+    try {
+      await request(`/rental-agreements/${existing.id}/signed-copy`, { method: "POST", body: new FormData(event.currentTarget) });
+      await onDone(`Signed copy saved for ${existing.agreementNumber}.`);
+    } catch (uploadError) {
+      setError(errorText(uploadError, "Unable to upload the signed copy"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createInvoice(billTo: "insurer" | "customer") {
     if (!existing) return;
     setBusy(true);
@@ -547,9 +464,42 @@ function AgreementForm({
         </fieldset>
         <div className="rental-actions">
           <button className="orange-button" disabled={busy}>{busy ? "Saving..." : existing ? "Save changes" : "Create agreement"}</button>
-          {existing && <button type="button" className="secondary-button" onClick={() => openAgreement(existing)}>View / print agreement</button>}
         </div>
       </form>
+      {existing && (
+        <div className="rental-invoice rental-signing">
+          <h3>Signing</h3>
+          <p className="records-muted">
+            {existing.status === "signed"
+              ? "Signed. The signed copy is saved to the claim."
+              : existing.documensoEnvelopeId
+                ? "Sent for signature. The customer signs first, then the shop."
+                : "Not sent yet. Send it for signature, or download it and sign by hand."}
+          </p>
+          <div className="rental-actions">
+            <button type="button" className="secondary-button" disabled={busy} onClick={() => void getPdf(`/rental-agreements/${existing.id}/pdf`, `${existing.agreementNumber}-rental-agreement.pdf`)}>Download PDF</button>
+            {!existing.documensoEnvelopeId && existing.status === "draft" && (
+              <button type="button" className="orange-button" disabled={busy || !existing.customerEmail} onClick={() => void sendForSigning()}>Send for signature</button>
+            )}
+            {existing.documensoEnvelopeId && existing.status !== "signed" && (
+              <button type="button" className="secondary-button" disabled={busy} onClick={() => void checkSigning()}>Check signing status</button>
+            )}
+            {existing.status === "signed" && (
+              <button type="button" className="secondary-button" disabled={busy} onClick={() => void getPdf(`/rental-agreements/${existing.id}/signed.pdf`, `${existing.agreementNumber}-signed.pdf`)}>Download signed copy</button>
+            )}
+          </div>
+          {!existing.customerEmail && existing.status === "draft" && <p className="records-muted">Add the customer email above to send for signature.</p>}
+          {existing.status !== "signed" && (
+            <form className="rental-upload" onSubmit={uploadSigned}>
+              <label>
+                Signed PDF (signed by hand)
+                <input type="file" name="file" accept="application/pdf" required />
+              </label>
+              <button type="submit" className="secondary-button" disabled={busy}>Upload signed copy</button>
+            </form>
+          )}
+        </div>
+      )}
       {existing && (
         <div className="rental-invoice">
           <h3>Invoice</h3>

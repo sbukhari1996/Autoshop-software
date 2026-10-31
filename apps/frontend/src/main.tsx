@@ -325,6 +325,14 @@ function Icon({ name }: { name: string }) {
     </svg>
   );
 }
+async function fetchFile(path: string): Promise<Blob> {
+  const headers = new Headers();
+  const token = localStorage.getItem("repairos_token");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(`${API_URL}${path}`, { headers });
+  if (!response.ok) throw new Error(`Unable to download file (HTTP ${response.status})`);
+  return response.blob();
+}
 async function fetchJson<T>(
   path: string,
   options: RequestInit = {},
@@ -1005,7 +1013,7 @@ function App() {
             />
           )}
           {view === "Saved Receipts" && <SavedReceiptsView request={fetchJson} onOpen={openSavedReceipt} />}
-          {view === "Car Rental" && <RentalsView claims={claims} request={fetchJson} />}
+          {view === "Car Rental" && <RentalsView claims={claims} request={fetchJson} download={fetchFile} />}
           {view === "MV-104" && <Mv104View claims={claims} apiUrl={String(API_URL)} />}
           {view === "Bookkeeping" && <BookkeepingView data={finance} request={fetchJson} onChanged={() => void loadData()} />}
           {view === "Reports" && (

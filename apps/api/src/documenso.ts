@@ -11,6 +11,8 @@ export interface RepairAuthorizationSubmission {
   signerEmail: string;
   signerName: string;
   fieldPlacements?: AuthorizationFieldPlacement[];
+  // Several signers sign in order. When set, replaces the single signer above.
+  signers?: Array<{ name: string; email: string; signingOrder: number; fieldPlacements: AuthorizationFieldPlacement[] }>;
   documentTitle?: string;
   emailSubject?: string;
   emailMessage?: string;
@@ -53,8 +55,8 @@ export function getDocumensoApiConfig(env: NodeJS.ProcessEnv = process.env): Doc
   return { apiToken, baseUrl };
 }
 
-export function buildDocumensoPayload(submission: RepairAuthorizationSubmission) {
-  const fields = (submission.fieldPlacements || []).map((field) => ({
+function documensoFields(placements: AuthorizationFieldPlacement[]) {
+  return placements.map((field) => ({
     identifier: 0,
     type: documensoFieldType(field.type),
     page: field.page,
@@ -69,18 +71,32 @@ export function buildDocumensoPayload(submission: RepairAuthorizationSubmission)
       required: field.required,
     },
   }));
+}
+
+export function buildDocumensoPayload(submission: RepairAuthorizationSubmission) {
+  const recipients = submission.signers
+    ? submission.signers.map((signer) => ({
+      email: signer.email,
+      name: signer.name,
+      role: 'SIGNER',
+      signingOrder: signer.signingOrder,
+      fields: documensoFields(signer.fieldPlacements),
+    }))
+    : [{
+      email: submission.signerEmail,
+      name: submission.signerName,
+      role: 'SIGNER',
+      fields: documensoFields(submission.fieldPlacements || []),
+    }];
   return {
     type: 'DOCUMENT',
     title: submission.documentTitle ?? `Repair authorization ${submission.jobNumber}`,
     externalId: submission.authorizationId,
     visibility: 'ADMIN',
-    recipients: [{
-      email: submission.signerEmail,
-      name: submission.signerName,
-      role: 'SIGNER',
-      fields,
-    }],
+    recipients,
     meta: {
+      // Several signers sign in order: each is emailed after the previous one signs.
+      ...(submission.signers ? { signingOrder: 'SEQUENTIAL' } : {}),
       subject: submission.emailSubject ?? `Please sign repair authorization ${submission.jobNumber}`,
       message: submission.emailMessage ?? 'Please review and sign the attached repair authorization.',
     },

@@ -790,6 +790,8 @@ model RentalAgreement {
   sentAt              DateTime?
   signedAt            DateTime?
   returnedAt          DateTime?
+  pdfFilePath         String?
+  signedFilePath      String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 

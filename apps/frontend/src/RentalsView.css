@@ -27,3 +27,5 @@
 .status-pill.rental-status-signed { color: #1e6b3c; background: #e2f5ea; }
 .status-pill.rental-status-returned { color: #1d4f91; background: #e4efff; }
 @media (max-width: 720px) { .rental-car { grid-template-columns: 1fr; } }
+.rental-upload { display: flex; gap: 12px; flex-wrap: wrap; align-items: end; margin-top: 12px; }
+.rental-upload label { display: grid; gap: 6px; font-size: .9rem; }

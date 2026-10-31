@@ -2,6 +2,18 @@ import { Router } from 'express';
 import type { PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
 import { nextInvoiceNumber } from './invoices.js';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import multer from 'multer';
+import { createRentalAgreementPdf, SHOP, type RentalAgreementPdfInput } from '../rentalAgreement.js';
+import {
+  createRepairAuthorizationEnvelope,
+  distributeDocumensoEnvelope,
+  getDocumensoApiConfig,
+  getDocumensoEnvelope,
+  getSignedDocumensoDocument,
+} from '../documenso.js';
 
 const carStatuses = ['available', 'in_repair', 'out_of_service'];
 const agreementStatuses = ['draft', 'sent', 'signed', 'returned'];
@@ -241,5 +253,137 @@ export function createRentalsRouter(prisma: PrismaClient) {
     res.status(201).json(invoice);
   }));
 
+
+  // ---- PDF, e-signature and signed copies ----
+  const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
+  const signedUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  const findAgreement = async (id: string) => {
+    const row = await prisma.rentalAgreement.findUnique({ where: { id }, include: { rentalCar: true } });
+    if (!row) throw new ApiError(404, 'Rental agreement not found');
+    return row;
+  };
+
+  const pdfInput = (agreement: Awaited<ReturnType<typeof findAgreement>>): RentalAgreementPdfInput => ({ ...agreement, issuedOn: agreement.createdAt });
+
+  async function storeAgreementPdf(agreementNumber: string, kind: string, bytes: Uint8Array) {
+    await mkdir(uploadDirectory, { recursive: true });
+    const absolute = path.join(uploadDirectory, `rental-${agreementNumber}-${kind}-${randomUUID()}.pdf`);
+    await writeFile(absolute, bytes);
+    return path.relative(process.cwd(), absolute);
+  }
+
+  async function readAgreementPdf(filePath: string) {
+    const resolved = path.resolve(process.cwd(), filePath);
+    if (path.relative(uploadDirectory, resolved).startsWith('..')) throw new ApiError(500, 'Stored agreement file is outside the upload folder');
+    return readFile(resolved);
+  }
+
+  // Puts a copy on the claim's documents, when the agreement belongs to a claim.
+  async function attachToClaim(claimId: string | null, agreementNumber: string, filePath: string, description: string) {
+    if (!claimId) return;
+    await prisma.claimDocument.create({ data: { claimId, fileName: `${agreementNumber}-rental-agreement.pdf`, filePath, documentType: 'Rental agreement', description } });
+  }
+
+  // The agreement as a PDF: the copy that was sent once sent, otherwise a fresh copy to print or sign by hand.
+  router.get('/rental-agreements/:id/pdf', asyncHandler(async (req, res) => {
+    const agreement = await findAgreement(idOf(req));
+    const bytes = agreement.pdfFilePath
+      ? await readAgreementPdf(agreement.pdfFilePath)
+      : Buffer.from((await createRentalAgreementPdf(pdfInput(agreement))).pdf);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${agreement.agreementNumber}-rental-agreement.pdf"`);
+    res.send(bytes);
+  }));
+
+  // Sends the agreement to the customer, then the shop owner after the customer signs.
+  router.post('/rental-agreements/:id/send', asyncHandler(async (req, res) => {
+    const agreement = await findAgreement(idOf(req));
+    if (agreement.documensoEnvelopeId) throw new ApiError(409, 'This agreement was already sent for signature');
+    if (agreement.status !== 'draft') throw new ApiError(409, 'Only draft agreements can be sent for signature');
+    const customerEmail = agreement.customerEmail?.trim() || '';
+    if (!emailPattern.test(customerEmail)) throw new ApiError(400, 'Add the customer email on the agreement before sending');
+
+    const config = getDocumensoApiConfig();
+    const shopEmail = process.env.SHOP_SIGNER_EMAIL?.trim() || SHOP.email;
+    const shopName = process.env.SHOP_SIGNER_NAME?.trim() || SHOP.name;
+    const generated = await createRentalAgreementPdf(pdfInput(agreement));
+    const pdfFilePath = await storeAgreementPdf(agreement.agreementNumber, 'sent', generated.pdf);
+    await prisma.rentalAgreement.update({ where: { id: agreement.id }, data: { pdfFilePath } });
+
+    const envelopeId = await createRepairAuthorizationEnvelope(config, {
+      authorizationId: agreement.id,
+      jobId: null,
+      claimId: agreement.claimId,
+      jobNumber: agreement.agreementNumber,
+      fileName: `${agreement.agreementNumber}-rental-agreement.pdf`,
+      pdf: Buffer.from(generated.pdf),
+      signerEmail: customerEmail,
+      signerName: agreement.customerName,
+      signers: [
+        { name: agreement.customerName, email: customerEmail, signingOrder: 1, fieldPlacements: generated.fields.renter },
+        { name: shopName, email: shopEmail, signingOrder: 2, fieldPlacements: generated.fields.shop },
+      ],
+      documentTitle: `Vehicle loan and rental agreement ${agreement.agreementNumber}`,
+      emailSubject: `Please sign rental agreement ${agreement.agreementNumber}`,
+      emailMessage: 'Please review, initial and sign the attached vehicle loan and rental agreement.',
+    });
+    await prisma.rentalAgreement.update({ where: { id: agreement.id }, data: { documensoEnvelopeId: envelopeId, documensoStatus: 'sending' } });
+    await distributeDocumensoEnvelope(config, envelopeId);
+
+    const sent = await prisma.rentalAgreement.update({
+      where: { id: agreement.id },
+      data: { status: 'sent', documensoStatus: 'sent', sentAt: new Date() },
+      include: { rentalCar: true },
+    });
+    await attachToClaim(agreement.claimId, agreement.agreementNumber, pdfFilePath, 'Rental agreement sent for signature');
+    res.status(201).json(sent);
+  }));
+
+  // Checks Documenso. When both signers have signed, saves the signed copy to the claim.
+  router.post('/rental-agreements/:id/refresh', asyncHandler(async (req, res) => {
+    const agreement = await findAgreement(idOf(req));
+    if (!agreement.documensoEnvelopeId) throw new ApiError(409, 'This agreement has not been sent for signature');
+    const config = getDocumensoApiConfig();
+    const envelope = await getDocumensoEnvelope(config, agreement.documensoEnvelopeId);
+    const completed = envelope.status.toUpperCase().includes('COMPLETE');
+    if (completed && !agreement.signedFilePath) {
+      const itemId = envelope.envelopeItems[0]?.id;
+      if (!itemId) throw new ApiError(502, 'Documenso returned no document for this envelope');
+      const signedFilePath = await storeAgreementPdf(agreement.agreementNumber, 'signed', await getSignedDocumensoDocument(config, itemId));
+      await attachToClaim(agreement.claimId, agreement.agreementNumber, signedFilePath, 'Signed rental agreement');
+      res.json(await prisma.rentalAgreement.update({
+        where: { id: agreement.id },
+        data: { status: 'signed', documensoStatus: envelope.status, signedAt: envelope.completedAt ? new Date(envelope.completedAt) : new Date(), signedFilePath },
+        include: { rentalCar: true },
+      }));
+      return;
+    }
+    res.json(await prisma.rentalAgreement.update({ where: { id: agreement.id }, data: { documensoStatus: envelope.status }, include: { rentalCar: true } }));
+  }));
+
+  // Upload a copy signed by hand (wet ink) or signed outside Documenso.
+  router.post('/rental-agreements/:id/signed-copy', signedUpload.single('file'), asyncHandler(async (req, res) => {
+    const agreement = await findAgreement(idOf(req));
+    const file = (req as { file?: { buffer: Buffer } }).file;
+    if (!file) throw new ApiError(400, 'Choose the signed PDF to upload');
+    if (file.buffer.subarray(0, 5).toString('ascii') !== '%PDF-') throw new ApiError(400, 'The signed copy must be a PDF');
+    const signedFilePath = await storeAgreementPdf(agreement.agreementNumber, 'signed', file.buffer);
+    await attachToClaim(agreement.claimId, agreement.agreementNumber, signedFilePath, 'Signed rental agreement (uploaded)');
+    res.json(await prisma.rentalAgreement.update({
+      where: { id: agreement.id },
+      data: { status: 'signed', signedAt: new Date(), signedFilePath },
+      include: { rentalCar: true },
+    }));
+  }));
+
+  router.get('/rental-agreements/:id/signed.pdf', asyncHandler(async (req, res) => {
+    const agreement = await findAgreement(idOf(req));
+    if (!agreement.signedFilePath) throw new ApiError(409, 'No signed copy yet');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${agreement.agreementNumber}-signed.pdf"`);
+    res.send(await readAgreementPdf(agreement.signedFilePath));
+  }));
   return router;
 }
