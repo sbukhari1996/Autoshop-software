@@ -1,5 +1,6 @@
 import React from "react";
 import { downloadMonthlyStatement } from "./monthlyStatement";
+import { formatLedgerDate } from "./ledgerDate";
 import "./ledger-mobile.css";
 
 type FinanceEntry = {
@@ -204,7 +205,7 @@ export function BookkeepingView({
       item.category,
       item.paymentMethod,
       item.entryDate.slice(0, 10),
-      dateValue(item.entryDate),
+      formatLedgerDate(item.entryDate),
       item.notes,
       item.amount.toFixed(2),
       ...item.documents.map((document) => document.fileName),
@@ -764,7 +765,7 @@ export function BookkeepingView({
                           : current.filter((id) => id !== item.id))}
                       />
                     </td>
-                    <td data-label="Date">{dateValue(item.entryDate)}</td>
+                    <td data-label="Date">{formatLedgerDate(item.entryDate)}</td>
                     <td className={`finance-amount ${item.type === "income" ? "finance-income" : "finance-expense"}`} data-label="Amount">
                       <span>{item.type === "income" ? "+" : "-"}{currency(item.amount)}</span>
                     </td>
@@ -820,7 +821,7 @@ export function BookkeepingView({
                   <span className="ledger-card-text">
                     <strong>{item.description}</strong>
                     <small>
-                      {dateValue(item.entryDate)} · {item.category || "Uncategorized"}
+                      {formatLedgerDate(item.entryDate)} · {item.category || "Uncategorized"}
                       {item.paymentMethod ? ` · ${item.paymentMethod.replace("_", " ")}` : ""}
                     </small>
                   </span>
