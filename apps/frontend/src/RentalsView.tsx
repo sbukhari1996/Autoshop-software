@@ -522,7 +522,12 @@ function AgreementForm({
       {existing && (
         <div className="rental-invoice">
           <h3>Invoice</h3>
-          {existing.invoiceId ? <p className="records-muted">An invoice already exists for this agreement.</p> : (
+          {existing.invoiceId ? (
+            <div className="rental-actions">
+              <button type="button" className="secondary-button" disabled={busy} onClick={() => void getPdf(`/rental-agreements/${existing.id}/invoice.pdf`, `${existing.agreementNumber}-invoice.pdf`)}>Download invoice PDF</button>
+              <button type="button" className="orange-button" disabled={busy} onClick={() => void getPdf(`/rental-agreements/${existing.id}/packet.pdf`, `${existing.agreementNumber}-insurer-packet.pdf`)}>Download insurer packet (agreement + invoice)</button>
+            </div>
+          ) : (
             <div className="rental-actions">
               <button type="button" className="secondary-button" disabled={busy} onClick={() => void createInvoice("insurer")}>Invoice insurance company</button>
               <button type="button" className="secondary-button" disabled={busy} onClick={() => void createInvoice("customer")}>Invoice customer</button>

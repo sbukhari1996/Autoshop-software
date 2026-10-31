@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import type { PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
-import { nextInvoiceNumber } from './invoices.js';
+import { invoicePdfBytes, nextInvoiceNumber } from './invoices.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import multer from 'multer';
+import { PDFDocument } from 'pdf-lib';
 import { createRentalAgreementPdf, SHOP, type RentalAgreementPdfInput } from '../rentalAgreement.js';
 import {
   createRepairAuthorizationEnvelope,
@@ -397,6 +398,34 @@ export function createRentalsRouter(prisma: PrismaClient) {
       data: { status: 'signed', signedAt: new Date(), signedFilePath },
       include: { rentalCar: true },
     }));
+  }));
+
+  // The invoice as a PDF, straight from the invoice record so numbers match the Invoices page.
+  router.get('/rental-agreements/:id/invoice.pdf', asyncHandler(async (req, res) => {
+    const agreement = await findAgreement(idOf(req));
+    if (!agreement.invoiceId) throw new ApiError(409, 'Create the invoice first');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${agreement.agreementNumber}-invoice.pdf"`);
+    res.send(await invoicePdfBytes(prisma, agreement.invoiceId));
+  }));
+
+  // Insurer packet: the signed agreement (or the sent or fresh copy if not signed yet) followed by the invoice.
+  router.get('/rental-agreements/:id/packet.pdf', asyncHandler(async (req, res) => {
+    const agreement = await findAgreement(idOf(req));
+    if (!agreement.invoiceId) throw new ApiError(409, 'Create the invoice first');
+    const agreementBytes = agreement.signedFilePath
+      ? await readAgreementPdf(agreement.signedFilePath)
+      : agreement.pdfFilePath
+        ? await readAgreementPdf(agreement.pdfFilePath)
+        : Buffer.from((await createRentalAgreementPdf(pdfInput(agreement))).pdf);
+    const packet = await PDFDocument.create();
+    for (const bytes of [agreementBytes, await invoicePdfBytes(prisma, agreement.invoiceId)]) {
+      const source = await PDFDocument.load(bytes);
+      (await packet.copyPages(source, source.getPageIndices())).forEach((page) => packet.addPage(page));
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${agreement.agreementNumber}-insurer-packet.pdf"`);
+    res.send(Buffer.from(await packet.save()));
   }));
 
   router.get('/rental-agreements/:id/signed.pdf', asyncHandler(async (req, res) => {

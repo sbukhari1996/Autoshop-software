@@ -233,6 +233,13 @@ export async function nextInvoiceNumber(tx: Prisma.TransactionClient) {
   }
 }
 
+// Renders an invoice as a PDF from its stored record. Used by rental agreements for the insurer packet.
+export async function invoicePdfBytes(prisma: PrismaClient, id: string): Promise<Buffer> {
+  const invoice = await prisma.invoice.findUnique({ where: { id }, include: { customer: true, job: { include: { vehicle: true } }, claim: true, lineItems: { orderBy: { createdAt: 'asc' } }, payments: { orderBy: { date: 'asc' } } } });
+  if (!invoice) throw new ApiError(404, 'Invoice not found');
+  return createInvoicePdf(invoice);
+}
+
 async function createInvoicePdf(invoice: {
   invoiceNumber: string;
   issueDate: Date;
