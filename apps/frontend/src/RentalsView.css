@@ -1,8 +1,11 @@
 .rental-workspace { display: grid; gap: 18px; }
 .rental-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .rental-heading h2 { margin: 0; }
-.rental-car-form, .rental-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
-.rental-form fieldset { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin: 0; min-width: 0; }
+.rental-car-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.rental-form { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.rental-form > .rental-actions { justify-content: flex-end; }
+@media (min-width: 900px) { .rental-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rental-form > .rental-actions, .rental-form > .rental-invoice { grid-column: 1 / -1; } }
+.rental-form fieldset { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin: 0; min-width: 0; }
 .rental-form legend { font-weight: 600; padding: 0 6px; }
 .rental-form label, .rental-car-form label, .rental-filters label, .rental-car label { display: grid; gap: 6px; font-size: .9rem; }
 .rental-form input, .rental-form select, .rental-form textarea, .rental-car-form input, .rental-filters select, .rental-car select, .rental-car input { min-height: 44px; padding: 0 10px; font: inherit; }
@@ -18,6 +21,7 @@
 .rental-filters { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
 .rental-filters label { min-width: 200px; }
 .rental-invoice { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.rental-print { min-height: 44px; padding: 0 12px; white-space: nowrap; }
 .status-pill.rental-status-draft { color: #4a4f55; background: #ebedf0; }
 .status-pill.rental-status-sent { color: #8a5a00; background: #fff4d6; }
 .status-pill.rental-status-signed { color: #1e6b3c; background: #e2f5ea; }

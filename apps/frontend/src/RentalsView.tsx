@@ -193,7 +193,7 @@ function RentalLog({ agreements, onOpen }: { agreements: Agreement[]; onOpen: (a
       {shown.length ? (
         <table className="data-table">
           <thead>
-            <tr><th>Agreement</th><th>Customer</th><th>Car</th><th>Dates</th><th>Total</th><th>Status</th><th>Invoice</th></tr>
+            <tr><th>Agreement</th><th>Customer</th><th>Car</th><th>Dates</th><th>Total</th><th>Status</th><th>Invoice</th><th>Copy</th></tr>
           </thead>
           <tbody>
             {shown.map((item) => (
@@ -205,6 +205,7 @@ function RentalLog({ agreements, onOpen }: { agreements: Agreement[]; onOpen: (a
                 <td data-label="Total">{money(item.total)}</td>
                 <td data-label="Status"><span className={`status-pill ${AGREEMENT_STATUS[item.status]?.className ?? ""}`}>{AGREEMENT_STATUS[item.status]?.label ?? item.status}</span></td>
                 <td data-label="Invoice">{item.invoiceId ? "Created" : "None"}</td>
+                <td data-label="Copy"><button type="button" className="secondary-button rental-print" onClick={(event) => { event.stopPropagation(); openAgreement(item); }}>Print / PDF</button></td>
               </tr>
             ))}
           </tbody>
