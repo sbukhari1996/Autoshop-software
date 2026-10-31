@@ -221,7 +221,7 @@ const escapeHtml = (value: string | number | null | undefined) =>
   String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char] as string));
 
 // Shop details printed on every agreement. Fill these in once.
-const SHOP = { name: "Mastercraft Auto Repair & Collision", address: "[Shop street address]", cityLine: "[City], New York [ZIP]", phone: "[Shop phone]", county: "[County]" };
+const SHOP = { name: "Mastercraft Auto Repair & Collision", address: "3821 23rd St", cityLine: "Long Island City, NY 11101", phone: "718-578-4563", email: "shop@mastercraftautony.com", county: "Queens" };
 
 // Printable loan and rental agreement in a new tab. Print dialog > Save as PDF gives the download.
 // shortcut: wording is a drafted template, have a New York attorney review before use.
@@ -235,7 +235,7 @@ function openAgreement(a: Agreement) {
   const clause = (no: string, text: string) => `<p class="c"><b>${no}</b>&nbsp; ${text}</p>`;
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(a.agreementNumber)} Vehicle Loan and Rental Agreement</title>
 <style>
-@page { size: Letter; margin: 0.7in 0.75in 0.9in; }
+@page { size: Letter; margin: 0.7in 0.75in 0.9in; @bottom-left { content: "${escapeHtml(a.agreementNumber)} · ${SHOP.name}"; font: 8.5pt Arial, sans-serif; color: #333; } @bottom-right { content: "Renter initials: ________   Page " counter(page) " of " counter(pages); font: 8.5pt Arial, sans-serif; color: #333; } }
 body { font-family: "Times New Roman", Times, Georgia, serif; color: #111; font-size: 11pt; line-height: 1.38; margin: 0; }
 .bar { margin: 16px; font: 14px Arial, sans-serif; }
 .bar button { padding: 8px 16px; font-size: 14px; }
@@ -260,13 +260,12 @@ p.c b { font-weight: bold; }
 .sig > div { flex: 1; }
 .sig .line { border-top: 1px solid #111; padding-top: 3px; font-size: 10pt; }
 .sig .space { height: 30px; }
-.foot { position: fixed; bottom: 0; left: 0; right: 0; font-size: 8.5pt; color: #333; border-top: 1px solid #888; padding-top: 3px; display: flex; justify-content: space-between; }
 .keep { page-break-inside: avoid; }
 @media print { .bar { display: none; } }
 @media screen { body { max-width: 8.5in; margin: 0 auto 60px; padding: 0 0.5in; box-sizing: border-box; } }
 </style></head><body>
 <div class="bar"><button onclick="window.print()">Print or save as PDF</button></div>
-<div class="letterhead"><div class="shop">${escapeHtml(SHOP.name)}</div><div class="addr">${escapeHtml(SHOP.address)} · ${escapeHtml(SHOP.cityLine)} · ${escapeHtml(SHOP.phone)}</div></div>
+<div class="letterhead"><div class="shop">${escapeHtml(SHOP.name)}</div><div class="addr">${escapeHtml(SHOP.address)} · ${escapeHtml(SHOP.cityLine)}<br>Tel. ${escapeHtml(SHOP.phone)} · ${escapeHtml(SHOP.email)}</div></div>
 <h1>VEHICLE LOAN AND RENTAL AGREEMENT</h1>
 <div class="meta">Agreement No. <b>${escapeHtml(a.agreementNumber)}</b> &nbsp;·&nbsp; Issued ${dateText(a.createdAt)} &nbsp;·&nbsp; Status: ${escapeHtml(AGREEMENT_STATUS[a.status]?.label ?? a.status)}</div>
 
@@ -371,7 +370,6 @@ ${clause("14.4", "A photocopy, scan or electronic signature of this Agreement ha
 </div>
 </div>
 
-<div class="foot"><span>${escapeHtml(a.agreementNumber)} · ${escapeHtml(SHOP.name)}</span><span>Renter initials: ________</span></div>
 </body></html>`;
   const win = window.open("", "_blank");
   if (!win) return; // pop-up blocked
