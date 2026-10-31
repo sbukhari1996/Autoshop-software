@@ -203,7 +203,7 @@ function RentalLog({ agreements, onOpen, onPdf }: { agreements: Agreement[]; onO
       {shown.length ? (
         <table className="data-table">
           <thead>
-            <tr><th>Agreement</th><th>Customer</th><th>Car</th><th>Dates</th><th>Total</th><th>Status</th><th>Invoice</th><th>Copy</th></tr>
+            <tr><th>Agreement</th><th>Customer</th><th>Car</th><th>Dates</th><th>Total</th><th>Status</th><th>Invoice</th><th>Actions</th></tr>
           </thead>
           <tbody>
             {shown.map((item) => (
@@ -215,7 +215,7 @@ function RentalLog({ agreements, onOpen, onPdf }: { agreements: Agreement[]; onO
                 <td data-label="Total">{money(item.total)}</td>
                 <td data-label="Status"><span className={`status-pill ${AGREEMENT_STATUS[item.status]?.className ?? ""}`}>{AGREEMENT_STATUS[item.status]?.label ?? item.status}</span></td>
                 <td data-label="Invoice">{item.invoiceId ? "Created" : "None"}</td>
-                <td data-label="Copy"><button type="button" className="secondary-button rental-print" onClick={(event) => { event.stopPropagation(); onPdf(item); }}>PDF</button></td>
+                <td data-label="Actions" className="rental-row-actions"><button type="button" className="secondary-button rental-print" onClick={(event) => { event.stopPropagation(); onOpen(item); }}>Edit</button><button type="button" className="secondary-button rental-print" onClick={(event) => { event.stopPropagation(); onPdf(item); }}>PDF</button></td>
               </tr>
             ))}
           </tbody>
@@ -394,6 +394,21 @@ function AgreementForm({
     }
   }
 
+  async function deleteAgreement() {
+    if (!existing) return;
+    if (!window.confirm(`Delete ${existing.agreementNumber}? This cannot be undone.`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await request(`/rental-agreements/${existing.id}`, { method: "DELETE" });
+      await onDone(`Deleted ${existing.agreementNumber}.`);
+    } catch (deleteError) {
+      setError(errorText(deleteError, "Unable to delete the agreement"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createInvoice(billTo: "insurer" | "customer") {
     if (!existing) return;
     setBusy(true);
@@ -418,6 +433,7 @@ function AgreementForm({
         <button type="button" className="secondary-button" onClick={onCancel}>Back to rentals</button>
       </div>
       {error && <div className="sr-banner sr-warn" role="alert">{error}</div>}
+      {existing?.documensoEnvelopeId && <div className="sr-banner sr-warn" role="note">Sent for signature, so the terms are locked. Save changes only updates return mileage, fuel, condition and notes.</div>}
       <form className="rental-form" onSubmit={save}>
         <fieldset>
           <legend>Claim and insurer</legend>
@@ -464,6 +480,9 @@ function AgreementForm({
         </fieldset>
         <div className="rental-actions">
           <button className="orange-button" disabled={busy}>{busy ? "Saving..." : existing ? "Save changes" : "Create agreement"}</button>
+          {existing && !existing.documensoEnvelopeId && !existing.invoiceId && !existing.signedAt && (
+            <button type="button" className="danger-button" disabled={busy} onClick={() => void deleteAgreement()}>Delete agreement</button>
+          )}
         </div>
       </form>
       {existing && (

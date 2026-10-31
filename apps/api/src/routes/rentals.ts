@@ -182,6 +182,17 @@ export function createRentalsRouter(prisma: PrismaClient) {
     const current = await prisma.rentalAgreement.findUnique({ where: { id: idOf(req) } });
     if (!current) throw new ApiError(404, 'Rental agreement not found');
     const body = req.body ?? {};
+    // Once sent for signature, the terms are what the customer signs. Only return details can still change.
+    if (current.documensoEnvelopeId) {
+      const terms = ['customerName', 'customerPhone', 'customerEmail', 'customerAddress', 'insuranceCompany', 'claimNumber', 'adjusterName', 'adjusterPhone', 'adjusterEmail', 'startDate', 'endDate', 'dailyRate', 'taxRate'] as const;
+      const changed = terms.filter((key) => {
+        if (body[key] === undefined) return false;
+        const stored = current[key];
+        if (stored instanceof Date) return new Date(String(body[key])).getTime() !== stored.getTime();
+        return String(body[key] ?? '').trim() !== String(stored ?? '').trim();
+      });
+      if (changed.length) throw new ApiError(409, 'This agreement was sent for signature, so its terms are locked. Create a new agreement to change them.');
+    }
     const data: Record<string, unknown> = {};
     for (const key of ['customerName', 'customerPhone', 'customerEmail', 'customerAddress', 'insuranceCompany', 'claimNumber', 'adjusterName', 'adjusterPhone', 'adjusterEmail', 'conditionOut', 'conditionIn', 'damageNotes', 'notes'] as const) {
       if (body[key] !== undefined) data[key] = text(body[key], key === 'damageNotes' || key === 'notes' ? 1000 : 200);
@@ -211,6 +222,16 @@ export function createRentalsRouter(prisma: PrismaClient) {
   }));
 
   // Creates a normal invoice from the agreement. The insurer is billed by default; a customer invoice uses the customer's details.
+  // Only agreements that were never sent or signed can be deleted. Invoices must be removed first.
+  router.delete('/rental-agreements/:id', asyncHandler(async (req, res) => {
+    const current = await prisma.rentalAgreement.findUnique({ where: { id: idOf(req) } });
+    if (!current) throw new ApiError(404, 'Rental agreement not found');
+    if (current.documensoEnvelopeId || current.signedFilePath) throw new ApiError(409, 'This agreement was sent or signed and cannot be deleted');
+    if (current.invoiceId) throw new ApiError(409, 'Delete the invoice for this agreement first');
+    await prisma.rentalAgreement.delete({ where: { id: current.id } });
+    res.status(204).end();
+  }));
+
   router.post('/rental-agreements/:id/invoice', asyncHandler(async (req, res) => {
     const agreement = await prisma.rentalAgreement.findUnique({ where: { id: idOf(req) }, include: { rentalCar: true } });
     if (!agreement) throw new ApiError(404, 'Rental agreement not found');
