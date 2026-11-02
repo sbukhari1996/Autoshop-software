@@ -859,6 +859,18 @@ input[type="search"] {
   .rpt-table td .rpt-bar-track { min-width: 0; width: 55%; }
 }
 .rpt-range button { white-space: nowrap; }
+.dashboard-work-orders-scroll {
+  max-height: 360px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+  scrollbar-color: #647b88 #e3e9e7;
+}
+.dashboard-work-orders-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
+.dashboard-work-orders-scroll::-webkit-scrollbar-track { background: #e3e9e7; }
+.dashboard-work-orders-scroll::-webkit-scrollbar-thumb { background: #647b88; border: 2px solid #e3e9e7; border-radius: 8px; }
+.dashboard-work-orders-scroll th { position: sticky; top: 0; z-index: 1; background: var(--panel); }
+
 @media (max-width: 640px) {
   .rpt-chart { overflow-x: auto; overscroll-behavior-x: contain; }
   .rpt-chart svg { min-width: 560px; }

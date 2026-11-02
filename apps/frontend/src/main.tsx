@@ -1219,7 +1219,9 @@ function Dashboard({
               View all <Icon name="arrow" />
             </button>
           </div>
-          <JobTable jobs={data?.recentJobs || []} />
+          <div className="dashboard-work-orders-scroll" role="region" aria-label="Active work orders" tabIndex={0}>
+            <JobTable jobs={data?.recentJobs || []} />
+          </div>
         </div>
         <div className="surface">
           <div className="surface-heading">
