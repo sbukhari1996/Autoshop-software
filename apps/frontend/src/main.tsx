@@ -63,6 +63,7 @@ type Vehicle = {
 const CLAIM_STATUS_GROUPS = {
   new: { key: "new", label: "New" },
   submitted: { key: "submitted", label: "Submitted" },
+  inspection_scheduled: { key: "inspection", label: "Inspection scheduled" },
   in_review: { key: "review", label: "In review" },
   approved: { key: "approved", label: "Approved" },
   denied: { key: "denied", label: "Denied" },
@@ -1242,17 +1243,15 @@ function Dashboard({
                     minute: "2-digit",
                   })}
                   title={`${inspection.customer.firstName} ${inspection.customer.lastName}`}
+                  vehicle={[
+                    inspection.claim?.vehicle?.year || inspection.job?.vehicle?.year || inspection.claim?.vehicleYear,
+                    inspection.claim?.vehicle?.make || inspection.job?.vehicle?.make || inspection.claim?.vehicleMake,
+                    inspection.claim?.vehicle?.model || inspection.job?.vehicle?.model || inspection.claim?.vehicleModel,
+                  ].filter(Boolean).join(" ") || "Vehicle pending"}
                   detail={[
                     inspection.claim?.claimNumber
                       ? `Claim #${inspection.claim.claimNumber}`
                       : "No claim",
-                    inspection.claim?.vehicle || inspection.job?.vehicle
-                      ? [
-                          inspection.claim?.vehicle?.year || inspection.job?.vehicle?.year,
-                          inspection.claim?.vehicle?.make || inspection.job?.vehicle?.make,
-                          inspection.claim?.vehicle?.model || inspection.job?.vehicle?.model,
-                        ].filter(Boolean).join(" ")
-                      : "Vehicle pending",
                     `Inspector: ${inspection.inspectorName || "Unassigned"}`,
                     inspection.inspectorPhone ? `Call: ${inspection.inspectorPhone}` : "",
                     `Insurance: ${inspection.insuranceRep || "Unassigned"}`,
@@ -1640,7 +1639,7 @@ function ClaimWorkspace({
     event.preventDefault();
     if (!customerId) { setError("Select an existing customer before saving the claim."); return; }
     setBusy(true); setError("");
-    const payload = { ...form, vehicleId: form.vehicleId || null, jobId: form.jobId || null, vehicleYear: form.vehicleYear ? Number(form.vehicleYear) : null, atFaultVehicleYear: form.atFaultVehicleYear ? Number(form.atFaultVehicleYear) : null, incidentDate: form.incidentDate || null, adjusterVisitAt: form.adjusterVisitAt || null, dateSubmitted: form.dateSubmitted || null };
+    const payload = { ...form, vehicleId: form.vehicleId || null, jobId: form.jobId || null, vehicleYear: form.vehicleYear ? Number(form.vehicleYear) : null, atFaultVehicleYear: form.atFaultVehicleYear ? Number(form.atFaultVehicleYear) : null, incidentDate: form.incidentDate || null, adjusterVisitAt: form.adjusterVisitAt ? new Date(String(form.adjusterVisitAt)).toISOString() : null, dateSubmitted: form.dateSubmitted || null };
     try {
       const path = claim ? `/claims/${claim.id}` : "/claims";
       await fetchJson(path, { method: claim ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -1673,7 +1672,7 @@ function ClaimWorkspace({
             <div className="claim-section"><h3>At-fault party and insurance</h3><div className="claim-grid"><Field label="At-fault driver name" value={form.atFaultDriverName} onChange={(value) => update("atFaultDriverName", value)} /><Field label="At-fault driver phone" value={form.atFaultDriverPhone} onChange={(value) => update("atFaultDriverPhone", value)} /><Field label="At-fault driver's license" value={form.atFaultDriverLicense} onChange={(value) => update("atFaultDriverLicense", value)} /><Field label="DL state" value={form.atFaultDriverDlState} onChange={(value) => update("atFaultDriverDlState", value)} /><Field label="At-fault license plate" value={form.atFaultPlate} onChange={(value) => update("atFaultPlate", value)} /><Field label="At-fault plate state" value={form.atFaultPlateState} onChange={(value) => update("atFaultPlateState", value)} /><div className="vin-control-row"><Field label="At-fault vehicle VIN" value={form.atFaultVehicleVin} onChange={(value) => update("atFaultVehicleVin", value)} /><button type="button" className="secondary-button" onClick={() => void decodeVin("atFault")} disabled={vinState.atFault.loading}>{vinState.atFault.loading ? "Decoding..." : "Decode VIN"}</button></div>{vinState.atFault.message && <p className={vinState.atFault.error ? "vin-error" : "vin-success"}>{vinState.atFault.message}</p>}<Field label="At-fault vehicle year" value={form.atFaultVehicleYear} onChange={(value) => update("atFaultVehicleYear", value)} /><Field label="At-fault vehicle make" value={form.atFaultVehicleMake} onChange={(value) => update("atFaultVehicleMake", value)} /><Field label="At-fault vehicle model" value={form.atFaultVehicleModel} onChange={(value) => update("atFaultVehicleModel", value)} /><Field label="At-fault vehicle trim" value={form.atFaultVehicleTrim} onChange={(value) => update("atFaultVehicleTrim", value)} /><Field label="At-fault body style" value={form.atFaultVehicleBodyClass} onChange={(value) => update("atFaultVehicleBodyClass", value)} /><Field label="At-fault vehicle color" value={form.atFaultVehicleColor} onChange={(value) => update("atFaultVehicleColor", value)} /><Field label="At-fault insurance" value={form.atFaultInsurance} onChange={(value) => update("atFaultInsurance", value)} /><Field label="At-fault policy number" value={form.atFaultPolicyNumber} onChange={(value) => update("atFaultPolicyNumber", value)} /><Field label="At-fault claim number" value={form.atFaultClaimNumber} onChange={(value) => update("atFaultClaimNumber", value)} /><Field label="At-fault insurance phone" value={form.atFaultInsurancePhone} onChange={(value) => update("atFaultInsurancePhone", value)} /></div></div>
             <div className="claim-section"><h3>Incident and witnesses</h3><div className="claim-grid"><Field label="Incident date" type="date" value={form.incidentDate} onChange={(value) => update("incidentDate", value)} /><Field label="Police report number" value={form.policeReportNumber} onChange={(value) => update("policeReportNumber", value)} /><Field label="Police department" value={form.policeDepartment} onChange={(value) => update("policeDepartment", value)} /><Field label="Witness name" value={form.witnessName} onChange={(value) => update("witnessName", value)} /><Field label="Witness phone" value={form.witnessPhone} onChange={(value) => update("witnessPhone", value)} /></div></div>
             <div className="claim-section"><h3>Documentation checklist</h3><div className="claim-checklist">{claimFlags.map(([key, label]) => <label key={key} className="checkbox-field"><input type="checkbox" checked={Boolean(form[key])} onChange={(event) => update(key, event.target.checked)} />{label}</label>)}</div><div className="claim-grid claim-followup"><Field label="Photo folder link" value={form.photoFolderLink} onChange={(value) => update("photoFolderLink", value)} /><Field label="Police report file" value={form.policeReportFile} onChange={(value) => update("policeReportFile", value)} /><Field label="Adjuster name" value={form.adjusterName} onChange={(value) => update("adjusterName", value)} /><Field label="Adjuster phone" value={form.adjusterPhone} onChange={(value) => update("adjusterPhone", value)} /><Field label="Adjuster email" value={form.adjusterEmail} onChange={(value) => update("adjusterEmail", value)} /><Field label="Adjuster visit" type="datetime-local" value={form.adjusterVisitAt} onChange={(value) => update("adjusterVisitAt", value)} /></div></div>
-            <div className="claim-section"><h3>Claim status</h3><div className="claim-grid"><label>Status<select value={String(form.status)} onChange={(event) => update("status", event.target.value)}>{["new", "submitted", "in_review", "approved", "denied", "closed"].map((status) => <option key={status}>{humanize(status)}</option>)}</select></label><Field label="Date submitted" type="date" value={form.dateSubmitted} onChange={(value) => update("dateSubmitted", value)} /><label className="claim-notes">Notes<textarea value={String(form.notes || "")} onChange={(event) => update("notes", event.target.value)} /></label></div></div>
+            <div className="claim-section"><h3>Claim status</h3><div className="claim-grid"><label>Status<select value={String(form.status)} onChange={(event) => update("status", event.target.value)}>{["new", "submitted", "inspection_scheduled", "in_review", "approved", "denied", "closed"].map((status) => <option key={status} value={status}>{humanize(status)}</option>)}</select></label><Field label="Date submitted" type="date" value={form.dateSubmitted} onChange={(value) => update("dateSubmitted", value)} /><label className="claim-notes">Notes<textarea value={String(form.notes || "")} onChange={(event) => update("notes", event.target.value)} /></label></div></div>
             <div className="claim-form-actions"><button type="button" className="secondary-button" onClick={() => setPrintMode(true)}>Preview authorization</button><button className="orange-button" disabled={busy}>{busy ? "Saving..." : claim ? "Save claim" : "Create claim"}</button></div>
           </form>
         ))}
@@ -3010,8 +3009,8 @@ function InspectionModal({
         body: JSON.stringify({
           ...form,
           scheduledFor: new Date(form.scheduledFor).toISOString(),
-          claimId: form.claimId || undefined,
-          jobId: form.jobId || undefined,
+          claimId: form.claimId || null,
+          jobId: form.jobId || null,
         }),
       });
       onCreated();
@@ -3125,6 +3124,7 @@ function InspectionModal({
 function ScheduleItem({
   time,
   title,
+  vehicle,
   detail,
   status,
   tone,
@@ -3132,6 +3132,7 @@ function ScheduleItem({
 }: {
   time: string;
   title: string;
+  vehicle?: string;
   detail: string;
   status: string;
   tone: string;
@@ -3143,6 +3144,7 @@ function ScheduleItem({
       <span className={`schedule-line ${tone}`} />
       <div>
         <strong>{title}</strong>
+        {vehicle && <span className="schedule-vehicle">{vehicle}</span>}
         <small>{detail}</small>
         <span className={`status-pill ${status === "scheduled" ? "orange" : "blue"}`}>{humanize(status)}</span>
       </div>

@@ -3,11 +3,12 @@ import PDFDocument from 'pdfkit';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
 import { optionalBoolean, optionalDate, optionalInteger, optionalText, requiredText } from '../validation.js';
+import { clearInspectionVisit, syncClaimInspection, syncInspectionClaim } from '../claimInspection.js';
 
 const inspectionSelect = {
   id: true, customerId: true, claimId: true, jobId: true, scheduledFor: true, inspectorName: true, inspectorPhone: true, insuranceRep: true, status: true, notes: true,
   customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
-  claim: { select: { id: true, claimNumber: true, insuranceCompany: true, vehicle: true } },
+  claim: { select: { id: true, claimNumber: true, insuranceCompany: true, vehicle: true, vehicleYear: true, vehicleMake: true, vehicleModel: true } },
   job: { select: { id: true, jobNumber: true, status: true, vehicle: true } },
 } as const;
 
@@ -77,19 +78,23 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
     const claimId = optionalText(req.body.claimId, 'claimId') || null;
     const jobId = optionalText(req.body.jobId, 'jobId') || null;
     await ensureInspectionLinks(prisma, customerId, claimId, jobId);
-    const inspection = await prisma.inspection.create({
-      data: {
-        customerId,
-        claimId,
-        jobId,
-        scheduledFor,
-        inspectorName: optionalText(req.body.inspectorName, 'inspectorName'),
-        inspectorPhone: optionalText(req.body.inspectorPhone, 'inspectorPhone'),
-        insuranceRep: optionalText(req.body.insuranceRep, 'insuranceRep'),
-        status: optionalInspectionStatus(req.body.status),
-        notes: optionalText(req.body.notes, 'notes'),
-      },
-      select: inspectionSelect,
+    const inspection = await prisma.$transaction(async (tx) => {
+      const created = await tx.inspection.create({
+        data: {
+          customerId,
+          claimId,
+          jobId,
+          scheduledFor,
+          inspectorName: optionalText(req.body.inspectorName, 'inspectorName'),
+          inspectorPhone: optionalText(req.body.inspectorPhone, 'inspectorPhone'),
+          insuranceRep: optionalText(req.body.insuranceRep, 'insuranceRep'),
+          status: optionalInspectionStatus(req.body.status),
+          notes: optionalText(req.body.notes, 'notes'),
+        },
+        select: inspectionSelect,
+      });
+      await syncInspectionClaim(tx, created);
+      return created;
     });
     res.status(201).json(inspection);
   }));
@@ -105,29 +110,37 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
     const claimId = req.body.claimId === undefined ? existing.claimId : optionalText(req.body.claimId, 'claimId') || null;
     const jobId = req.body.jobId === undefined ? existing.jobId : optionalText(req.body.jobId, 'jobId') || null;
     await ensureInspectionLinks(prisma, customerId, claimId, jobId);
-    const inspection = await prisma.inspection.update({
-      where: { id: inspectionId },
-      data: {
-        customerId,
-        claimId,
-        jobId,
-        scheduledFor: req.body.scheduledFor === undefined ? undefined : requiredDate(req.body.scheduledFor, 'scheduledFor'),
-        inspectorName: req.body.inspectorName === undefined ? undefined : optionalText(req.body.inspectorName, 'inspectorName'),
-        inspectorPhone: req.body.inspectorPhone === undefined ? undefined : optionalText(req.body.inspectorPhone, 'inspectorPhone'),
-        insuranceRep: req.body.insuranceRep === undefined ? undefined : optionalText(req.body.insuranceRep, 'insuranceRep'),
-        status: req.body.status === undefined ? undefined : optionalInspectionStatus(req.body.status),
-        notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'),
-      },
-      select: inspectionSelect,
+    const inspection = await prisma.$transaction(async (tx) => {
+      const updated = await tx.inspection.update({
+        where: { id: inspectionId },
+        data: {
+          customerId,
+          claimId,
+          jobId,
+          scheduledFor: req.body.scheduledFor === undefined ? undefined : requiredDate(req.body.scheduledFor, 'scheduledFor'),
+          inspectorName: req.body.inspectorName === undefined ? undefined : optionalText(req.body.inspectorName, 'inspectorName'),
+          inspectorPhone: req.body.inspectorPhone === undefined ? undefined : optionalText(req.body.inspectorPhone, 'inspectorPhone'),
+          insuranceRep: req.body.insuranceRep === undefined ? undefined : optionalText(req.body.insuranceRep, 'insuranceRep'),
+          status: req.body.status === undefined ? undefined : optionalInspectionStatus(req.body.status),
+          notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'),
+        },
+        select: inspectionSelect,
+      });
+      if (existing.claimId !== updated.claimId) await clearInspectionVisit(tx, existing);
+      await syncInspectionClaim(tx, updated);
+      return updated;
     });
     res.json(inspection);
   }));
 
   workflowsRouter.delete('/inspections/:inspectionId', asyncHandler(async (req, res) => {
     const inspectionId = routeParam(req, 'inspectionId');
-    const existing = await prisma.inspection.findUnique({ where: { id: inspectionId }, select: { id: true } });
+    const existing = await prisma.inspection.findUnique({ where: { id: inspectionId } });
     if (!existing) throw new ApiError(404, 'Inspection not found');
-    await prisma.inspection.delete({ where: { id: inspectionId } });
+    await prisma.$transaction(async (tx) => {
+      await tx.inspection.delete({ where: { id: inspectionId } });
+      await clearInspectionVisit(tx, existing);
+    });
     res.status(204).send();
   }));
 
@@ -205,6 +218,7 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
     const claim = await prisma.$transaction(async (tx) => {
       const created = await tx.claim.create({ data: buildClaimData(req.body, customerId, vehicleId) });
       if (jobId) await tx.job.update({ where: { id: jobId }, data: { claimId: created.id } });
+      await syncClaimInspection(tx, created);
       return tx.claim.findUniqueOrThrow({ where: { id: created.id }, include: claimInclude });
     });
     res.status(201).json(claim);
@@ -224,7 +238,7 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
 
   workflowsRouter.put('/claims/:claimId', asyncHandler(async (req, res) => {
     const claimId = routeParam(req, 'claimId');
-    const existing = await prisma.claim.findUnique({ where: { id: claimId, }, select: { customerId: true, vehicleId: true } });
+    const existing = await prisma.claim.findUnique({ where: { id: claimId, }, select: { customerId: true, vehicleId: true, adjusterVisitAt: true } });
     if (!existing) throw new ApiError(404, 'Claim not found');
     const customerId = req.body.customerId === undefined ? existing.customerId : requiredText(req.body.customerId, 'customerId');
     const vehicleId = req.body.vehicleId === undefined ? existing.vehicleId : optionalText(req.body.vehicleId, 'vehicleId');
@@ -234,9 +248,10 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
     if (vehicleId) await ensureVehicleBelongsToCustomer(prisma, vehicleId, customerId);
     if (jobId) await ensureJobBelongsToCustomer(prisma, jobId, customerId, vehicleId);
     const claim = await prisma.$transaction(async (tx) => {
-      await tx.claim.update({ where: { id: claimId }, data: buildClaimData(req.body, customerId, vehicleId) });
+      const updated = await tx.claim.update({ where: { id: claimId }, data: buildClaimData(req.body, customerId, vehicleId) });
       await tx.job.updateMany({ where: { claimId: claimId }, data: { claimId: null } });
       if (jobId) await tx.job.update({ where: { id: jobId }, data: { claimId } });
+      await syncClaimInspection(tx, updated, existing.adjusterVisitAt);
       return tx.claim.findUniqueOrThrow({ where: { id: claimId }, include: claimInclude });
     });
     res.json(claim);
@@ -930,12 +945,7 @@ async function getUpcomingInspections(prisma: PrismaClient) {
   return prisma.inspection.findMany({
     where: { status: 'scheduled', scheduledFor: { gte: new Date() } },
     orderBy: { scheduledFor: 'asc' },
-    select: {
-      id: true, scheduledFor: true, inspectorName: true, inspectorPhone: true, insuranceRep: true, status: true, notes: true,
-      customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
-      claim: { select: { id: true, claimNumber: true, insuranceCompany: true, vehicle: true } },
-      job: { select: { id: true, jobNumber: true, status: true, vehicle: true } },
-    },
+    select: inspectionSelect,
   });
 }
 
