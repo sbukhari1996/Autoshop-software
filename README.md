@@ -12,6 +12,8 @@ A local-first collision repair shop management system built for small shops need
 
 ## Claim inspections
 
+Use the claim statuses **Follow up** for insurance follow-ups and **Waiting on estimate** while an estimate is pending. Both are saved on the claim and shown as distinct labels in the claims list.
+
 Save an **Adjuster visit** date/time on a claim to create a linked inspection in **Upcoming schedule**. Saving the claim again updates its first scheduled inspection with the visit time, adjuster name/phone, insurance company, and customer rather than adding a duplicate. Completed and cancelled inspections remain in history. Enter a visit time as well as inspector details; a name alone does not schedule an appointment. Upcoming schedule only lists future scheduled visits.
 
 Editing a linked schedule event updates the claim's visit and adjuster details too. Completing, cancelling, or deleting that event clears the claim visit when it matches the event; clearing the matching visit in the claim cancels the scheduled event. Other scheduled events and inspection notes are preserved. **Inspection scheduled** is also available as a claim status; choosing that status alone does not set an appointment time.
