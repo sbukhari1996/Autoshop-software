@@ -63,6 +63,9 @@ type Vehicle = {
 const CLAIM_STATUS_GROUPS = {
   new: { key: "new", label: "New" },
   submitted: { key: "submitted", label: "Submitted" },
+  inspection_scheduled: { key: "inspection", label: "Inspection scheduled" },
+  follow_up: { key: "follow-up", label: "Follow up" },
+  waiting_on_estimate: { key: "waiting-on-estimate", label: "Waiting on estimate" },
   in_review: { key: "review", label: "In review" },
   approved: { key: "approved", label: "Approved" },
   denied: { key: "denied", label: "Denied" },
@@ -1226,7 +1229,9 @@ function Dashboard({
               View all <Icon name="arrow" />
             </button>
           </div>
-          <JobTable jobs={data?.recentJobs || []} />
+          <div className="dashboard-work-orders-scroll" role="region" aria-label="Active work orders" tabIndex={0}>
+            <JobTable jobs={data?.recentJobs || []} />
+          </div>
         </div>
         <div className="surface">
           <div className="surface-heading">
@@ -1250,17 +1255,15 @@ function Dashboard({
                     minute: "2-digit",
                   })}
                   title={`${inspection.customer.firstName} ${inspection.customer.lastName}`}
+                  vehicle={[
+                    inspection.claim?.vehicle?.year || inspection.job?.vehicle?.year || inspection.claim?.vehicleYear,
+                    inspection.claim?.vehicle?.make || inspection.job?.vehicle?.make || inspection.claim?.vehicleMake,
+                    inspection.claim?.vehicle?.model || inspection.job?.vehicle?.model || inspection.claim?.vehicleModel,
+                  ].filter(Boolean).join(" ") || "Vehicle pending"}
                   detail={[
                     inspection.claim?.claimNumber
                       ? `Claim #${inspection.claim.claimNumber}`
                       : "No claim",
-                    inspection.claim?.vehicle || inspection.job?.vehicle
-                      ? [
-                          inspection.claim?.vehicle?.year || inspection.job?.vehicle?.year,
-                          inspection.claim?.vehicle?.make || inspection.job?.vehicle?.make,
-                          inspection.claim?.vehicle?.model || inspection.job?.vehicle?.model,
-                        ].filter(Boolean).join(" ")
-                      : "Vehicle pending",
                     `Inspector: ${inspection.inspectorName || "Unassigned"}`,
                     inspection.inspectorPhone ? `Call: ${inspection.inspectorPhone}` : "",
                     `Insurance: ${inspection.insuranceRep || "Unassigned"}`,
@@ -1662,7 +1665,7 @@ function ClaimWorkspace({
     event.preventDefault();
     if (!customerId) { setError("Select an existing customer before saving the claim."); return; }
     setBusy(true); setError("");
-    const payload = { ...form, vehicleId: form.vehicleId || null, jobId: form.jobId || null, vehicleYear: form.vehicleYear ? Number(form.vehicleYear) : null, atFaultVehicleYear: form.atFaultVehicleYear ? Number(form.atFaultVehicleYear) : null, incidentDate: form.incidentDate || null, adjusterVisitAt: form.adjusterVisitAt || null, dateSubmitted: form.dateSubmitted || null };
+    const payload = { ...form, vehicleId: form.vehicleId || null, jobId: form.jobId || null, vehicleYear: form.vehicleYear ? Number(form.vehicleYear) : null, atFaultVehicleYear: form.atFaultVehicleYear ? Number(form.atFaultVehicleYear) : null, incidentDate: form.incidentDate || null, adjusterVisitAt: form.adjusterVisitAt ? new Date(String(form.adjusterVisitAt)).toISOString() : null, dateSubmitted: form.dateSubmitted || null };
     try {
       const path = claim ? `/claims/${claim.id}` : "/claims";
       await fetchJson(path, { method: claim ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -1701,7 +1704,7 @@ function ClaimWorkspace({
                 <button type="button" className="orange-button" disabled={busy} onClick={() => void createJobFromClaim()}>Create job from this claim</button>
               </div>
             )}
-            <div className="claim-section"><h3>Claim status</h3><div className="claim-grid"><label>Status<select value={String(form.status)} onChange={(event) => update("status", event.target.value)}>{["new", "submitted", "in_review", "approved", "denied", "closed"].map((status) => <option key={status}>{humanize(status)}</option>)}</select></label><Field label="Date submitted" type="date" value={form.dateSubmitted} onChange={(value) => update("dateSubmitted", value)} /><label className="claim-notes">Notes<textarea value={String(form.notes || "")} onChange={(event) => update("notes", event.target.value)} /></label></div></div>
+                        <div className="claim-section"><h3>Claim status</h3><div className="claim-grid"><label>Status<select value={String(form.status)} onChange={(event) => update("status", event.target.value)}>{["new", "submitted", "inspection_scheduled", "follow_up", "waiting_on_estimate", "in_review", "approved", "denied", "closed"].map((status) => <option key={status} value={status}>{humanize(status)}</option>)}</select></label><Field label="Date submitted" type="date" value={form.dateSubmitted} onChange={(value) => update("dateSubmitted", value)} /><label className="claim-notes">Notes<textarea value={String(form.notes || "")} onChange={(event) => update("notes", event.target.value)} /></label></div></div>
             <div className="claim-form-actions"><button type="button" className="secondary-button" onClick={() => setPrintMode(true)}>Preview authorization</button><button className="orange-button" disabled={busy}>{busy ? "Saving..." : claim ? "Save claim" : "Create claim"}</button></div>
           </form>
         ))}
@@ -3176,8 +3179,8 @@ function InspectionModal({
         body: JSON.stringify({
           ...form,
           scheduledFor: new Date(form.scheduledFor).toISOString(),
-          claimId: form.claimId || undefined,
-          jobId: form.jobId || undefined,
+          claimId: form.claimId || null,
+          jobId: form.jobId || null,
         }),
       });
       onCreated();
@@ -3291,6 +3294,7 @@ function InspectionModal({
 function ScheduleItem({
   time,
   title,
+  vehicle,
   detail,
   status,
   tone,
@@ -3298,6 +3302,7 @@ function ScheduleItem({
 }: {
   time: string;
   title: string;
+  vehicle?: string;
   detail: string;
   status: string;
   tone: string;
@@ -3309,6 +3314,7 @@ function ScheduleItem({
       <span className={`schedule-line ${tone}`} />
       <div>
         <strong>{title}</strong>
+        {vehicle && <span className="schedule-vehicle">{vehicle}</span>}
         <small>{detail}</small>
         <span className={`status-pill ${status === "scheduled" ? "orange" : "blue"}`}>{humanize(status)}</span>
       </div>
