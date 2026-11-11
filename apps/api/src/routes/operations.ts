@@ -89,6 +89,43 @@ export function createOperationsRouter(prisma: PrismaClient) {
     res.status(204).send();
   }));
 
+  router.get('/jobs/:jobId/parts', asyncHandler(async (req, res) => {
+    const job = await ensureJob(prisma, routeParam(req, 'jobId'));
+    res.json(await prisma.jobPart.findMany({ where: { jobId: job.id }, orderBy: { createdAt: 'asc' } }));
+  }));
+
+  router.post('/jobs/:jobId/parts', asyncHandler(async (req, res) => {
+    const jobId = routeParam(req, 'jobId');
+    await ensureJob(prisma, jobId);
+    res.status(201).json(await prisma.jobPart.create({ data: { ...partData(req.body, true), jobId } }));
+  }));
+
+  router.patch('/parts/:partId', asyncHandler(async (req, res) => {
+    const existing = await prisma.jobPart.findUnique({ where: { id: routeParam(req, 'partId') } });
+    if (!existing) throw new ApiError(404, 'Part not found');
+    res.json(await prisma.jobPart.update({ where: { id: existing.id }, data: partData(req.body, false) }));
+  }));
+
+  router.delete('/parts/:partId', asyncHandler(async (req, res) => {
+    const existing = await prisma.jobPart.findUnique({ where: { id: routeParam(req, 'partId') } });
+    if (!existing) throw new ApiError(404, 'Part not found');
+    await prisma.jobPart.delete({ where: { id: existing.id } });
+    res.status(204).send();
+  }));
+
+  // Parts still on the way, expected between from and to (inclusive, YYYY-MM-DD).
+  router.get('/parts/arrivals', asyncHandler(async (req, res) => {
+    const from = dateOnly(req.query.from, 'from');
+    const to = dateOnly(req.query.to, 'to');
+    if (!from || !to) throw new ApiError(400, 'from and to dates are required');
+    const parts = await prisma.jobPart.findMany({
+      where: { expectedDate: { gte: from, lt: new Date(to.getTime() + 86400000) }, status: { in: ['ordered', 'waiting_delivery'] } },
+      include: { job: { select: { id: true, jobNumber: true, customer: { select: { firstName: true, lastName: true } }, vehicle: { select: { year: true, make: true, model: true } } } } },
+      orderBy: { expectedDate: 'asc' },
+    });
+    res.json(parts);
+  }));
+
   router.get('/jobs/:jobId/payments', asyncHandler(async (req, res) => {
     const job = await ensureJob(prisma, routeParam(req, 'jobId'));
     res.json(await prisma.jobPayment.findMany({ where: { jobId: job.id }, orderBy: { paidDate: 'desc' } }));
@@ -280,6 +317,33 @@ async function ensureJob(prisma: PrismaClient, jobId: string) {
   const job = await prisma.job.findUnique({ where: { id: jobId } });
   if (!job) throw new ApiError(404, 'Job not found');
   return job;
+}
+
+const partStatuses = ['not_ordered', 'ordered', 'waiting_delivery', 'arrived', 'arrived_wrong', 'returned'] as const;
+
+function dateOnly(value: unknown, field: string): Date | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new ApiError(400, `${field} must be a date (YYYY-MM-DD)`);
+  return new Date(`${value}T00:00:00.000Z`);
+}
+
+function partData(body: Record<string, any>, creating: boolean) {
+  const data: Record<string, unknown> = {};
+  if (creating || body.partName !== undefined) data.partName = requiredText(body.partName, 'partName');
+  for (const key of ['partNumber', 'vendorName', 'vendorPhone', 'poNumber', 'quoteNumber', 'invoiceNumber', 'notes'] as const) {
+    if (body[key] !== undefined) data[key] = optionalText(body[key], key) ?? null;
+  }
+  if (body.quantity !== undefined) {
+    if (!Number.isInteger(Number(body.quantity)) || Number(body.quantity) < 1) throw new ApiError(400, 'quantity must be a whole number of 1 or more');
+    data.quantity = Number(body.quantity);
+  }
+  if (body.status !== undefined) {
+    if (!partStatuses.includes(body.status)) throw new ApiError(400, 'Unknown part status');
+    data.status = body.status;
+  }
+  if (body.expectedDate !== undefined) data.expectedDate = dateOnly(body.expectedDate, 'expectedDate');
+  if (body.arrivedDate !== undefined) data.arrivedDate = dateOnly(body.arrivedDate, 'arrivedDate');
+  return data;
 }
 
 function routeParam(req: { params: Record<string, string | string[]> }, name: string) {

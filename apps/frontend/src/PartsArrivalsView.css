@@ -1,0 +1,99 @@
+.parts-panel .part-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.parts-panel .part-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.parts-panel .part-main small {
+  color: #6b7280;
+}
+.parts-panel .part-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.parts-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+  align-items: center;
+}
+.parts-arrivals {
+  display: grid;
+  gap: 12px;
+}
+.parts-arrivals-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 12px;
+}
+.arrivals-scroll {
+  max-height: 70vh;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+  padding-right: 6px;
+  display: grid;
+  gap: 14px;
+}
+.arrival-divider {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 8px 0;
+  background: inherit;
+  border-bottom: 2px solid #d1d5db;
+  font-weight: 600;
+}
+.arrival-divider.today {
+  border-bottom-color: #ea580c;
+}
+.arrival-divider small {
+  font-weight: 400;
+  color: #6b7280;
+}
+.arrival-car {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-left: 3px solid #d1d5db;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.02);
+}
+.arrival-car header {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.arrival-car header small {
+  color: #6b7280;
+}
+.arrival-car ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.arrival-car li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.arrival-car li small {
+  color: #6b7280;
+}
+@media (prefers-reduced-motion: reduce) {
+  .arrivals-scroll { scroll-behavior: auto; }
+}

@@ -13,6 +13,7 @@ import type { ReceiptKind } from "./receiptFrame";
 import { CompanyTodoList, type CompanyTodo } from "./CompanyTodoList";
 import { StickyNotes } from "./StickyNotes";
 import { RentalsView } from "./RentalsView";
+import { JobPartsPanel, PartsArrivalsView } from "./PartsArrivalsView";
 import { Mv104Form } from "./Mv104Form";
 import { Mv104View } from "./Mv104View";
 
@@ -22,6 +23,7 @@ type View =
   | "Vehicles"
   | "Claims"
   | "Jobs"
+  | "Parts Arrivals"
   | "Estimates"
   | "Documents"
   | "Invoices"
@@ -296,6 +298,7 @@ const navItems: Array<{ label: View; icon: string }> = [
   { label: "Vehicles", icon: "car" },
   { label: "Claims", icon: "shield" },
   { label: "Jobs", icon: "wrench" },
+  { label: "Parts Arrivals", icon: "truck" },
   { label: "Estimates", icon: "file" },
   { label: "Documents", icon: "folder" },
   { label: "Invoices", icon: "file" },
@@ -1028,6 +1031,7 @@ function App() {
             />
           )}
           {view === "Saved Receipts" && <SavedReceiptsView request={fetchJson} onOpen={openSavedReceipt} />}
+          {view === "Parts Arrivals" && <PartsArrivalsView request={fetchJson} />}
           {view === "Car Rental" && <RentalsView claims={claims} request={fetchJson} download={fetchFile} />}
           {view === "MV-104" && <Mv104View claims={claims} apiUrl={String(API_URL)} />}
           {view === "Bookkeeping" && <BookkeepingView data={finance} request={fetchJson} onChanged={() => void loadData()} />}
@@ -2421,6 +2425,7 @@ function JobOperations({
             <button className="text-button">Record payment</button>
           </form>
         </div>
+        <JobPartsPanel jobId={job.id} request={fetchJson} />
         <div className="operation-section">
           <h3>Invoices</h3>
           {jobInvoices.length ? (

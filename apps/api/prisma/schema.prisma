@@ -303,6 +303,7 @@ model Job {
   estimates      Estimate[]
   expenses       JobExpense[]
   payments       JobPayment[]
+  parts          JobPart[]
   financeEntries FinanceEntry[]
   inspections    Inspection[]
   documents      JobDocument[]
@@ -376,6 +377,30 @@ model JobPayment {
 
   @@index([jobId])
   @@map("job_payments")
+}
+
+model JobPart {
+  id          String    @id @default(cuid())
+  jobId       String
+  partName    String
+  partNumber  String?
+  quantity    Int       @default(1)
+  status      String    @default("not_ordered")
+  vendorName  String?
+  vendorPhone String?
+  poNumber    String?
+  quoteNumber String?
+  invoiceNumber String?
+  expectedDate DateTime?
+  arrivedDate DateTime?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  job         Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([expectedDate])
+  @@map("job_parts")
 }
 
 model JobStatusHistory {
