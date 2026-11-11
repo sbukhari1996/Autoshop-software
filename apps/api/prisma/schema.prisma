@@ -290,6 +290,7 @@ model Job {
   insurancePaid  Float     @default(0)
   cashPaid       Float     @default(0)
   paymentStatus  String    @default("waiting_insurance")
+  agreedAmount   Float?
   closedAt       DateTime?
   notes          String?
   createdAt      DateTime  @default(now())
@@ -300,6 +301,7 @@ model Job {
   claim          Claim?                @relation(fields: [claimId], references: [id])
   estimates      Estimate[]
   expenses       JobExpense[]
+  payments       JobPayment[]
   financeEntries FinanceEntry[]
   inspections    Inspection[]
   documents      JobDocument[]
@@ -352,12 +354,27 @@ model JobExpense {
   amount      Float
   category    String?
   receiptFile String?
+  receiptName String?
   expenseDate DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   job         Job       @relation(fields: [jobId], references: [id])
 
   @@map("job_expenses")
+}
+
+model JobPayment {
+  id        String    @id @default(cuid())
+  jobId     String
+  source    String
+  amount    Float
+  paidDate  DateTime  @default(now())
+  note      String?
+  createdAt DateTime  @default(now())
+  job       Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_payments")
 }
 
 model JobStatusHistory {

@@ -30,7 +30,7 @@ export function createOperationsRouter(prisma: PrismaClient) {
     const description = requiredText(req.body.description, 'description');
     const amount = positiveAmount(req.body.amount);
     const expense = await prisma.$transaction(async (tx) => {
-      const created = await tx.jobExpense.create({ data: { jobId, description, amount, category: optionalText(req.body.category, 'category'), receiptFile: optionalText(req.body.receiptFile, 'receiptFile'), expenseDate: parseDate(req.body.expenseDate) } });
+      const created = await tx.jobExpense.create({ data: { jobId, description, amount, category: optionalText(req.body.category, 'category'), expenseDate: parseDate(req.body.expenseDate) } });
       await refreshExpenseTotal(tx, jobId);
       return created;
     });
@@ -52,6 +52,68 @@ export function createOperationsRouter(prisma: PrismaClient) {
     const existing = await prisma.jobExpense.findUnique({ where: { id: routeParam(req, 'expenseId') } });
     if (!existing) throw new ApiError(404, 'Expense not found');
     await prisma.$transaction(async (tx) => { await tx.jobExpense.delete({ where: { id: existing.id } }); await refreshExpenseTotal(tx, existing.jobId); });
+    if (existing.receiptFile) await removeStoredFile(existing.receiptFile);
+    res.status(204).send();
+  }));
+
+  router.post('/expenses/:expenseId/receipt', upload.single('file'), asyncHandler(async (req, res) => {
+    const existing = await prisma.jobExpense.findUnique({ where: { id: routeParam(req, 'expenseId') } });
+    if (!existing) throw new ApiError(404, 'Expense not found');
+    const file = req.file;
+    if (!file || !file.size) throw new ApiError(400, 'Choose a non-empty receipt file');
+    await mkdir(uploadDirectory, { recursive: true });
+    const receiptName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'receipt';
+    const storedPath = path.join(uploadDirectory, `${randomUUID()}-${receiptName}`);
+    await writeFile(storedPath, file.buffer, { flag: 'wx' });
+    try {
+      const updated = await prisma.jobExpense.update({ where: { id: existing.id }, data: { receiptFile: path.relative(process.cwd(), storedPath), receiptName } });
+      if (existing.receiptFile) await removeStoredFile(existing.receiptFile);
+      res.json(updated);
+    } catch (error) {
+      await unlink(storedPath);
+      throw error;
+    }
+  }));
+
+  router.get('/expenses/:expenseId/receipt', asyncHandler(async (req, res) => {
+    const expense = await prisma.jobExpense.findUnique({ where: { id: routeParam(req, 'expenseId') } });
+    if (!expense?.receiptFile || !expense.receiptName) throw new ApiError(404, 'Receipt not found');
+    await sendStoredFile(res, expense.receiptFile, expense.receiptName);
+  }));
+
+  router.delete('/expenses/:expenseId/receipt', asyncHandler(async (req, res) => {
+    const expense = await prisma.jobExpense.findUnique({ where: { id: routeParam(req, 'expenseId') } });
+    if (!expense?.receiptFile) throw new ApiError(404, 'Receipt not found');
+    await removeStoredFile(expense.receiptFile);
+    await prisma.jobExpense.update({ where: { id: expense.id }, data: { receiptFile: null, receiptName: null } });
+    res.status(204).send();
+  }));
+
+  router.get('/jobs/:jobId/payments', asyncHandler(async (req, res) => {
+    const job = await ensureJob(prisma, routeParam(req, 'jobId'));
+    res.json(await prisma.jobPayment.findMany({ where: { jobId: job.id }, orderBy: { paidDate: 'desc' } }));
+  }));
+
+  router.post('/jobs/:jobId/payments', asyncHandler(async (req, res) => {
+    const jobId = routeParam(req, 'jobId');
+    await ensureJob(prisma, jobId);
+    const source = req.body.source;
+    if (!['customer', 'insurance'].includes(source)) throw new ApiError(400, 'Source must be customer or insurance');
+    const amount = positiveAmount(req.body.amount);
+    const paidDate = req.body.paidDate ? new Date(String(req.body.paidDate)) : new Date();
+    if (Number.isNaN(paidDate.getTime())) throw new ApiError(400, 'paidDate must be a valid date');
+    const payment = await prisma.$transaction(async (tx) => {
+      const created = await tx.jobPayment.create({ data: { jobId, source, amount, paidDate, note: optionalText(req.body.note, 'note') ?? null } });
+      await refreshPaymentTotals(tx, jobId);
+      return created;
+    });
+    res.status(201).json(payment);
+  }));
+
+  router.delete('/payments/:paymentId', asyncHandler(async (req, res) => {
+    const existing = await prisma.jobPayment.findUnique({ where: { id: routeParam(req, 'paymentId') } });
+    if (!existing) throw new ApiError(404, 'Payment not found');
+    await prisma.$transaction(async (tx) => { await tx.jobPayment.delete({ where: { id: existing.id } }); await refreshPaymentTotals(tx, existing.jobId); });
     res.status(204).send();
   }));
 
@@ -71,14 +133,11 @@ export function createOperationsRouter(prisma: PrismaClient) {
   // Money received for a job: what insurance paid and what the customer paid directly.
   router.patch('/jobs/:jobId/financials', asyncHandler(async (req, res) => {
     const job = await ensureJob(prisma, routeParam(req, 'jobId'));
-    const amount = (value: unknown, label: string) => {
-      const number = Number(value ?? 0);
-      if (!Number.isFinite(number) || number < 0) throw new ApiError(400, `${label} must be zero or more`);
-      return Math.round(number * 100) / 100;
-    };
     const paymentStatus = req.body.paymentStatus;
     if (!['paid', 'waiting_insurance'].includes(paymentStatus)) throw new ApiError(400, 'Payment status must be paid or waiting_insurance');
-    res.json(await prisma.job.update({ where: { id: job.id }, data: { insurancePaid: amount(req.body.insurancePaid, 'Insurance paid'), cashPaid: amount(req.body.cashPaid, 'Cash paid'), paymentStatus } }));
+    const blank = req.body.agreedAmount === undefined || req.body.agreedAmount === null || req.body.agreedAmount === '';
+    const agreedAmount = blank ? null : positiveAmount(req.body.agreedAmount);
+    res.json(await prisma.job.update({ where: { id: job.id }, data: { agreedAmount, paymentStatus } }));
   }));
 
   router.get('/jobs/:jobId/invoices', asyncHandler(async (req, res) => {
@@ -266,6 +325,11 @@ async function removeStoredFile(filePath: string) {
 async function refreshExpenseTotal(tx: any, jobId: string) {
   const aggregate = await tx.jobExpense.aggregate({ where: { jobId }, _sum: { amount: true } });
   await tx.job.update({ where: { id: jobId }, data: { totalExpenses: aggregate._sum.amount || 0 } });
+}
+
+async function refreshPaymentTotals(tx: any, jobId: string) {
+  const total = async (source: string) => Math.round(((await tx.jobPayment.aggregate({ where: { jobId, source }, _sum: { amount: true } }))._sum.amount || 0) * 100) / 100;
+  await tx.job.update({ where: { id: jobId }, data: { insurancePaid: await total('insurance'), cashPaid: await total('customer') } });
 }
 
 function positiveAmount(value: unknown) {

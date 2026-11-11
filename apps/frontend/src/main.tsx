@@ -152,6 +152,7 @@ type Job = {
   totalExpenses?: number;
   insurancePaid?: number;
   cashPaid?: number;
+  agreedAmount?: number | null;
   paymentStatus?: string;
   arrivalDate?: string | null;
   closedAt?: string | null;
@@ -171,7 +172,9 @@ type Expense = {
   amount: number;
   category: string | null;
   expenseDate: string;
+  receiptName?: string | null;
 };
+type JobPayment = { id: string; source: "customer" | "insurance"; amount: number; paidDate: string; note: string | null };
 type DashboardData = {
   metrics: {
     openJobs: number;
@@ -2155,8 +2158,13 @@ function JobOperations({
   const [jobInvoices, setJobInvoices] = React.useState<JobInvoice[]>([]);
   const [unattached, setUnattached] = React.useState<JobInvoice[]>([]);
   const [attachId, setAttachId] = React.useState("");
-  const [paid, setPaid] = React.useState({ insurance: job.insurancePaid ?? 0, cash: job.cashPaid ?? 0 });
-  const [paidInput, setPaidInput] = React.useState({ insurance: String(job.insurancePaid ?? 0), cash: String(job.cashPaid ?? 0) });
+  const [payments, setPayments] = React.useState<JobPayment[]>([]);
+  const [agreedInput, setAgreedInput] = React.useState(job.agreedAmount == null ? "" : String(job.agreedAmount));
+  const [payForm, setPayForm] = React.useState({ source: "customer", amount: "", paidDate: new Date().toISOString().slice(0, 10), note: "" });
+  const paid = {
+    insurance: payments.filter((payment) => payment.source === "insurance").reduce((total, payment) => total + payment.amount, 0),
+    cash: payments.filter((payment) => payment.source === "customer").reduce((total, payment) => total + payment.amount, 0),
+  };
   async function loadInvoices() {
     const [attached, all] = await Promise.all([
       fetchJson<JobInvoice[]>(`/jobs/${job.id}/invoices`),
@@ -2165,20 +2173,72 @@ function JobOperations({
     setJobInvoices(attached);
     setUnattached(all.filter((invoice) => !invoice.jobId && (!invoice.customerId || invoice.customerId === job.customer.id)));
   }
+  async function loadPayments() {
+    setPayments(await fetchJson<JobPayment[]>(`/jobs/${job.id}/payments`));
+  }
+  React.useEffect(() => {
+    void loadPayments();
+  }, [job.id]);
   async function saveFinancials(event: React.FormEvent) {
     event.preventDefault();
     setError("");
-    const next = { insurance: Number(paidInput.insurance || 0), cash: Number(paidInput.cash || 0) };
     try {
       await fetchJson(`/jobs/${job.id}/financials`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ insurancePaid: next.insurance, cashPaid: next.cash, paymentStatus }),
+        body: JSON.stringify({ agreedAmount: agreedInput, paymentStatus }),
       });
-      setPaid(next);
       await onChanged();
     } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Unable to save payments");
+      setError(actionError instanceof Error ? actionError.message : "Unable to save");
+    }
+  }
+  async function recordPayment(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    try {
+      await fetchJson(`/jobs/${job.id}/payments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payForm),
+      });
+      setPayForm({ ...payForm, amount: "", note: "" });
+      await loadPayments();
+      await onChanged();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Unable to record payment");
+    }
+  }
+  async function deletePayment(payment: JobPayment) {
+    if (!window.confirm(`Delete this ${dollars(payment.amount)} payment?`)) return;
+    setError("");
+    try {
+      await fetchJson(`/payments/${payment.id}`, { method: "DELETE" });
+      await loadPayments();
+      await onChanged();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Unable to delete payment");
+    }
+  }
+  async function attachReceipt(expense: Expense, file: File) {
+    setError("");
+    const body = new FormData();
+    body.append("file", file);
+    try {
+      await fetchJson(`/expenses/${expense.id}/receipt`, { method: "POST", body });
+      await loadExpenses();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Unable to attach receipt");
+    }
+  }
+  async function viewReceipt(expense: Expense) {
+    setError("");
+    try {
+      const response = await fetch(`${API_URL}/expenses/${expense.id}/receipt`, { headers: { Authorization: `Bearer ${localStorage.getItem("repairos_token") || ""}` } });
+      if (!response.ok) throw new Error("Unable to open receipt");
+      window.open(URL.createObjectURL(await response.blob()), "_blank");
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Unable to open receipt");
     }
   }
   async function attachInvoice() {
@@ -2280,10 +2340,19 @@ function JobOperations({
           <h3>Money and days open</h3>
           <div className="job-money-summary">
             <div>
-              <span>Received</span>
+              <span>Agreed total</span>
+              <strong>{job.agreedAmount == null ? "Not set" : dollars(job.agreedAmount)}</strong>
+              <small>{paymentStatus === "paid" ? "Paid in full" : "Waiting on insurance check"}</small>
+            </div>
+            <div>
+              <span>Received so far</span>
               <strong>{dollars(received)}</strong>
               <small>Insurance {dollars(paid.insurance)} · Customer {dollars(paid.cash)}</small>
-              <small>{paymentStatus === "paid" ? "Paid" : "Waiting on insurance check"}</small>
+            </div>
+            <div>
+              <span>Still to collect</span>
+              <strong>{job.agreedAmount == null ? "—" : dollars(Math.abs(job.agreedAmount - received))}</strong>
+              <small>{job.agreedAmount == null ? "Set an agreed total below" : job.agreedAmount - received < 0 ? "Received more than agreed" : "Agreed minus received"}</small>
             </div>
             <div>
               <span>Spent on expenses</span>
@@ -2303,12 +2372,8 @@ function JobOperations({
           </div>
           <form className="expense-form" onSubmit={saveFinancials}>
             <label>
-              Insurance paid
-              <input type="number" min="0" step="0.01" value={paidInput.insurance} onChange={(event) => setPaidInput({ ...paidInput, insurance: event.target.value })} />
-            </label>
-            <label>
-              Customer / cash paid
-              <input type="number" min="0" step="0.01" value={paidInput.cash} onChange={(event) => setPaidInput({ ...paidInput, cash: event.target.value })} />
+              Agreed total
+              <input type="number" min="0" step="0.01" placeholder="Total agreed" value={agreedInput} onChange={(event) => setAgreedInput(event.target.value)} />
             </label>
             <label>
               Payment status
@@ -2317,7 +2382,33 @@ function JobOperations({
                 <option value="paid">Paid</option>
               </select>
             </label>
-            <button className="text-button">Save payments</button>
+            <button className="text-button">Save agreed total</button>
+          </form>
+          <h3>Payments received</h3>
+          {payments.length ? (
+            <div className="expense-list">
+              {payments.map((payment) => (
+                <div key={payment.id}>
+                  <span>
+                    {dollars(payment.amount)} · {payment.source === "insurance" ? "Insurance check" : "Customer / cash"}
+                    <small>{new Date(payment.paidDate).toLocaleDateString(undefined, { timeZone: "UTC" })}{payment.note ? ` · ${payment.note}` : ""}</small>
+                  </span>
+                  <span className="expense-actions"><button type="button" className="danger-button compact-danger" onClick={() => void deletePayment(payment)}>Delete</button></span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="table-subtext">No payments recorded yet.</p>
+          )}
+          <form className="expense-form" onSubmit={recordPayment}>
+            <select value={payForm.source} onChange={(event) => setPayForm({ ...payForm, source: event.target.value })}>
+              <option value="customer">Customer / cash</option>
+              <option value="insurance">Insurance check</option>
+            </select>
+            <input required type="number" min="0.01" step="0.01" placeholder="Amount received" value={payForm.amount} onChange={(event) => setPayForm({ ...payForm, amount: event.target.value })} />
+            <input type="date" value={payForm.paidDate} onChange={(event) => setPayForm({ ...payForm, paidDate: event.target.value })} />
+            <input placeholder="Note (check #, partial, cash)" value={payForm.note} onChange={(event) => setPayForm({ ...payForm, note: event.target.value })} />
+            <button className="text-button">Record payment</button>
           </form>
         </div>
         <div className="operation-section">
@@ -2365,7 +2456,7 @@ function JobOperations({
                       {new Date(expense.expenseDate).toLocaleDateString()}
                     </small>
                   </span>
-                  <span className="expense-actions"><strong>${expense.amount.toLocaleString()}</strong><button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete expense "${expense.description}"?`)) return; setError(""); try { await fetchJson(`/expenses/${expense.id}`, { method: "DELETE" }); await loadExpenses(); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete expense"); } }}>Delete</button></span>
+                  <span className="expense-actions"><strong>${expense.amount.toLocaleString()}</strong>{expense.receiptName && <button type="button" className="secondary-button compact" onClick={() => void viewReceipt(expense)}>Receipt</button>}<label className="secondary-button compact">{expense.receiptName ? "Replace receipt" : "Attach receipt"}<input type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void attachReceipt(expense, file); event.target.value = ""; }} /></label><button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete expense "${expense.description}"?`)) return; setError(""); try { await fetchJson(`/expenses/${expense.id}`, { method: "DELETE" }); await loadExpenses(); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete expense"); } }}>Delete</button></span>
                 </div>
               ))}
             </div>
