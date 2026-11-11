@@ -154,6 +154,29 @@ export function createOperationsRouter(prisma: PrismaClient) {
     res.status(204).send();
   }));
 
+  // Invoices, payments and insurance authorizations are money and legal records, so those jobs cannot be deleted.
+  router.delete('/jobs/:jobId', asyncHandler(async (req, res) => {
+    const job = await ensureJob(prisma, routeParam(req, 'jobId'));
+    const [invoices, payments, authorizations] = await Promise.all([
+      prisma.invoice.count({ where: { jobId: job.id } }),
+      prisma.jobPayment.count({ where: { jobId: job.id } }),
+      prisma.repairAuthorization.count({ where: { jobId: job.id } }),
+    ]);
+    if (invoices || payments || authorizations) throw new ApiError(409, 'This job has invoices, payments, or an insurance authorization, so it cannot be deleted');
+    const documents = await prisma.jobDocument.findMany({ where: { jobId: job.id } });
+    const expenses = await prisma.jobExpense.findMany({ where: { jobId: job.id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.jobExpense.deleteMany({ where: { jobId: job.id } });
+      await tx.jobDocument.deleteMany({ where: { jobId: job.id } });
+      await tx.jobStatusHistory.deleteMany({ where: { jobId: job.id } });
+      await tx.job.delete({ where: { id: job.id } });
+    });
+    for (const filePath of [...documents.map((document) => document.filePath), ...expenses.map((expense) => expense.receiptFile)]) {
+      if (filePath) await removeStoredFile(filePath).catch(() => undefined);
+    }
+    res.status(204).send();
+  }));
+
   router.patch('/jobs/:jobId/status', asyncHandler(async (req, res) => {
     const job = await ensureJob(prisma, routeParam(req, 'jobId'));
     const nextStatus = requiredText(req.body.status, 'status');

@@ -2287,6 +2287,17 @@ function JobOperations({
   const openSince = new Date(job.arrivalDate || job.createdAt || Date.now());
   const openUntil = job.closedAt ? new Date(job.closedAt) : new Date();
   const daysOpen = Math.max(0, Math.round((openUntil.getTime() - openSince.getTime()) / 86400000));
+  async function deleteJob() {
+    if (!window.confirm(`Delete job ${job.jobNumber}? Its parts, expenses and receipts are removed. This cannot be undone.`)) return;
+    setError("");
+    try {
+      await fetchJson(`/jobs/${job.id}`, { method: "DELETE" });
+      await onChanged();
+      onClose();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Unable to delete job");
+    }
+  }
   async function generateInvoice() {
     try {
       const invoice = await fetchJson<{ id: string; invoiceNumber: string }>(`/invoices/from-job/${job.id}`, { method: "POST" });
@@ -2341,6 +2352,9 @@ function JobOperations({
           onClick={() => void generateInvoice()}
         >
           <Icon name="file" /> Generate job invoice
+        </button>
+        <button className="danger-button" type="button" onClick={() => void deleteJob()}>
+          Delete job
         </button>
         <div className="operation-section job-money">
           <h3>Money and days open</h3>
