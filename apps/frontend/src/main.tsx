@@ -149,6 +149,7 @@ type Job = {
   totalExpenses?: number;
   insurancePaid?: number;
   cashPaid?: number;
+  paymentStatus?: string;
   arrivalDate?: string | null;
   closedAt?: string | null;
   createdAt?: string;
@@ -2169,7 +2170,7 @@ function JobOperations({
       await fetchJson(`/jobs/${job.id}/financials`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ insurancePaid: next.insurance, cashPaid: next.cash }),
+        body: JSON.stringify({ insurancePaid: next.insurance, cashPaid: next.cash, paymentStatus }),
       });
       setPaid(next);
       await onChanged();
@@ -2210,6 +2211,7 @@ function JobOperations({
       setPdfBusy(false);
     }
   }
+  const [paymentStatus, setPaymentStatus] = React.useState(job.paymentStatus ?? "waiting_insurance");
   const received = paid.insurance + paid.cash;
   const spent = expenses.reduce((total, expense) => total + expense.amount, 0);
   const profit = received - spent;
@@ -2278,6 +2280,7 @@ function JobOperations({
               <span>Received</span>
               <strong>{dollars(received)}</strong>
               <small>Insurance {dollars(paid.insurance)} · Customer {dollars(paid.cash)}</small>
+              <small>{paymentStatus === "paid" ? "Paid" : "Waiting on insurance check"}</small>
             </div>
             <div>
               <span>Spent on expenses</span>
@@ -2303,6 +2306,13 @@ function JobOperations({
             <label>
               Customer / cash paid
               <input type="number" min="0" step="0.01" value={paidInput.cash} onChange={(event) => setPaidInput({ ...paidInput, cash: event.target.value })} />
+            </label>
+            <label>
+              Payment status
+              <select value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)}>
+                <option value="waiting_insurance">Waiting on insurance check</option>
+                <option value="paid">Paid</option>
+              </select>
             </label>
             <button className="text-button">Save payments</button>
           </form>

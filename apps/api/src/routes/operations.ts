@@ -76,7 +76,9 @@ export function createOperationsRouter(prisma: PrismaClient) {
       if (!Number.isFinite(number) || number < 0) throw new ApiError(400, `${label} must be zero or more`);
       return Math.round(number * 100) / 100;
     };
-    res.json(await prisma.job.update({ where: { id: job.id }, data: { insurancePaid: amount(req.body.insurancePaid, 'Insurance paid'), cashPaid: amount(req.body.cashPaid, 'Cash paid') } }));
+    const paymentStatus = req.body.paymentStatus;
+    if (!['paid', 'waiting_insurance'].includes(paymentStatus)) throw new ApiError(400, 'Payment status must be paid or waiting_insurance');
+    res.json(await prisma.job.update({ where: { id: job.id }, data: { insurancePaid: amount(req.body.insurancePaid, 'Insurance paid'), cashPaid: amount(req.body.cashPaid, 'Cash paid'), paymentStatus } }));
   }));
 
   router.get('/jobs/:jobId/invoices', asyncHandler(async (req, res) => {

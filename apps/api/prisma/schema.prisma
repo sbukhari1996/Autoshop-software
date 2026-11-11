@@ -289,6 +289,7 @@ model Job {
   totalExpenses  Float     @default(0)
   insurancePaid  Float     @default(0)
   cashPaid       Float     @default(0)
+  paymentStatus  String    @default("waiting_insurance")
   closedAt       DateTime?
   notes          String?
   createdAt      DateTime  @default(now())
