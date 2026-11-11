@@ -344,14 +344,35 @@ async function ensureJob(prisma: PrismaClient, jobId: string) {
 
 const partStatuses = ['not_ordered', 'ordered', 'waiting_delivery', 'arrived', 'arrived_wrong', 'returned'] as const;
 
+function isPartStatus(status: unknown): status is typeof partStatuses[number] {
+  return typeof status === 'string' && partStatuses.includes(status as typeof partStatuses[number]);
+}
+
 function dateOnly(value: unknown, field: string): Date | null {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new ApiError(400, `${field} must be a date (YYYY-MM-DD)`);
   return new Date(`${value}T00:00:00.000Z`);
 }
 
-function partData(body: Record<string, any>, creating: boolean) {
-  const data: Record<string, unknown> = {};
+type PartData = {
+  partName?: string;
+  partNumber?: string | null;
+  vendorName?: string | null;
+  vendorPhone?: string | null;
+  poNumber?: string | null;
+  quoteNumber?: string | null;
+  invoiceNumber?: string | null;
+  notes?: string | null;
+  quantity?: number;
+  status?: typeof partStatuses[number];
+  expectedDate?: Date | null;
+  arrivedDate?: Date | null;
+};
+
+function partData(body: Record<string, unknown>, creating: true): PartData & { partName: string };
+function partData(body: Record<string, unknown>, creating: false): PartData;
+function partData(body: Record<string, unknown>, creating: boolean): PartData {
+  const data: PartData = {};
   if (creating || body.partName !== undefined) data.partName = requiredText(body.partName, 'partName');
   for (const key of ['partNumber', 'vendorName', 'vendorPhone', 'poNumber', 'quoteNumber', 'invoiceNumber', 'notes'] as const) {
     if (body[key] !== undefined) data[key] = optionalText(body[key], key) ?? null;
@@ -361,7 +382,7 @@ function partData(body: Record<string, any>, creating: boolean) {
     data.quantity = Number(body.quantity);
   }
   if (body.status !== undefined) {
-    if (!partStatuses.includes(body.status)) throw new ApiError(400, 'Unknown part status');
+    if (!isPartStatus(body.status)) throw new ApiError(400, 'Unknown part status');
     data.status = body.status;
   }
   if (body.expectedDate !== undefined) data.expectedDate = dateOnly(body.expectedDate, 'expectedDate');
