@@ -153,6 +153,7 @@ type Job = {
   insurancePaid?: number;
   cashPaid?: number;
   agreedAmount?: number | null;
+  balanceSource?: string | null;
   paymentStatus?: string;
   arrivalDate?: string | null;
   closedAt?: string | null;
@@ -2160,6 +2161,7 @@ function JobOperations({
   const [attachId, setAttachId] = React.useState("");
   const [payments, setPayments] = React.useState<JobPayment[]>([]);
   const [agreedInput, setAgreedInput] = React.useState(job.agreedAmount == null ? "" : String(job.agreedAmount));
+  const [balanceSource, setBalanceSource] = React.useState(job.balanceSource ?? "");
   const [payForm, setPayForm] = React.useState({ source: "customer", amount: "", paidDate: new Date().toISOString().slice(0, 10), note: "" });
   const paid = {
     insurance: payments.filter((payment) => payment.source === "insurance").reduce((total, payment) => total + payment.amount, 0),
@@ -2186,7 +2188,7 @@ function JobOperations({
       await fetchJson(`/jobs/${job.id}/financials`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agreedAmount: agreedInput, paymentStatus }),
+        body: JSON.stringify({ agreedAmount: agreedInput, paymentStatus, balanceSource }),
       });
       await onChanged();
     } catch (actionError) {
@@ -2352,7 +2354,7 @@ function JobOperations({
             <div>
               <span>Still to collect</span>
               <strong>{job.agreedAmount == null ? "—" : dollars(Math.abs(job.agreedAmount - received))}</strong>
-              <small>{job.agreedAmount == null ? "Set an agreed total below" : job.agreedAmount - received < 0 ? "Received more than agreed" : "Agreed minus received"}</small>
+              <small>{job.agreedAmount == null ? "Set an agreed total below" : job.agreedAmount - received < 0 ? "Received more than agreed" : balanceSource ? `Expected from ${balanceSource === "insurance" ? "insurance" : "customer (cash)"}` : "Agreed minus received"}</small>
             </div>
             <div>
               <span>Spent on expenses</span>
@@ -2374,6 +2376,14 @@ function JobOperations({
             <label>
               Agreed total
               <input type="number" min="0" step="0.01" placeholder="Total agreed" value={agreedInput} onChange={(event) => setAgreedInput(event.target.value)} />
+            </label>
+            <label>
+              Remaining from
+              <select value={balanceSource} onChange={(event) => setBalanceSource(event.target.value)}>
+                <option value="">Not set</option>
+                <option value="customer">Customer (cash)</option>
+                <option value="insurance">Insurance</option>
+              </select>
             </label>
             <label>
               Payment status

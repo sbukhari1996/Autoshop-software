@@ -137,7 +137,9 @@ export function createOperationsRouter(prisma: PrismaClient) {
     if (!['paid', 'waiting_insurance'].includes(paymentStatus)) throw new ApiError(400, 'Payment status must be paid or waiting_insurance');
     const blank = req.body.agreedAmount === undefined || req.body.agreedAmount === null || req.body.agreedAmount === '';
     const agreedAmount = blank ? null : positiveAmount(req.body.agreedAmount);
-    res.json(await prisma.job.update({ where: { id: job.id }, data: { agreedAmount, paymentStatus } }));
+    const balanceSource = req.body.balanceSource || null;
+    if (balanceSource !== null && !['customer', 'insurance'].includes(balanceSource)) throw new ApiError(400, 'Remaining balance must be from customer or insurance');
+    res.json(await prisma.job.update({ where: { id: job.id }, data: { agreedAmount, paymentStatus, balanceSource } }));
   }));
 
   router.get('/jobs/:jobId/invoices', asyncHandler(async (req, res) => {
