@@ -900,3 +900,9 @@ input[type="search"] {
 .job-money .expense-form label { display: grid; gap: 4px; font-size: .85rem; }
 .claim-next-step { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0; padding: 12px; border: 1px solid #f2c9a5; border-radius: 10px; background: #fff7f0; }
 .claim-next-step p { margin: 0; }
+
+/* Dashboard schedule: window label and mark-complete button */
+.schedule-entry { position: relative; }
+.schedule-entry .schedule-item time { white-space: normal; min-width: 0; }
+.schedule-complete { position: absolute; right: 10px; top: 10px; }
+.schedule-entry .schedule-item { grid-template-columns: 96px 3px 1fr; }

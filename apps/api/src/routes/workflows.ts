@@ -3,10 +3,11 @@ import PDFDocument from 'pdfkit';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
 import { optionalBoolean, optionalDate, optionalInteger, optionalText, requiredText } from '../validation.js';
+import { sixPmNewYork } from '../shop-time.js';
 import { clearInspectionVisit, syncClaimInspection, syncInspectionClaim } from '../claimInspection.js';
 
 const inspectionSelect = {
-  id: true, customerId: true, claimId: true, jobId: true, scheduledFor: true, inspectorName: true, inspectorPhone: true, insuranceRep: true, status: true, notes: true,
+  id: true, customerId: true, claimId: true, jobId: true, scheduledFor: true, scheduledUntil: true, inspectorName: true, inspectorPhone: true, insuranceRep: true, status: true, notes: true,
   customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
   claim: { select: { id: true, claimNumber: true, insuranceCompany: true, vehicle: true, vehicleYear: true, vehicleMake: true, vehicleModel: true } },
   job: { select: { id: true, jobNumber: true, status: true, vehicle: true } },
@@ -85,6 +86,7 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
           claimId,
           jobId,
           scheduledFor,
+          scheduledUntil: optionalDate(req.body.scheduledUntil, 'scheduledUntil') ?? null,
           inspectorName: optionalText(req.body.inspectorName, 'inspectorName'),
           inspectorPhone: optionalText(req.body.inspectorPhone, 'inspectorPhone'),
           insuranceRep: optionalText(req.body.insuranceRep, 'insuranceRep'),
@@ -118,6 +120,7 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
           claimId,
           jobId,
           scheduledFor: req.body.scheduledFor === undefined ? undefined : requiredDate(req.body.scheduledFor, 'scheduledFor'),
+          scheduledUntil: req.body.scheduledUntil === undefined ? undefined : optionalDate(req.body.scheduledUntil, 'scheduledUntil') ?? null,
           inspectorName: req.body.inspectorName === undefined ? undefined : optionalText(req.body.inspectorName, 'inspectorName'),
           inspectorPhone: req.body.inspectorPhone === undefined ? undefined : optionalText(req.body.inspectorPhone, 'inspectorPhone'),
           insuranceRep: req.body.insuranceRep === undefined ? undefined : optionalText(req.body.insuranceRep, 'insuranceRep'),
@@ -957,12 +960,15 @@ async function getDashboardData(prisma: PrismaClient) {
   return { metrics: { openJobs, inspections, customers, revenue: revenue._sum.totalRevenue || 0, expenses: expenses._sum.amount || 0 }, recentJobs, upcomingSchedule };
 }
 
+// Stays listed until 6 PM New York time on its day, so a morning inspection can still be followed up.
 async function getUpcomingInspections(prisma: PrismaClient) {
-  return prisma.inspection.findMany({
-    where: { status: 'scheduled', scheduledFor: { gte: new Date() } },
+  const rows = await prisma.inspection.findMany({
+    where: { status: 'scheduled', scheduledFor: { gte: new Date(Date.now() - 86400000) } },
     orderBy: { scheduledFor: 'asc' },
     select: inspectionSelect,
   });
+  const now = Date.now();
+  return rows.filter((row) => row.scheduledFor && sixPmNewYork(row.scheduledFor).getTime() > now);
 }
 
 async function ensureInspectionLinks(prisma: PrismaClient, customerId: string, claimId: string | null, jobId: string | null) {

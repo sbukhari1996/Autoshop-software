@@ -331,6 +331,7 @@ model Inspection {
   customerId     String?
   claimId        String?
   scheduledFor   DateTime?
+  scheduledUntil DateTime?
   inspectorName  String?
   inspectorPhone String?
   insuranceRep   String?

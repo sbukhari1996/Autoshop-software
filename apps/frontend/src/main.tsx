@@ -192,6 +192,7 @@ type DashboardData = {
 type Inspection = {
   id: string;
   scheduledFor: string;
+  scheduledUntil?: string | null;
   inspectorName: string | null;
   inspectorPhone: string | null;
   insuranceRep: string | null;
@@ -1158,6 +1159,14 @@ function Dashboard({
 }) {
   const [scheduleModalOpen, setScheduleModalOpen] = React.useState(false);
   const [selectedInspection, setSelectedInspection] = React.useState<Inspection | null>(null);
+  async function completeInspection(inspection: Inspection) {
+    try {
+      await request(`/inspections/${inspection.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "completed" }) });
+      onCreated();
+    } catch (completeError) {
+      window.alert(completeError instanceof Error ? completeError.message : "Unable to mark complete");
+    }
+  }
   const metrics = data?.metrics || {
     openJobs: 0,
     inspections: 0,
@@ -1256,12 +1265,7 @@ function Dashboard({
               {data.upcomingSchedule.map((inspection) => (
                 <ScheduleItem
                   key={inspection.id}
-                  time={new Date(inspection.scheduledFor).toLocaleString([], {
-                    month: "short",
-                    day: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
+                  time={scheduleWindow(inspection)}
                   title={`${inspection.customer.firstName} ${inspection.customer.lastName}`}
                   vehicle={[
                     inspection.claim?.vehicle?.year || inspection.job?.vehicle?.year || inspection.claim?.vehicleYear,
@@ -1279,6 +1283,7 @@ function Dashboard({
                   status={inspection.status}
                   tone={inspection.status === "scheduled" ? "orange" : "blue"}
                   onClick={() => { setSelectedInspection(inspection); setScheduleModalOpen(true); }}
+                  onComplete={inspection.status === "scheduled" ? () => void completeInspection(inspection) : undefined}
                 />
               ))}
             </div>
@@ -3261,6 +3266,7 @@ function InspectionModal({
     claimId: inspection?.claim?.id || "",
     jobId: inspection?.job?.id || "",
     scheduledFor: toDateTimeLocal(inspection?.scheduledFor),
+    scheduledUntil: toDateTimeLocal(inspection?.scheduledUntil),
     inspectorName: inspection?.inspectorName || "",
     inspectorPhone: inspection?.inspectorPhone || "",
     insuranceRep: inspection?.insuranceRep || "",
@@ -3299,6 +3305,7 @@ function InspectionModal({
         body: JSON.stringify({
           ...form,
           scheduledFor: new Date(form.scheduledFor).toISOString(),
+          scheduledUntil: form.scheduledUntil ? new Date(form.scheduledUntil).toISOString() : null,
           claimId: form.claimId || null,
           jobId: form.jobId || null,
         }),
@@ -3375,6 +3382,10 @@ function InspectionModal({
             <input required type="datetime-local" value={form.scheduledFor} onChange={(event) => update("scheduledFor", event.target.value)} />
           </label>
           <label>
+            Window ends
+            <input type="datetime-local" value={form.scheduledUntil} onChange={(event) => update("scheduledUntil", event.target.value)} />
+          </label>
+          <label>
             Inspector name
             <input value={form.inspectorName} onChange={(event) => update("inspectorName", event.target.value)} />
           </label>
@@ -3419,6 +3430,7 @@ function ScheduleItem({
   status,
   tone,
   onClick,
+  onComplete,
 }: {
   time: string;
   title: string;
@@ -3427,8 +3439,10 @@ function ScheduleItem({
   status: string;
   tone: string;
   onClick?: () => void;
+  onComplete?: () => void;
 }) {
   return (
+    <div className="schedule-entry">
     <button type="button" className="schedule-item schedule-item-clickable" onClick={onClick}>
       <time>{time}</time>
       <span className={`schedule-line ${tone}`} />
@@ -3439,8 +3453,22 @@ function ScheduleItem({
         <span className={`status-pill ${status === "scheduled" ? "orange" : "blue"}`}>{humanize(status)}</span>
       </div>
     </button>
+    {onComplete && (
+      <button type="button" className="secondary-button compact schedule-complete" onClick={onComplete}>
+        Mark complete
+      </button>
+    )}
+    </div>
   );
 }
+
+function scheduleWindow(inspection: Inspection) {
+  const start = new Date(inspection.scheduledFor);
+  const day = start.toLocaleDateString([], { month: "short", day: "numeric" });
+  const clock = (value: Date) => value.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return inspection.scheduledUntil ? `${day}, ${clock(start)} – ${clock(new Date(inspection.scheduledUntil))}` : `${day}, ${clock(start)}`;
+}
+
 function EmptyState({
   text,
   action,
