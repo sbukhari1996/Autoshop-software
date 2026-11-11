@@ -138,6 +138,8 @@ type Claim = {
   notes?: string | null;
   jobs?: Array<{ id: string; jobNumber: string; status: string }>;
 };
+type JobInvoice = { id: string; invoiceNumber: string; status: string; total: number; balanceDue: number; jobId: string | null; customerId: string | null };
+
 type Job = {
   id: string;
   jobNumber: string;
@@ -145,6 +147,11 @@ type Job = {
   status: string;
   totalRevenue: number;
   totalExpenses?: number;
+  insurancePaid?: number;
+  cashPaid?: number;
+  arrivalDate?: string | null;
+  closedAt?: string | null;
+  createdAt?: string;
   customer: Customer;
   vehicle: Vehicle | null;
   claim?: Pick<Claim, "claimNumber" | "insuranceCompany" | "customerName" | "customerPolicyNumber" | "incidentDate" | "adjusterName" | "adjusterPhone"> | null;
@@ -1636,7 +1643,21 @@ function ClaimWorkspace({
       setVinState((current) => ({ ...current, [kind]: { loading: false, message: decodeError instanceof Error ? decodeError.message : "VIN could not be decoded", error: true } }));
     }
   }
-  async function save(event: React.FormEvent) {
+  async function createJobFromClaim() {
+    if (!claim) return;
+    setBusy(true);
+    setError("");
+    try {
+      await fetchJson(`/claims/${claim.id}/job`, { method: "POST" });
+      await onSaved();
+    } catch (jobError) {
+      setError(jobError instanceof Error ? jobError.message : "Unable to create job");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+    async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!customerId) { setError("Select an existing customer before saving the claim."); return; }
     setBusy(true); setError("");
@@ -1673,6 +1694,12 @@ function ClaimWorkspace({
             <div className="claim-section"><h3>At-fault party and insurance</h3><div className="claim-grid"><Field label="At-fault driver name" value={form.atFaultDriverName} onChange={(value) => update("atFaultDriverName", value)} /><Field label="At-fault driver phone" value={form.atFaultDriverPhone} onChange={(value) => update("atFaultDriverPhone", value)} /><Field label="At-fault driver's license" value={form.atFaultDriverLicense} onChange={(value) => update("atFaultDriverLicense", value)} /><Field label="DL state" value={form.atFaultDriverDlState} onChange={(value) => update("atFaultDriverDlState", value)} /><Field label="At-fault license plate" value={form.atFaultPlate} onChange={(value) => update("atFaultPlate", value)} /><Field label="At-fault plate state" value={form.atFaultPlateState} onChange={(value) => update("atFaultPlateState", value)} /><div className="vin-control-row"><Field label="At-fault vehicle VIN" value={form.atFaultVehicleVin} onChange={(value) => update("atFaultVehicleVin", value)} /><button type="button" className="secondary-button" onClick={() => void decodeVin("atFault")} disabled={vinState.atFault.loading}>{vinState.atFault.loading ? "Decoding..." : "Decode VIN"}</button></div>{vinState.atFault.message && <p className={vinState.atFault.error ? "vin-error" : "vin-success"}>{vinState.atFault.message}</p>}<Field label="At-fault vehicle year" value={form.atFaultVehicleYear} onChange={(value) => update("atFaultVehicleYear", value)} /><Field label="At-fault vehicle make" value={form.atFaultVehicleMake} onChange={(value) => update("atFaultVehicleMake", value)} /><Field label="At-fault vehicle model" value={form.atFaultVehicleModel} onChange={(value) => update("atFaultVehicleModel", value)} /><Field label="At-fault vehicle trim" value={form.atFaultVehicleTrim} onChange={(value) => update("atFaultVehicleTrim", value)} /><Field label="At-fault body style" value={form.atFaultVehicleBodyClass} onChange={(value) => update("atFaultVehicleBodyClass", value)} /><Field label="At-fault vehicle color" value={form.atFaultVehicleColor} onChange={(value) => update("atFaultVehicleColor", value)} /><Field label="At-fault insurance" value={form.atFaultInsurance} onChange={(value) => update("atFaultInsurance", value)} /><Field label="At-fault policy number" value={form.atFaultPolicyNumber} onChange={(value) => update("atFaultPolicyNumber", value)} /><Field label="At-fault claim number" value={form.atFaultClaimNumber} onChange={(value) => update("atFaultClaimNumber", value)} /><Field label="At-fault insurance phone" value={form.atFaultInsurancePhone} onChange={(value) => update("atFaultInsurancePhone", value)} /></div></div>
             <div className="claim-section"><h3>Incident and witnesses</h3><div className="claim-grid"><Field label="Incident date" type="date" value={form.incidentDate} onChange={(value) => update("incidentDate", value)} /><Field label="Police report number" value={form.policeReportNumber} onChange={(value) => update("policeReportNumber", value)} /><Field label="Police department" value={form.policeDepartment} onChange={(value) => update("policeDepartment", value)} /><Field label="Witness name" value={form.witnessName} onChange={(value) => update("witnessName", value)} /><Field label="Witness phone" value={form.witnessPhone} onChange={(value) => update("witnessPhone", value)} /></div></div>
             <div className="claim-section"><h3>Documentation checklist</h3><div className="claim-checklist">{claimFlags.map(([key, label]) => <label key={key} className="checkbox-field"><input type="checkbox" checked={Boolean(form[key])} onChange={(event) => update(key, event.target.checked)} />{label}</label>)}</div><div className="claim-grid claim-followup"><Field label="Photo folder link" value={form.photoFolderLink} onChange={(value) => update("photoFolderLink", value)} /><Field label="Police report file" value={form.policeReportFile} onChange={(value) => update("policeReportFile", value)} /><Field label="Adjuster name" value={form.adjusterName} onChange={(value) => update("adjusterName", value)} /><Field label="Adjuster phone" value={form.adjusterPhone} onChange={(value) => update("adjusterPhone", value)} /><Field label="Adjuster email" value={form.adjusterEmail} onChange={(value) => update("adjusterEmail", value)} /><Field label="Adjuster visit" type="datetime-local" value={form.adjusterVisitAt} onChange={(value) => update("adjusterVisitAt", value)} /></div></div>
+            {claim && claim.claimStatus === "approved" && !jobs.some((job) => job.claimId === claim.id) && (
+              <div className="claim-next-step">
+                <p>This claim is approved. Create its repair job now.</p>
+                <button type="button" className="orange-button" disabled={busy} onClick={() => void createJobFromClaim()}>Create job from this claim</button>
+              </div>
+            )}
             <div className="claim-section"><h3>Claim status</h3><div className="claim-grid"><label>Status<select value={String(form.status)} onChange={(event) => update("status", event.target.value)}>{["new", "submitted", "in_review", "approved", "denied", "closed"].map((status) => <option key={status}>{humanize(status)}</option>)}</select></label><Field label="Date submitted" type="date" value={form.dateSubmitted} onChange={(value) => update("dateSubmitted", value)} /><label className="claim-notes">Notes<textarea value={String(form.notes || "")} onChange={(event) => update("notes", event.target.value)} /></label></div></div>
             <div className="claim-form-actions"><button type="button" className="secondary-button" onClick={() => setPrintMode(true)}>Preview authorization</button><button className="orange-button" disabled={busy}>{busy ? "Saving..." : claim ? "Save claim" : "Create claim"}</button></div>
           </form>
@@ -2049,6 +2076,8 @@ function JobView({
     </>
   );
 }
+const dollars = (value: number) => value.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
 function JobOperations({
   job,
   onClose,
@@ -2081,6 +2110,7 @@ function JobOperations({
   }
   React.useEffect(() => {
     void loadExpenses();
+    void loadInvoices();
   }, [job.id]);
   async function transition(status: string) {
     try {
@@ -2118,10 +2148,79 @@ function JobOperations({
       );
     }
   }
+  const [jobInvoices, setJobInvoices] = React.useState<JobInvoice[]>([]);
+  const [unattached, setUnattached] = React.useState<JobInvoice[]>([]);
+  const [attachId, setAttachId] = React.useState("");
+  const [paid, setPaid] = React.useState({ insurance: job.insurancePaid ?? 0, cash: job.cashPaid ?? 0 });
+  const [paidInput, setPaidInput] = React.useState({ insurance: String(job.insurancePaid ?? 0), cash: String(job.cashPaid ?? 0) });
+  async function loadInvoices() {
+    const [attached, all] = await Promise.all([
+      fetchJson<JobInvoice[]>(`/jobs/${job.id}/invoices`),
+      fetchJson<JobInvoice[]>("/invoices"),
+    ]);
+    setJobInvoices(attached);
+    setUnattached(all.filter((invoice) => !invoice.jobId && (!invoice.customerId || invoice.customerId === job.customer.id)));
+  }
+  async function saveFinancials(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    const next = { insurance: Number(paidInput.insurance || 0), cash: Number(paidInput.cash || 0) };
+    try {
+      await fetchJson(`/jobs/${job.id}/financials`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ insurancePaid: next.insurance, cashPaid: next.cash }),
+      });
+      setPaid(next);
+      await onChanged();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Unable to save payments");
+    }
+  }
+  async function attachInvoice() {
+    if (!attachId) return;
+    setError("");
+    try {
+      await fetchJson(`/jobs/${job.id}/invoices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invoiceId: attachId }),
+      });
+      setAttachId("");
+      await loadInvoices();
+      await onChanged();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Unable to attach invoice");
+    }
+  }
+  async function downloadInvoice(invoice: Pick<JobInvoice, "id" | "invoiceNumber">) {
+    setPdfBusy(true);
+    setError("");
+    try {
+      const result = await fetchJson<{ downloadUrl: string; fileName: string }>(`/invoices/${invoice.id}/pdf`, { method: "POST" });
+      const response = await fetch(new URL(result.downloadUrl, API_URL).toString(), { headers: { Authorization: `Bearer ${localStorage.getItem("repairos_token") || ""}` } });
+      if (!response.ok) throw new Error("Unable to download invoice PDF");
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(await response.blob());
+      link.download = result.fileName;
+      link.click();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Unable to download invoice PDF");
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+  const received = paid.insurance + paid.cash;
+  const spent = expenses.reduce((total, expense) => total + expense.amount, 0);
+  const profit = received - spent;
+  const openSince = new Date(job.arrivalDate || job.createdAt || Date.now());
+  const openUntil = job.closedAt ? new Date(job.closedAt) : new Date();
+  const daysOpen = Math.max(0, Math.round((openUntil.getTime() - openSince.getTime()) / 86400000));
   async function generateInvoice() {
     try {
       const invoice = await fetchJson<{ id: string; invoiceNumber: string }>(`/invoices/from-job/${job.id}`, { method: "POST" });
       setGeneratedInvoice(invoice);
+      await loadInvoices();
       await onChanged();
     } catch (actionError) {
       setError(
@@ -2132,20 +2231,9 @@ function JobOperations({
     }
   }
   async function downloadGeneratedInvoice() {
-    if (!generatedInvoice) return;
-    setPdfBusy(true);
-    try {
-      const result = await fetchJson<{ downloadUrl: string; fileName: string }>(`/invoices/${generatedInvoice.id}/pdf`, { method: "POST" });
-      const response = await fetch(new URL(result.downloadUrl, API_URL).toString(), { headers: { Authorization: `Bearer ${localStorage.getItem("repairos_token") || ""}` } });
-      if (!response.ok) throw new Error("Unable to download invoice PDF");
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(await response.blob());
-      link.download = result.fileName;
-      link.click();
-    } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Unable to download invoice PDF");
-    } finally { setPdfBusy(false); }
+    if (generatedInvoice) await downloadInvoice(generatedInvoice);
   }
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <section
@@ -2183,6 +2271,74 @@ function JobOperations({
         >
           <Icon name="file" /> Generate job invoice
         </button>
+        <div className="operation-section job-money">
+          <h3>Money and days open</h3>
+          <div className="job-money-summary">
+            <div>
+              <span>Received</span>
+              <strong>{dollars(received)}</strong>
+              <small>Insurance {dollars(paid.insurance)} · Customer {dollars(paid.cash)}</small>
+            </div>
+            <div>
+              <span>Spent on expenses</span>
+              <strong>{dollars(spent)}</strong>
+              <small>{expenses.length} expense{expenses.length === 1 ? "" : "s"}</small>
+            </div>
+            <div className={profit < 0 ? "job-money-loss" : "job-money-profit"}>
+              <span>{profit < 0 ? "Loss so far" : "Profit so far"}</span>
+              <strong>{dollars(Math.abs(profit))}</strong>
+              <small>Received minus expenses</small>
+            </div>
+            <div>
+              <span>Days open</span>
+              <strong>{daysOpen}</strong>
+              <small>{job.closedAt ? `Closed ${openUntil.toLocaleDateString()}` : `Open since ${openSince.toLocaleDateString()}`}</small>
+            </div>
+          </div>
+          <form className="expense-form" onSubmit={saveFinancials}>
+            <label>
+              Insurance paid
+              <input type="number" min="0" step="0.01" value={paidInput.insurance} onChange={(event) => setPaidInput({ ...paidInput, insurance: event.target.value })} />
+            </label>
+            <label>
+              Customer / cash paid
+              <input type="number" min="0" step="0.01" value={paidInput.cash} onChange={(event) => setPaidInput({ ...paidInput, cash: event.target.value })} />
+            </label>
+            <button className="text-button">Save payments</button>
+          </form>
+        </div>
+        <div className="operation-section">
+          <h3>Invoices</h3>
+          {jobInvoices.length ? (
+            <div className="expense-list">
+              {jobInvoices.map((invoice) => (
+                <div key={invoice.id}>
+                  <span>
+                    {invoice.invoiceNumber}
+                    <small>{invoice.status} · balance {dollars(invoice.balanceDue)}</small>
+                  </span>
+                  <span className="expense-actions">
+                    <strong>{dollars(invoice.total)}</strong>
+                    <button type="button" className="secondary-button compact" disabled={pdfBusy} onClick={() => void downloadInvoice(invoice)}>PDF</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="table-subtext">No invoice is attached to this job yet.</p>
+          )}
+          {unattached.length > 0 && (
+            <form className="expense-form" onSubmit={(event) => { event.preventDefault(); void attachInvoice(); }}>
+              <select value={attachId} onChange={(event) => setAttachId(event.target.value)}>
+                <option value="">Attach an existing invoice</option>
+                {unattached.map((invoice) => (
+                  <option key={invoice.id} value={invoice.id}>{invoice.invoiceNumber} · {dollars(invoice.total)}</option>
+                ))}
+              </select>
+              <button className="text-button" disabled={!attachId}>Attach invoice</button>
+            </form>
+          )}
+        </div>
         <div className="operation-section">
           <h3>Expenses</h3>
           {expenses.length ? (
@@ -2224,7 +2380,7 @@ function JobOperations({
               }
             />
             <input
-              placeholder="Category"
+              placeholder="Category (Parts, Labor, Paint)"
               value={form.category}
               onChange={(event) =>
                 setForm({ ...form, category: event.target.value })

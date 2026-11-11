@@ -871,3 +871,13 @@ input[type="search"] {
 .status-pill.claim-status-approved { color: #1e6b3c; background: #e2f5ea; }
 .status-pill.claim-status-denied { color: #9b1c1c; background: #fde4e4; }
 .status-pill.claim-status-closed { color: #4a4f55; background: #ebedf0; }
+
+.job-money-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.job-money-summary > div { border: 1px solid #ddd; border-radius: 10px; padding: 10px 12px; display: grid; gap: 2px; }
+.job-money-summary span, .job-money-summary small { color: #6b6b6b; font-size: .8rem; }
+.job-money-summary strong { font-size: 1.15rem; }
+.job-money-profit strong { color: #1f7a3d; }
+.job-money-loss strong { color: #b42318; }
+.job-money .expense-form label { display: grid; gap: 4px; font-size: .85rem; }
+.claim-next-step { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 12px 0; padding: 12px; border: 1px solid #f2c9a5; border-radius: 10px; background: #fff7f0; }
+.claim-next-step p { margin: 0; }

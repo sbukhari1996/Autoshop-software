@@ -910,6 +910,22 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
     res.status(201).json(job);
   }));
 
+  // One repair job per approved claim.
+  workflowsRouter.post('/claims/:claimId/job', asyncHandler(async (req, res) => {
+    const claim = await prisma.claim.findUnique({ where: { id: String(req.params.claimId) }, include: { jobs: { select: { jobNumber: true }, take: 1 } } });
+    if (!claim) throw new ApiError(404, 'Claim not found');
+    if (claim.claimStatus !== 'approved') throw new ApiError(409, 'Only approved claims can create a job');
+    if (claim.jobs.length) throw new ApiError(409, `This claim already has job ${claim.jobs[0].jobNumber}`);
+    const job = await prisma.$transaction(async (tx) => {
+      const jobNumber = `JOB-${String((await tx.$queryRaw<Array<{ number: bigint }>>`SELECT nextval('job_number_seq') AS number`)[0].number).padStart(3, '0')}`;
+      return tx.job.create({
+        data: { customerId: claim.customerId, vehicleId: claim.vehicleId, claimId: claim.id, jobNumber, status: 'new' },
+        include: { customer: true, vehicle: true, claim: true },
+      });
+    });
+    res.status(201).json(job);
+  }));
+
   return workflowsRouter;
 }
 

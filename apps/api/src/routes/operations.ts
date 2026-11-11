@@ -13,6 +13,7 @@ import { optionalText, requiredText } from '../validation.js';
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const statuses = ['new', 'inspection', 'authorized', 'in_progress', 'ready', 'completed', 'cancelled'] as const;
+const closedStatuses: readonly string[] = ['completed', 'cancelled'];
 
 export function createOperationsRouter(prisma: PrismaClient) {
   const router = Router();
@@ -59,7 +60,7 @@ export function createOperationsRouter(prisma: PrismaClient) {
     const nextStatus = requiredText(req.body.status, 'status');
     if (!(statuses as readonly string[]).includes(nextStatus)) throw new ApiError(400, `Unsupported job status: ${nextStatus}`);
     const updated = await prisma.$transaction(async (tx) => {
-      const saved = await tx.job.update({ where: { id: job.id }, data: { status: nextStatus } });
+      const saved = await tx.job.update({ where: { id: job.id }, data: { status: nextStatus, closedAt: closedStatuses.includes(nextStatus) ? (job.closedAt ?? new Date()) : null } });
       await tx.jobStatusHistory.create({ data: { jobId: job.id, fromStatus: job.status, toStatus: nextStatus, note: optionalText(req.body.note, 'note') } });
       return saved;
     });
@@ -67,6 +68,32 @@ export function createOperationsRouter(prisma: PrismaClient) {
   }));
 
   // Storage billing: mark a job as a total loss and/or set the date it arrived in storage.
+  // Money received for a job: what insurance paid and what the customer paid directly.
+  router.patch('/jobs/:jobId/financials', asyncHandler(async (req, res) => {
+    const job = await ensureJob(prisma, routeParam(req, 'jobId'));
+    const amount = (value: unknown, label: string) => {
+      const number = Number(value ?? 0);
+      if (!Number.isFinite(number) || number < 0) throw new ApiError(400, `${label} must be zero or more`);
+      return Math.round(number * 100) / 100;
+    };
+    res.json(await prisma.job.update({ where: { id: job.id }, data: { insurancePaid: amount(req.body.insurancePaid, 'Insurance paid'), cashPaid: amount(req.body.cashPaid, 'Cash paid') } }));
+  }));
+
+  router.get('/jobs/:jobId/invoices', asyncHandler(async (req, res) => {
+    const job = await ensureJob(prisma, routeParam(req, 'jobId'));
+    res.json(await prisma.invoice.findMany({ where: { jobId: job.id }, orderBy: { issueDate: 'desc' } }));
+  }));
+
+  // Attach an existing invoice for this customer that is not on another job yet.
+  router.post('/jobs/:jobId/invoices', asyncHandler(async (req, res) => {
+    const job = await ensureJob(prisma, routeParam(req, 'jobId'));
+    const invoice = await prisma.invoice.findUnique({ where: { id: requiredText(req.body.invoiceId, 'invoiceId') } });
+    if (!invoice) throw new ApiError(404, 'Invoice not found');
+    if (invoice.jobId && invoice.jobId !== job.id) throw new ApiError(409, 'That invoice is already attached to another job');
+    if (invoice.customerId && invoice.customerId !== job.customerId) throw new ApiError(400, 'That invoice belongs to a different customer');
+    res.json(await prisma.invoice.update({ where: { id: invoice.id }, data: { jobId: job.id } }));
+  }));
+
   router.patch('/jobs/:jobId/storage', asyncHandler(async (req, res) => {
     const job = await ensureJob(prisma, routeParam(req, 'jobId'));
     const data: { totalLoss?: boolean; totalLossDate?: Date | null; arrivalDate?: Date | null } = {};
