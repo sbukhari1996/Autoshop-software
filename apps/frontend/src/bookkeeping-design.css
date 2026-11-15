@@ -1,0 +1,20 @@
+/* Bookkeeping page restyle, per the Bookkeeping design canvas. Scoped to the page. */
+.bookkeeping-workspace { display: flex; flex-direction: column; gap: 18px; }
+.bookkeeping-workspace .finance-toolbar h2 { font-size: 28px; font-weight: 700; margin: 4px 0; }
+.bookkeeping-workspace .finance-toolbar .subheading { color: #6e6e73; }
+.bookkeeping-workspace .bookkeeping-tabs {
+  display: inline-flex; gap: 4px; padding: 3px; border-radius: 10px;
+  background: rgba(0, 0, 0, .06); align-self: flex-start; flex-wrap: wrap;
+}
+.bookkeeping-workspace .bookkeeping-tabs button {
+  border: 0; border-radius: 8px; padding: 7px 16px; background: transparent; color: #3a3a3c; font-weight: 500;
+}
+.bookkeeping-workspace .bookkeeping-tabs button.active {
+  background: #fff; color: #1d1d1f; font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+}
+.bookkeeping-workspace .surface {
+  border-radius: 14px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .06), 0 1px 2px rgba(0, 0, 0, .04);
+}
+.bookkeeping-workspace .recurring-period {
+  border-radius: 12px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .08);
+}

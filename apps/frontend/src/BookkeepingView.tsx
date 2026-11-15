@@ -2,6 +2,7 @@ import React from "react";
 import { downloadMonthlyStatement } from "./monthlyStatement";
 import { formatLedgerDate } from "./ledgerDate";
 import "./ledger-mobile.css";
+import "./bookkeeping-design.css";
 
 type FinanceEntry = {
   id: string;
