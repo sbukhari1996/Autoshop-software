@@ -189,6 +189,20 @@ export function JobPartsPanel({ jobId, request, onSaved }: { jobId: string; requ
                   ))}
                 </select>
                 <input
+                  key={`${part.id}-${part.cost}`}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Cost"
+                  aria-label="Cost"
+                  className="part-cost"
+                  defaultValue={part.cost ?? ""}
+                  onBlur={(event) => {
+                    const cost = event.target.value === "" ? null : Number(event.target.value);
+                    if (cost !== part.cost) void changePart(part, { cost });
+                  }}
+                />
+                <input
                   type="date"
                   aria-label="Expected delivery"
                   value={part.expectedDate ? part.expectedDate.slice(0, 10) : ""}

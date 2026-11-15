@@ -5,6 +5,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
+import { receiptPdf } from '../receipt-pdf.js';
 import { optionalBoolean, optionalDate, optionalText, requiredText } from '../validation.js';
 
 const entryTypes = ['income', 'expense'] as const;
@@ -100,13 +101,22 @@ export function createFinanceRouter(prisma: PrismaClient) {
     res.status(204).send();
   }));
   router.get('/entries', asyncHandler(async (req, res) => {
-    const entries = await prisma.financeEntry.findMany({ orderBy: { entryDate: 'desc' }, include: { documents: { orderBy: { createdAt: 'desc' } } } });
+    const entries = await prisma.financeEntry.findMany({
+      orderBy: { entryDate: 'desc' },
+      include: {
+        documents: { orderBy: { createdAt: 'desc' } },
+        customer: { select: { firstName: true, lastName: true } },
+        vehicle: { select: { year: true, make: true, model: true } },
+        job: { select: { jobNumber: true } },
+      },
+    });
     res.json(entries);
   }));
   router.post('/entries', asyncHandler(async (req, res) => {
     const type = validate(req.body.type, entryTypes, 'type');
     const amount = positive(req.body.amount);
-    const entry = await prisma.financeEntry.create({ data: { type, amount, description: requiredText(req.body.description, 'description'), category: optionalText(req.body.category, 'category'), paymentMethod: req.body.paymentMethod === undefined ? null : validate(req.body.paymentMethod, paymentMethods, 'paymentMethod'), entryDate: req.body.entryDate ? date(req.body.entryDate, 'entryDate') : new Date(), documentId: optionalText(req.body.documentId, 'documentId'), notes: optionalText(req.body.notes, 'notes') } });
+    const links = await entryLinks(prisma, req.body);
+    const entry = await prisma.financeEntry.create({ data: { ...links, type, amount, description: requiredText(req.body.description, 'description'), category: optionalText(req.body.category, 'category'), paymentMethod: req.body.paymentMethod === undefined ? null : validate(req.body.paymentMethod, paymentMethods, 'paymentMethod'), entryDate: req.body.entryDate ? date(req.body.entryDate, 'entryDate') : new Date(), documentId: optionalText(req.body.documentId, 'documentId'), notes: optionalText(req.body.notes, 'notes') } });
     res.status(201).json(entry);
   }));
   router.patch('/entries/:id', asyncHandler(async (req, res) => {
@@ -122,7 +132,7 @@ export function createFinanceRouter(prisma: PrismaClient) {
         category: req.body.category === undefined ? undefined : optionalText(req.body.category, 'category'),
         paymentMethod: req.body.paymentMethod === undefined ? undefined : validate(req.body.paymentMethod, paymentMethods, 'paymentMethod'),
         entryDate: req.body.entryDate === undefined ? undefined : date(req.body.entryDate, 'entryDate'),
-        jobId: null,
+        ...(['jobId', 'customerId', 'vehicleId'].some((key) => req.body[key] !== undefined) ? await entryLinks(prisma, req.body) : {}),
         claimId: null,
         notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'),
       },
@@ -145,12 +155,12 @@ export function createFinanceRouter(prisma: PrismaClient) {
     const file = req.file;
     if (!file || !file.size) throw new ApiError(400, 'Choose a non-empty receipt file');
     await mkdir(uploadDirectory, { recursive: true });
-    const fileName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'receipt';
-    const storedPath = path.join(uploadDirectory, `${randomUUID()}-${fileName}`);
-    await writeFile(storedPath, file.buffer, { flag: 'wx' });
+    const receipt = await receiptPdf(file);
+    const storedPath = path.join(uploadDirectory, `${randomUUID()}-${receipt.name}`);
+    await writeFile(storedPath, receipt.bytes, { flag: 'wx' });
     try {
       const document = await prisma.financeEntryDocument.create({
-        data: { entryId, fileName, filePath: path.relative(process.cwd(), storedPath) },
+        data: { entryId, fileName: receipt.name, filePath: path.relative(process.cwd(), storedPath) },
       });
       res.status(201).json(document);
     } catch (error) {
@@ -240,6 +250,15 @@ export function createFinanceRouter(prisma: PrismaClient) {
     res.json({ months, from, to, ...totals });
   }));
   return router;
+}
+// An entry links to a job (its customer and car come with it) or to a customer and car directly.
+async function entryLinks(prisma: PrismaClient, body: Record<string, unknown>) {
+  if (body.jobId) {
+    const job = await prisma.job.findUnique({ where: { id: String(body.jobId) }, select: { id: true, customerId: true, vehicleId: true } });
+    if (!job) throw new ApiError(400, 'Job not found');
+    return { jobId: job.id, customerId: job.customerId, vehicleId: job.vehicleId };
+  }
+  return { jobId: null, customerId: optionalText(body.customerId, 'customerId') ?? null, vehicleId: optionalText(body.vehicleId, 'vehicleId') ?? null };
 }
 function date(value: unknown, field: string) { const result = new Date(String(value)); if (Number.isNaN(result.getTime())) throw new ApiError(400, `${field} must be a valid date`); return result; }
 function positive(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result <= 0) throw new ApiError(400, 'amount must be a positive number'); return result; }

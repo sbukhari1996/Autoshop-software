@@ -911,3 +911,5 @@ input[type="search"] {
 .expense-amount-field { display: inline-flex; align-items: center; gap: 2px; }
 .expense-amount-field input { width: 96px; }
 .ledger-pill { color: #15803d; font-weight: 600; }
+.part-cost { width: 96px; }
+.ledger-link { display: block; }

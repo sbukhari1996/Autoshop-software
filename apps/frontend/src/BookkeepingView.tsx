@@ -5,6 +5,12 @@ import "./ledger-mobile.css";
 
 type FinanceEntry = {
   id: string;
+  jobId?: string | null;
+  customerId?: string | null;
+  vehicleId?: string | null;
+  customer?: { firstName: string; lastName: string } | null;
+  vehicle?: { year: number | null; make: string | null; model: string | null } | null;
+  job?: { jobNumber: string } | null;
   type: "income" | "expense";
   description: string;
   category: string | null;
@@ -15,6 +21,12 @@ type FinanceEntry = {
   documents: FinanceEntryDocument[];
 };
 type FinanceEntryDocument = { id: string; fileName: string; createdAt: string };
+type LedgerCustomer = { id: string; firstName: string; lastName: string };
+type LedgerVehicle = { id: string; customerId: string; year: number | null; make: string | null; model: string | null };
+type LedgerJob = { id: string; jobNumber: string; customerId: string; vehicleId: string | null };
+function carLabel(vehicle?: { year: number | null; make: string | null; model: string | null } | null) {
+  return vehicle ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ") : "";
+}
 type RecurringExpense = {
   id: string;
   name: string;
@@ -127,6 +139,9 @@ const emptyEntry = {
   entryDate: new Date().toISOString().slice(0, 10),
   paymentMethod: "cash",
   notes: "",
+  jobId: "",
+  customerId: "",
+  vehicleId: "",
 };
 const emptyRecurring = {
   name: "",
@@ -142,10 +157,16 @@ export function BookkeepingView({
   data,
   request,
   onChanged,
+  customers,
+  vehicles,
+  jobs,
 }: {
   data: FinanceData | null;
   request: Request;
   onChanged: () => void;
+  customers: LedgerCustomer[];
+  vehicles: LedgerVehicle[];
+  jobs: LedgerJob[];
 }) {
   const [period, setPeriod] = React.useState("month");
   const [ledgerMonth, setLedgerMonth] = React.useState("all");
@@ -281,6 +302,9 @@ export function BookkeepingView({
       entryDate: new Date(item.entryDate).toISOString().slice(0, 10),
       paymentMethod: item.paymentMethod || "cash",
       notes: item.notes || "",
+      jobId: item.jobId || "",
+      customerId: item.customerId || "",
+      vehicleId: item.vehicleId || "",
     } : { ...emptyEntry });
     setEntryOpen(true);
   }
@@ -328,6 +352,14 @@ export function BookkeepingView({
     } finally {
       setSaving(false);
     }
+  }
+  // Picking a job fills in its customer and car; picking a customer narrows the car list.
+  function pickJob(jobId: string) {
+    const job = jobs.find((item) => item.id === jobId);
+    setEntry({ ...entry, jobId, customerId: job?.customerId || entry.customerId, vehicleId: job ? job.vehicleId || "" : entry.vehicleId });
+  }
+  function pickCustomer(customerId: string) {
+    setEntry({ ...entry, jobId: "", customerId, vehicleId: vehicles.some((vehicle) => vehicle.id === entry.vehicleId && vehicle.customerId === customerId) ? entry.vehicleId : "" });
   }
   async function uploadEntryReceipt(entryId: string, file: File) {
     setUploadingReceiptFor(entryId);
@@ -771,6 +803,11 @@ export function BookkeepingView({
                     </td>
                     <td data-label="Description">
                       <span className="ledger-desc"><span className={`ledger-type-icon ${item.type}`}><LedgerIcon type={item.type} /></span><strong>{item.description}</strong></span>
+                      {(item.customer || item.vehicle || item.job) && (
+                        <small className="table-subtext ledger-link">
+                          {[item.customer && `${item.customer.firstName} ${item.customer.lastName}`, carLabel(item.vehicle), item.job?.jobNumber].filter(Boolean).join(" · ")}
+                        </small>
+                      )}
                       {item.notes && (
                         <small className="table-subtext">{item.notes}</small>
                       )}
@@ -787,6 +824,14 @@ export function BookkeepingView({
                             <button type="button" className="danger-button compact-danger" onClick={() => void deleteEntryReceipt(item.id, receipt)}>Delete</button>
                           </div>
                         ))}
+                        {item.type === "expense" && <label className="ledger-receipt-upload">
+                          Camera
+                          <input type="file" accept="image/*" capture="environment" hidden disabled={uploadingReceiptFor === item.id} onChange={(event) => {
+                            const file = event.currentTarget.files?.[0];
+                            event.currentTarget.value = "";
+                            if (file) void uploadEntryReceipt(item.id, file);
+                          }} />
+                        </label>}
                         {item.type === "expense" && <label className="ledger-receipt-upload">
                           {uploadingReceiptFor === item.id ? "Uploading..." : "Attach receipt"}
                           <input type="file" disabled={uploadingReceiptFor === item.id} onChange={(event) => {
@@ -1116,6 +1161,33 @@ export function BookkeepingView({
                   <option value="">Select category</option>
                   {categories.map((category) => (
                     <option key={category}>{category}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Job
+                <select value={entry.jobId} onChange={(event) => pickJob(event.target.value)}>
+                  <option value="">No job</option>
+                  {jobs.map((job) => (
+                    <option key={job.id} value={job.id}>{job.jobNumber}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Customer
+                <select value={entry.customerId} disabled={Boolean(entry.jobId)} onChange={(event) => pickCustomer(event.target.value)}>
+                  <option value="">None</option>
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>{customer.firstName} {customer.lastName}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Car
+                <select value={entry.vehicleId} disabled={Boolean(entry.jobId)} onChange={(event) => setEntry({ ...entry, vehicleId: event.target.value })}>
+                  <option value="">None</option>
+                  {vehicles.filter((vehicle) => !entry.customerId || vehicle.customerId === entry.customerId).map((vehicle) => (
+                    <option key={vehicle.id} value={vehicle.id}>{carLabel(vehicle)}</option>
                   ))}
                 </select>
               </label>

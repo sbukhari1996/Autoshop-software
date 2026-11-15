@@ -4,12 +4,12 @@ import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import PDFDocument from 'pdfkit';
-import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import { PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
 import { signedAuthorizationDownloadName } from '../authorization-document-name.js';
 import type { AuthorizationFieldPlacement } from '../authorization-fields.js';
 import { optionalText, requiredText } from '../validation.js';
+import { receiptPdf } from '../receipt-pdf.js';
 
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -450,7 +450,7 @@ const ledgerKey = (expenseId: string) => `job-expense:${expenseId}`;
 
 // A job expense is in the ledger only while it has an amount and a receipt. The ledger keeps its own copy of the receipt.
 async function syncLedgerExpense(prisma: PrismaClient, expenseId: string) {
-  const expense = await prisma.jobExpense.findUnique({ where: { id: expenseId }, include: { job: { select: { jobNumber: true } } } });
+  const expense = await prisma.jobExpense.findUnique({ where: { id: expenseId }, include: { job: { select: { jobNumber: true, customerId: true, vehicleId: true } } } });
   if (!expense || !(expense.amount > 0 && expense.receiptFile && expense.receiptName)) return removeLedgerExpense(prisma, expenseId);
   const data = {
     type: 'expense',
@@ -459,6 +459,8 @@ async function syncLedgerExpense(prisma: PrismaClient, expenseId: string) {
     amount: expense.amount,
     entryDate: expense.expenseDate ?? expense.createdAt,
     jobId: expense.jobId,
+    customerId: expense.job.customerId,
+    vehicleId: expense.job.vehicleId,
   };
   const existing = await prisma.financeEntry.findUnique({ where: { sourceReference: ledgerKey(expense.id) }, include: { documents: true } });
   const entry = existing
@@ -485,21 +487,6 @@ async function copyStoredFile(filePath: string, fileName: string) {
   const target = path.join(uploadDirectory, `${randomUUID()}-${fileName}`);
   await writeFile(target, bytes, { flag: 'wx' });
   return path.relative(process.cwd(), target);
-}
-
-// Phone photos are wrapped in a PDF so every receipt is the same kind of file.
-async function receiptPdf(file: Express.Multer.File) {
-  const name = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'receipt';
-  if (file.mimetype === 'application/pdf') return { bytes: file.buffer, name };
-  if (file.mimetype !== 'image/jpeg' && file.mimetype !== 'image/png') throw new ApiError(400, 'Receipts must be a PDF, JPEG or PNG');
-  const pdf = await PdfLibDocument.create();
-  const image = file.mimetype === 'image/png' ? await pdf.embedPng(file.buffer) : await pdf.embedJpg(file.buffer);
-  const page = pdf.addPage([612, 792]);
-  const scale = Math.min(540 / image.width, 720 / image.height);
-  const width = image.width * scale;
-  const height = image.height * scale;
-  page.drawImage(image, { x: (612 - width) / 2, y: (792 - height) / 2, width, height });
-  return { bytes: Buffer.from(await pdf.save()), name: `${name.replace(/\.[^.]*$/, '')}.pdf` };
 }
 
 // One job expense per arrived part. Its amount follows the part's cost; the receipt is attached on the expense.

@@ -50,6 +50,7 @@ type Customer = {
 };
 type Vehicle = {
   id: string;
+  customerId: string;
   year: number | null;
   make: string | null;
   model: string | null;
@@ -1035,7 +1036,16 @@ function App() {
           {view === "Parts Arrivals" && <PartsArrivalsView request={fetchJson} />}
           {view === "Car Rental" && <RentalsView claims={claims} request={fetchJson} download={fetchFile} />}
           {view === "MV-104" && <Mv104View claims={claims} apiUrl={String(API_URL)} />}
-          {view === "Bookkeeping" && <BookkeepingView data={finance} request={fetchJson} onChanged={() => void loadData()} />}
+          {view === "Bookkeeping" && (
+            <BookkeepingView
+              data={finance}
+              request={fetchJson}
+              onChanged={() => void loadData()}
+              customers={customers}
+              vehicles={vehicles}
+              jobs={jobs.map((job) => ({ id: job.id, jobNumber: job.jobNumber, customerId: job.customer.id, vehicleId: job.vehicle?.id ?? null }))}
+            />
+          )}
           {view === "Reports" && (
             <ReportView reports={reports} onNavigate={navigate} invoices={invoices} jobs={jobs} claims={claims} entries={reportEntries} />
           )}

@@ -79,6 +79,7 @@ model Customer {
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
   vehicles    Vehicle[]
+  financeEntries FinanceEntry[]
   claims      Claim[]
   jobs        Job[]
   inspections Inspection[]
@@ -107,6 +108,7 @@ model Vehicle {
 
   customer Customer @relation(fields: [customerId], references: [id])
   jobs     Job[]
+  financeEntries FinanceEntry[]
   claims   Claim[]
 
   @@map("vehicles")
@@ -430,6 +432,8 @@ model FinanceEntry {
   entryDate       DateTime @default(now())
   jobId           String?
   claimId         String?
+  customerId      String?
+  vehicleId       String?
   documentId      String?
   sourceReference String?  @unique
   notes           String?
@@ -438,12 +442,16 @@ model FinanceEntry {
 
   job       Job?                   @relation(fields: [jobId], references: [id], onDelete: SetNull)
   claim     Claim?                 @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  customer  Customer?              @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  vehicle   Vehicle?               @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
   documents FinanceEntryDocument[]
 
   @@index([entryDate])
   @@index([type])
   @@index([jobId])
   @@index([claimId])
+  @@index([customerId])
+  @@index([vehicleId])
   @@map("finance_entries")
 }
 
