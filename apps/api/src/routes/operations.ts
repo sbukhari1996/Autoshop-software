@@ -448,10 +448,10 @@ async function removeStoredFile(filePath: string) {
 
 const ledgerKey = (expenseId: string) => `job-expense:${expenseId}`;
 
-// A job expense is in the ledger only while it has an amount and a receipt. The ledger keeps its own copy of the receipt.
+// A job expense is in the ledger while it has an amount; the receipt is optional and can be attached later. The ledger keeps its own copy of the receipt.
 async function syncLedgerExpense(prisma: PrismaClient, expenseId: string) {
   const expense = await prisma.jobExpense.findUnique({ where: { id: expenseId }, include: { job: { select: { jobNumber: true, customerId: true, vehicleId: true } } } });
-  if (!expense || !(expense.amount > 0 && expense.receiptFile && expense.receiptName)) return removeLedgerExpense(prisma, expenseId);
+  if (!expense || !(expense.amount > 0)) return removeLedgerExpense(prisma, expenseId);
   const data = {
     type: 'expense',
     description: `${expense.description} (${expense.job.jobNumber})`,
@@ -470,8 +470,9 @@ async function syncLedgerExpense(prisma: PrismaClient, expenseId: string) {
     await prisma.financeEntryDocument.delete({ where: { id: document.id } });
     await removeStoredFile(document.filePath).catch(() => undefined);
   }
-  const copyPath = await copyStoredFile(expense.receiptFile!, expense.receiptName!);
-  await prisma.financeEntryDocument.create({ data: { entryId: entry.id, fileName: expense.receiptName!, filePath: copyPath } });
+  if (!expense.receiptFile || !expense.receiptName) return;
+  const copyPath = await copyStoredFile(expense.receiptFile, expense.receiptName);
+  await prisma.financeEntryDocument.create({ data: { entryId: entry.id, fileName: expense.receiptName, filePath: copyPath } });
 }
 
 async function removeLedgerExpense(prisma: PrismaClient, expenseId: string) {
