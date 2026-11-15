@@ -190,3 +190,7 @@
   .ledger-card-foot button { min-height: 40px; }
   .ledger-card-check input { width: 20px; height: 20px; }
 }
+
+/* Ledger entry opens as a right-hand sheet, matching the design. */
+.ledger-sheet-backdrop { place-items: stretch end; padding: 0; }
+.ledger-sheet { width: min(100%, 380px); height: 100%; max-height: none; border-radius: 0; border-width: 0 0 0 1px; }

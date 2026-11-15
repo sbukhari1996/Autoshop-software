@@ -1096,8 +1096,8 @@ export function BookkeepingView({
       {employeeOpen && <div className="modal-backdrop"><form className="modal finance-modal" onSubmit={saveEmployee}><div className="modal-heading"><div><p className="eyebrow">Team member</p><h2>Add employee</h2></div><button type="button" className="close-button" onClick={() => setEmployeeOpen(false)}>×</button></div><label>Name<input required value={employeeForm.name} onChange={(event) => setEmployeeForm({ ...employeeForm, name: event.target.value })} /></label><label>Role<input value={employeeForm.role} onChange={(event) => setEmployeeForm({ ...employeeForm, role: event.target.value })} placeholder="Technician, painter, office" /></label><label>Phone<input type="tel" value={employeeForm.phone} onChange={(event) => setEmployeeForm({ ...employeeForm, phone: event.target.value })} /></label><label>Weekly target<input required min="0" step="0.01" type="number" value={employeeForm.weeklyRate} onChange={(event) => setEmployeeForm({ ...employeeForm, weeklyRate: event.target.value })} /></label><label>Start date<input required type="date" value={employeeForm.startDate} onChange={(event) => setEmployeeForm({ ...employeeForm, startDate: event.target.value })} /></label><button className="orange-button submit-button" disabled={saving}>{saving ? "Saving..." : "Add employee"}</button></form></div>}
       {paymentEmployee && <div className="modal-backdrop"><form className="modal finance-modal" onSubmit={savePayment}><div className="modal-heading"><div><p className="eyebrow">Payroll payment</p><h2>Pay {paymentEmployee.name}</h2></div><button type="button" className="close-button" onClick={() => setPaymentEmployee(null)}>×</button></div><div className="payroll-payment-callout"><span>Still owed</span><strong>{currency(Math.max(0, paymentEmployee.balanceDue || 0))}</strong></div><label>Amount paid<input required min="0.01" step="0.01" type="number" value={paymentForm.amount} onChange={(event) => setPaymentForm({ ...paymentForm, amount: event.target.value })} /></label><label>Payment date<input required type="date" value={paymentForm.paymentDate} onChange={(event) => setPaymentForm({ ...paymentForm, paymentDate: event.target.value })} /></label><label>Payment method<select value={paymentForm.paymentMethod} onChange={(event) => setPaymentForm({ ...paymentForm, paymentMethod: event.target.value })}>{paymentMethods.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Notes<textarea value={paymentForm.notes} onChange={(event) => setPaymentForm({ ...paymentForm, notes: event.target.value })} /></label><button className="orange-button submit-button" disabled={saving}>{saving ? "Saving..." : "Record payment"}</button></form></div>}
       {entryOpen && (
-        <div className="modal-backdrop">
-          <form className="modal finance-modal" onSubmit={saveEntry}>
+        <div className="modal-backdrop ledger-sheet-backdrop">
+          <form className="modal finance-modal ledger-sheet" onSubmit={saveEntry}>
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">Ledger entry</p>
@@ -1165,6 +1165,21 @@ export function BookkeepingView({
                 </select>
               </label>
               <label>
+                Payment method
+                <select
+                  value={entry.paymentMethod}
+                  onChange={(event) =>
+                    setEntry({ ...entry, paymentMethod: event.target.value })
+                  }
+                >
+                  {paymentMethods.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
                 Job
                 <select value={entry.jobId} onChange={(event) => pickJob(event.target.value)}>
                   <option value="">No job</option>
@@ -1201,21 +1216,6 @@ export function BookkeepingView({
                     setEntry({ ...entry, entryDate: event.target.value })
                   }
                 />
-              </label>
-              <label>
-                Payment method
-                <select
-                  value={entry.paymentMethod}
-                  onChange={(event) =>
-                    setEntry({ ...entry, paymentMethod: event.target.value })
-                  }
-                >
-                  {paymentMethods.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
               </label>
               <label className="finance-notes">
                 Notes
