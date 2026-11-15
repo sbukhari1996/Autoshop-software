@@ -2075,7 +2075,9 @@ function JobView({
     setSelectedJob(match);
     onFocusHandled?.();
   }, [focus, jobs]);
-  const visibleJobs = jobs.filter((job) => matchesSearch(query, [job.jobNumber, job.customer?.firstName, job.customer?.lastName, job.customer?.phone, job.vehicle?.year, job.vehicle?.make, job.vehicle?.model, job.vehicle?.licensePlate, job.vehicle?.vin, job.status]));
+  const [statusFilter, setStatusFilter] = React.useState("all");
+  const jobStatusOptions = ["new", "inspection", "authorized", "in_progress", "ready", "completed", "cancelled"];
+  const visibleJobs = jobs.filter((job) => (statusFilter === "all" || job.status === statusFilter) && matchesSearch(query, [job.jobNumber, job.customer?.firstName, job.customer?.lastName, job.customer?.phone, job.vehicle?.year, job.vehicle?.make, job.vehicle?.model, job.vehicle?.licensePlate, job.vehicle?.vin, job.status]));
   return (
     <>
       <div className="surface">
@@ -2083,6 +2085,7 @@ function JobView({
           title="Repair board"
           subtitle="Every active work order in one place"
           search={{ value: query, onChange: setQuery, placeholder: "Search work order, customer, vehicle, or plate", label: "Search repair board" }}
+          filter={{ label: "Filter by job status", value: statusFilter, options: jobStatusOptions, onChange: setStatusFilter }}
         />
         <p className="records-muted">Jobs cannot be deleted here because linked claims, invoices, and repair history are protected by the backend.</p>
         <JobTable jobs={visibleJobs} onSelect={setSelectedJob} />
@@ -3202,10 +3205,12 @@ function SurfaceHeading({
   title,
   subtitle,
   search,
+  filter,
 }: {
   title: string;
   subtitle: string;
   search?: SearchProps;
+  filter?: { label: string; value: string; options: string[]; onChange: (value: string) => void };
 }) {
   return (
     <div className="surface-heading">
@@ -3214,9 +3219,14 @@ function SurfaceHeading({
         <p>{subtitle}</p>
       </div>
       {search && <ListSearch {...search} />}
-      <button className="filter-button">
-        Filter <span>v</span>
-      </button>
+      {filter && (
+        <select className="filter-select" aria-label={filter.label} value={filter.value} onChange={(event) => filter.onChange(event.target.value)}>
+          <option value="all">All statuses</option>
+          {filter.options.map((option) => (
+            <option key={option} value={option}>{humanize(option)}</option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }

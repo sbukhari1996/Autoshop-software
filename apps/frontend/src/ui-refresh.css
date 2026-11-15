@@ -913,3 +913,4 @@ input[type="search"] {
 .ledger-pill { color: #15803d; font-weight: 600; }
 .part-cost { width: 96px; }
 .ledger-link { display: block; }
+.filter-select { height: 36px; border-radius: 8px; padding: 0 10px; border: 1px solid rgba(0, 0, 0, 0.14); background: #fff; color: inherit; font: inherit; }
