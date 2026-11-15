@@ -906,3 +906,8 @@ input[type="search"] {
 .schedule-entry .schedule-item time { white-space: normal; min-width: 0; }
 .schedule-complete { position: absolute; right: 10px; top: 10px; }
 .schedule-entry .schedule-item { grid-template-columns: 96px 3px 1fr; }
+
+/* Job expenses: amount field, ledger marker, camera capture */
+.expense-amount-field { display: inline-flex; align-items: center; gap: 2px; }
+.expense-amount-field input { width: 96px; }
+.ledger-pill { color: #15803d; font-weight: 600; }

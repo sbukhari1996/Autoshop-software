@@ -358,6 +358,7 @@ model JobExpense {
   category    String?
   receiptFile String?
   receiptName String?
+  partId      String?   @unique
   expenseDate DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
@@ -392,6 +393,7 @@ model JobPart {
   poNumber    String?
   quoteNumber String?
   invoiceNumber String?
+  cost        Float?
   expectedDate DateTime?
   arrivedDate DateTime?
   notes       String?

@@ -2242,6 +2242,18 @@ function JobOperations({
       setError(actionError instanceof Error ? actionError.message : "Unable to attach receipt");
     }
   }
+  async function saveExpenseAmount(expense: Expense, value: string) {
+    const amount = Number(value);
+    if (!value || amount === expense.amount) return;
+    setError("");
+    try {
+      await fetchJson(`/expenses/${expense.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount }) });
+      await loadExpenses();
+      await onChanged();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Unable to save amount");
+    }
+  }
   async function viewReceipt(expense: Expense) {
     setError("");
     try {
@@ -2444,7 +2456,7 @@ function JobOperations({
             <button className="text-button">Record payment</button>
           </form>
         </div>
-        <JobPartsPanel jobId={job.id} request={fetchJson} />
+        <JobPartsPanel jobId={job.id} request={fetchJson} onSaved={() => { void loadExpenses(); void onChanged(); }} />
         <div className="operation-section">
           <h3>Invoices</h3>
           {jobInvoices.length ? (
@@ -2487,10 +2499,16 @@ function JobOperations({
                     {expense.description}
                     <small>
                       {expense.category || "General"} ·{" "}
-                      {new Date(expense.expenseDate).toLocaleDateString()}
+                      {expense.expenseDate ? new Date(expense.expenseDate).toLocaleDateString() : "No date"}
+                      {expense.receiptName && expense.amount > 0 && <span className="ledger-pill"> · In ledger</span>}
                     </small>
                   </span>
-                  <span className="expense-actions"><strong>${expense.amount.toLocaleString()}</strong>{expense.receiptName && <button type="button" className="secondary-button compact" onClick={() => void viewReceipt(expense)}>Receipt</button>}<label className="secondary-button compact">{expense.receiptName ? "Replace receipt" : "Attach receipt"}<input type="file" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void attachReceipt(expense, file); event.target.value = ""; }} /></label><button type="button" className="danger-button compact-danger" onClick={async () => { if (!window.confirm(`Delete expense "${expense.description}"?`)) return; setError(""); try { await fetchJson(`/expenses/${expense.id}`, { method: "DELETE" }); await loadExpenses(); await onChanged(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete expense"); } }}>Delete</button></span>
+                  <span className="expense-actions">
+                    <span className="expense-amount-field">$<input key={`${expense.id}-${expense.amount}`} type="number" min="0" step="0.01" defaultValue={expense.amount} aria-label="Expense amount" onBlur={(event) => void saveExpenseAmount(expense, event.target.value)} /></span>
+                    {expense.receiptName && <button type="button" className="secondary-button compact" onClick={() => void viewReceipt(expense)}>Receipt</button>}
+                    <label className="secondary-button compact">{expense.receiptName ? "Replace receipt" : "Attach receipt"}<input type="file" accept="application/pdf,image/jpeg,image/png" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void attachReceipt(expense, file); event.target.value = ""; }} /></label>
+                    <label className="secondary-button compact">Camera<input type="file" accept="image/*" capture="environment" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) void attachReceipt(expense, file); event.target.value = ""; }} /></label>
+                  </span>
                 </div>
               ))}
             </div>

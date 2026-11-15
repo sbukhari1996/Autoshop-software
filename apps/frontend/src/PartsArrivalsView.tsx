@@ -23,6 +23,7 @@ type JobPart = {
   poNumber: string | null;
   quoteNumber: string | null;
   invoiceNumber: string | null;
+  cost: number | null;
   expectedDate: string | null;
 };
 
@@ -74,10 +75,11 @@ type PartValues = {
   poNumber: string;
   quoteNumber: string;
   invoiceNumber: string;
+  cost: string;
   expectedDate: string;
 };
 
-const blankPart: PartValues = { partName: "", partNumber: "", quantity: "1", status: "not_ordered", vendorName: "", vendorPhone: "", poNumber: "", quoteNumber: "", invoiceNumber: "", expectedDate: "" };
+const blankPart: PartValues = { partName: "", partNumber: "", quantity: "1", status: "not_ordered", vendorName: "", vendorPhone: "", poNumber: "", quoteNumber: "", invoiceNumber: "", cost: "", expectedDate: "" };
 
 function valuesOf(part: JobPart): PartValues {
   return {
@@ -90,6 +92,7 @@ function valuesOf(part: JobPart): PartValues {
     poNumber: part.poNumber || "",
     quoteNumber: part.quoteNumber || "",
     invoiceNumber: part.invoiceNumber || "",
+    cost: part.cost == null ? "" : String(part.cost),
     expectedDate: part.expectedDate ? part.expectedDate.slice(0, 10) : "",
   };
 }
@@ -113,12 +116,13 @@ function PartFields({ values, onChange }: { values: PartValues; onChange: (next:
       {input("poNumber", "PO #")}
       {input("quoteNumber", "Quote #")}
       {input("invoiceNumber", "Invoice #")}
+      {input("cost", "Cost (from invoice)", { type: "number", min: 0, step: "0.01" })}
       {input("expectedDate", "Expected delivery", { type: "date" })}
     </>
   );
 }
 
-export function JobPartsPanel({ jobId, request }: { jobId: string; request: Request }) {
+export function JobPartsPanel({ jobId, request, onSaved }: { jobId: string; request: Request; onSaved?: () => void }) {
   const [parts, setParts] = React.useState<JobPart[]>([]);
   const [form, setForm] = React.useState(blankPart);
   const [editingId, setEditingId] = React.useState<string | null>(null);
@@ -138,6 +142,7 @@ export function JobPartsPanel({ jobId, request }: { jobId: string; request: Requ
     try {
       await action();
       await load();
+      onSaved?.();
       return true;
     } catch (actionError) {
       setError(errorText(actionError, fallback));

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import PDFDocument from 'pdfkit';
+import { PDFDocument as PdfLibDocument } from 'pdf-lib';
 import { PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
 import { signedAuthorizationDownloadName } from '../authorization-document-name.js';
@@ -30,7 +31,7 @@ export function createOperationsRouter(prisma: PrismaClient) {
     const description = requiredText(req.body.description, 'description');
     const amount = positiveAmount(req.body.amount);
     const expense = await prisma.$transaction(async (tx) => {
-      const created = await tx.jobExpense.create({ data: { jobId, description, amount, category: optionalText(req.body.category, 'category'), expenseDate: parseDate(req.body.expenseDate) } });
+      const created = await tx.jobExpense.create({ data: { jobId, description, amount, category: optionalText(req.body.category, 'category'), expenseDate: parseDate(req.body.expenseDate) ?? new Date() } });
       await refreshExpenseTotal(tx, jobId);
       return created;
     });
@@ -45,12 +46,14 @@ export function createOperationsRouter(prisma: PrismaClient) {
       await refreshExpenseTotal(tx, existing.jobId);
       return updated;
     });
+    await syncLedgerExpense(prisma, existing.id);
     res.json(expense);
   }));
 
   router.delete('/expenses/:expenseId', asyncHandler(async (req, res) => {
     const existing = await prisma.jobExpense.findUnique({ where: { id: routeParam(req, 'expenseId') } });
     if (!existing) throw new ApiError(404, 'Expense not found');
+    await removeLedgerExpense(prisma, existing.id);
     await prisma.$transaction(async (tx) => { await tx.jobExpense.delete({ where: { id: existing.id } }); await refreshExpenseTotal(tx, existing.jobId); });
     if (existing.receiptFile) await removeStoredFile(existing.receiptFile);
     res.status(204).send();
@@ -62,12 +65,13 @@ export function createOperationsRouter(prisma: PrismaClient) {
     const file = req.file;
     if (!file || !file.size) throw new ApiError(400, 'Choose a non-empty receipt file');
     await mkdir(uploadDirectory, { recursive: true });
-    const receiptName = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'receipt';
-    const storedPath = path.join(uploadDirectory, `${randomUUID()}-${receiptName}`);
-    await writeFile(storedPath, file.buffer, { flag: 'wx' });
+    const receipt = await receiptPdf(file);
+    const storedPath = path.join(uploadDirectory, `${randomUUID()}-${receipt.name}`);
+    await writeFile(storedPath, receipt.bytes, { flag: 'wx' });
     try {
-      const updated = await prisma.jobExpense.update({ where: { id: existing.id }, data: { receiptFile: path.relative(process.cwd(), storedPath), receiptName } });
+      const updated = await prisma.jobExpense.update({ where: { id: existing.id }, data: { receiptFile: path.relative(process.cwd(), storedPath), receiptName: receipt.name } });
       if (existing.receiptFile) await removeStoredFile(existing.receiptFile);
+      await syncLedgerExpense(prisma, existing.id);
       res.json(updated);
     } catch (error) {
       await unlink(storedPath);
@@ -86,6 +90,7 @@ export function createOperationsRouter(prisma: PrismaClient) {
     if (!expense?.receiptFile) throw new ApiError(404, 'Receipt not found');
     await removeStoredFile(expense.receiptFile);
     await prisma.jobExpense.update({ where: { id: expense.id }, data: { receiptFile: null, receiptName: null } });
+    await syncLedgerExpense(prisma, expense.id);
     res.status(204).send();
   }));
 
@@ -103,7 +108,9 @@ export function createOperationsRouter(prisma: PrismaClient) {
   router.patch('/parts/:partId', asyncHandler(async (req, res) => {
     const existing = await prisma.jobPart.findUnique({ where: { id: routeParam(req, 'partId') } });
     if (!existing) throw new ApiError(404, 'Part not found');
-    res.json(await prisma.jobPart.update({ where: { id: existing.id }, data: partData(req.body, false) }));
+    const part = await prisma.jobPart.update({ where: { id: existing.id }, data: partData(req.body, false) });
+    await linkPartExpense(prisma, part);
+    res.json(part);
   }));
 
   router.delete('/parts/:partId', asyncHandler(async (req, res) => {
@@ -165,6 +172,7 @@ export function createOperationsRouter(prisma: PrismaClient) {
     if (invoices || payments || authorizations) throw new ApiError(409, 'This job has invoices, payments, or an insurance authorization, so it cannot be deleted');
     const documents = await prisma.jobDocument.findMany({ where: { jobId: job.id } });
     const expenses = await prisma.jobExpense.findMany({ where: { jobId: job.id } });
+    for (const expense of expenses) await removeLedgerExpense(prisma, expense.id);
     await prisma.$transaction(async (tx) => {
       await tx.jobExpense.deleteMany({ where: { jobId: job.id } });
       await tx.jobDocument.deleteMany({ where: { jobId: job.id } });
@@ -356,6 +364,7 @@ function dateOnly(value: unknown, field: string): Date | null {
 
 type PartData = {
   partName?: string;
+  cost?: number | null;
   partNumber?: string | null;
   vendorName?: string | null;
   vendorPhone?: string | null;
@@ -384,6 +393,11 @@ function partData(body: Record<string, unknown>, creating: boolean): PartData {
   if (body.status !== undefined) {
     if (!isPartStatus(body.status)) throw new ApiError(400, 'Unknown part status');
     data.status = body.status;
+  }
+  if (body.cost !== undefined) {
+    const cost = body.cost === null || body.cost === '' ? null : Number(body.cost);
+    if (cost !== null && (!Number.isFinite(cost) || cost < 0)) throw new ApiError(400, 'cost must be zero or more');
+    data.cost = cost;
   }
   if (body.expectedDate !== undefined) data.expectedDate = dateOnly(body.expectedDate, 'expectedDate');
   if (body.arrivedDate !== undefined) data.arrivedDate = dateOnly(body.arrivedDate, 'arrivedDate');
@@ -430,6 +444,74 @@ async function removeStoredFile(filePath: string) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new ApiError(404, 'Stored file not found');
     throw error;
   }
+}
+
+const ledgerKey = (expenseId: string) => `job-expense:${expenseId}`;
+
+// A job expense is in the ledger only while it has an amount and a receipt. The ledger keeps its own copy of the receipt.
+async function syncLedgerExpense(prisma: PrismaClient, expenseId: string) {
+  const expense = await prisma.jobExpense.findUnique({ where: { id: expenseId }, include: { job: { select: { jobNumber: true } } } });
+  if (!expense || !(expense.amount > 0 && expense.receiptFile && expense.receiptName)) return removeLedgerExpense(prisma, expenseId);
+  const data = {
+    type: 'expense',
+    description: `${expense.description} (${expense.job.jobNumber})`,
+    category: expense.category,
+    amount: expense.amount,
+    entryDate: expense.expenseDate ?? expense.createdAt,
+    jobId: expense.jobId,
+  };
+  const existing = await prisma.financeEntry.findUnique({ where: { sourceReference: ledgerKey(expense.id) }, include: { documents: true } });
+  const entry = existing
+    ? await prisma.financeEntry.update({ where: { id: existing.id }, data })
+    : await prisma.financeEntry.create({ data: { ...data, sourceReference: ledgerKey(expense.id) } });
+  for (const document of existing?.documents ?? []) {
+    await prisma.financeEntryDocument.delete({ where: { id: document.id } });
+    await removeStoredFile(document.filePath).catch(() => undefined);
+  }
+  const copyPath = await copyStoredFile(expense.receiptFile!, expense.receiptName!);
+  await prisma.financeEntryDocument.create({ data: { entryId: entry.id, fileName: expense.receiptName!, filePath: copyPath } });
+}
+
+async function removeLedgerExpense(prisma: PrismaClient, expenseId: string) {
+  const entry = await prisma.financeEntry.findUnique({ where: { sourceReference: ledgerKey(expenseId) }, include: { documents: true } });
+  if (!entry) return;
+  for (const document of entry.documents) await removeStoredFile(document.filePath).catch(() => undefined);
+  await prisma.financeEntry.delete({ where: { id: entry.id } });
+}
+
+async function copyStoredFile(filePath: string, fileName: string) {
+  const bytes = await readFile(path.resolve(process.cwd(), filePath));
+  await mkdir(uploadDirectory, { recursive: true });
+  const target = path.join(uploadDirectory, `${randomUUID()}-${fileName}`);
+  await writeFile(target, bytes, { flag: 'wx' });
+  return path.relative(process.cwd(), target);
+}
+
+// Phone photos are wrapped in a PDF so every receipt is the same kind of file.
+async function receiptPdf(file: Express.Multer.File) {
+  const name = path.basename(file.originalname).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'receipt';
+  if (file.mimetype === 'application/pdf') return { bytes: file.buffer, name };
+  if (file.mimetype !== 'image/jpeg' && file.mimetype !== 'image/png') throw new ApiError(400, 'Receipts must be a PDF, JPEG or PNG');
+  const pdf = await PdfLibDocument.create();
+  const image = file.mimetype === 'image/png' ? await pdf.embedPng(file.buffer) : await pdf.embedJpg(file.buffer);
+  const page = pdf.addPage([612, 792]);
+  const scale = Math.min(540 / image.width, 720 / image.height);
+  const width = image.width * scale;
+  const height = image.height * scale;
+  page.drawImage(image, { x: (612 - width) / 2, y: (792 - height) / 2, width, height });
+  return { bytes: Buffer.from(await pdf.save()), name: `${name.replace(/\.[^.]*$/, '')}.pdf` };
+}
+
+// One job expense per arrived part. Its amount follows the part's cost; the receipt is attached on the expense.
+async function linkPartExpense(prisma: PrismaClient, part: { id: string; jobId: string; partName: string; partNumber: string | null; status: string; cost: number | null }) {
+  const linked = await prisma.jobExpense.findUnique({ where: { partId: part.id } });
+  if (!linked && part.status !== 'arrived') return;
+  const amount = part.cost ?? linked?.amount ?? 0;
+  const expense = linked
+    ? await prisma.jobExpense.update({ where: { id: linked.id }, data: { amount } })
+    : await prisma.jobExpense.create({ data: { jobId: part.jobId, partId: part.id, description: part.partNumber ? `${part.partName} (${part.partNumber})` : part.partName, amount, category: 'Parts', expenseDate: new Date() } });
+  await refreshExpenseTotal(prisma, part.jobId);
+  await syncLedgerExpense(prisma, expense.id);
 }
 
 async function refreshExpenseTotal(tx: any, jobId: string) {
