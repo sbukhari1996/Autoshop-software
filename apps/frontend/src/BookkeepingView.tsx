@@ -1241,6 +1241,14 @@ export function BookkeepingView({
                   ))}
                   {!editingFinanceEntry.documents.length && <p className="records-muted">No receipt attached yet.</p>}
                   <label className="ledger-receipt-upload">
+                    Camera
+                    <input type="file" accept="image/*" capture="environment" hidden disabled={uploadingReceiptFor === editingFinanceEntry.id} onChange={(event) => {
+                      const file = event.currentTarget.files?.[0];
+                      event.currentTarget.value = "";
+                      if (file) void uploadEntryReceipt(editingFinanceEntry.id, file);
+                    }} />
+                  </label>
+                  <label className="ledger-receipt-upload">
                     {uploadingReceiptFor === editingFinanceEntry.id ? "Uploading..." : "Attach receipt"}
                     <input type="file" disabled={uploadingReceiptFor === editingFinanceEntry.id} onChange={(event) => {
                       const file = event.currentTarget.files?.[0];
