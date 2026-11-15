@@ -55,9 +55,9 @@ function dayLabel(offset: number, key: string) {
   return new Date(`${key}T12:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 }
 
-function partLine(part: JobPart) {
-  return [part.partNumber, part.vendorName, part.vendorPhone].filter(Boolean).join(" · ");
-}
+type PartGroup = "open" | "arrived" | "problems";
+const partGroup = (status: string): PartGroup => (status === "arrived" ? "arrived" : status === "arrived_wrong" || status === "returned" ? "problems" : "open");
+const partFilters: [PartGroup | "all", string][] = [["all", "All"], ["open", "Open"], ["arrived", "Arrived"], ["problems", "Problems"]];
 
 function referenceLine(part: JobPart) {
   return [part.poNumber && `PO ${part.poNumber}`, part.quoteNumber && `Quote ${part.quoteNumber}`, part.invoiceNumber && `Invoice ${part.invoiceNumber}`]
@@ -127,7 +127,11 @@ export function JobPartsPanel({ jobId, request, onSaved }: { jobId: string; requ
   const [form, setForm] = React.useState(blankPart);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editValues, setEditValues] = React.useState(blankPart);
+  const [filter, setFilter] = React.useState<PartGroup | "all">("all");
   const [error, setError] = React.useState("");
+  const shown = parts.filter((part) => filter === "all" || partGroup(part.status) === filter);
+  const costTotal = parts.reduce((sum, part) => sum + (part.cost ?? 0), 0);
+  const problemCount = parts.filter((part) => partGroup(part.status) === "problems").length;
 
   async function load() {
     setParts(await request<JobPart[]>(`/jobs/${jobId}/parts`));
@@ -165,29 +169,39 @@ export function JobPartsPanel({ jobId, request, onSaved }: { jobId: string; requ
 
   return (
     <div className="operation-section parts-panel">
-      <h3>Parts needed</h3>
+      <div className="parts-head-row">
+        <h3>Parts needed</h3>
+        <div className="ledger-type-filter" role="group" aria-label="Filter parts">
+          {partFilters.map(([id, label]) => (
+            <button key={id} type="button" className={filter === id ? "active" : ""} aria-pressed={filter === id} onClick={() => setFilter(id)}>{label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="parts-summary">
+        <span><strong>{parts.length}</strong> listed</span>
+        <span>Cost <strong>${costTotal.toFixed(2)}</strong></span>
+        <span className={problemCount ? "parts-problem" : ""}>{problemCount} problem{problemCount === 1 ? "" : "s"}</span>
+      </div>
       {error && <p className="vin-error">{error}</p>}
       {parts.length ? (
-        parts.map((part) =>
-          editingId === part.id ? (
-            <form className="parts-form part-edit" key={part.id} onSubmit={(event) => { event.preventDefault(); void saveEdit(part); }}>
-              <PartFields values={editValues} onChange={setEditValues} />
-              <button className="text-button">Save part</button>
-              <button type="button" className="secondary-button compact" onClick={() => setEditingId(null)}>Cancel</button>
-            </form>
-          ) : (
-            <div className="part-row" key={part.id}>
-              <div className="part-main">
-                <strong>{part.quantity} × {part.partName}</strong>
-                {partLine(part) && <small>{partLine(part)}</small>}
-                {referenceLine(part) && <small>{referenceLine(part)}</small>}
-              </div>
-              <div className="part-controls">
-                <select value={part.status} aria-label="Part status" onChange={(event) => void changePart(part, { status: event.target.value })}>
-                  {Object.entries(partStatusLabels).map(([value, label]) => (
-                    <option value={value} key={value}>{label}</option>
-                  ))}
-                </select>
+        <div className="parts-table">
+          <div className="parts-table-head" aria-hidden="true"><span>Part</span><span>Qty</span><span>Vendor</span><span>Cost</span><span>Status</span><span>Expected</span><span /></div>
+          {shown.length ? shown.map((part) =>
+            editingId === part.id ? (
+              <form className="parts-form part-edit" key={part.id} onSubmit={(event) => { event.preventDefault(); void saveEdit(part); }}>
+                <PartFields values={editValues} onChange={setEditValues} />
+                <button className="text-button">Save part</button>
+                <button type="button" className="secondary-button compact" onClick={() => setEditingId(null)}>Cancel</button>
+              </form>
+            ) : (
+              <div className="part-row" key={part.id}>
+                <div className="part-main">
+                  <strong>{part.partName}</strong>
+                  {part.partNumber && <small>{part.partNumber}</small>}
+                  {referenceLine(part) && <small>{referenceLine(part)}</small>}
+                </div>
+                <span>{part.quantity}</span>
+                <span className="part-vendor">{[part.vendorName, part.vendorPhone].filter(Boolean).join(" · ")}</span>
                 <input
                   key={`${part.id}-${part.cost}`}
                   type="number"
@@ -202,26 +216,33 @@ export function JobPartsPanel({ jobId, request, onSaved }: { jobId: string; requ
                     if (cost !== part.cost) void changePart(part, { cost });
                   }}
                 />
+                <select value={part.status} aria-label="Part status" className={`part-status part-status-${partGroup(part.status)}`} onChange={(event) => void changePart(part, { status: event.target.value })}>
+                  {Object.entries(partStatusLabels).map(([value, label]) => (
+                    <option value={value} key={value}>{label}</option>
+                  ))}
+                </select>
                 <input
                   type="date"
                   aria-label="Expected delivery"
                   value={part.expectedDate ? part.expectedDate.slice(0, 10) : ""}
                   onChange={(event) => void changePart(part, { expectedDate: event.target.value || null })}
                 />
-                <button type="button" className="secondary-button compact" onClick={() => { setEditValues(valuesOf(part)); setEditingId(part.id); }}>Edit</button>
-                <button
-                  type="button"
-                  className="danger-button compact-danger"
-                  onClick={() => {
-                    if (window.confirm(`Delete "${part.partName}"?`)) void run(() => request(`/parts/${part.id}`, { method: "DELETE" }), "Unable to delete part");
-                  }}
-                >
-                  Delete
-                </button>
+                <div className="part-controls">
+                  <button type="button" className="secondary-button compact" onClick={() => { setEditValues(valuesOf(part)); setEditingId(part.id); }}>Edit</button>
+                  <button
+                    type="button"
+                    className="danger-button compact-danger"
+                    onClick={() => {
+                      if (window.confirm(`Delete "${part.partName}"?`)) void run(() => request(`/parts/${part.id}`, { method: "DELETE" }), "Unable to delete part");
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
-            </div>
-          ),
-        )
+            ),
+          ) : <p className="table-subtext">No parts match this filter.</p>}
+        </div>
       ) : (
         <p className="table-subtext">No parts listed for this car yet.</p>
       )}

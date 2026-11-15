@@ -746,6 +746,17 @@ export function BookkeepingView({
               </button>
             </div>
           </div>
+          <div className="ledger-totals">
+            <div><span>Filtered income</span><strong className="finance-income">{currency(filteredIncomeTotal)}</strong></div>
+            <div><span>Filtered expenses</span><strong className="finance-expense">{currency(filteredExpenseTotal)}</strong></div>
+            <div><span>Net</span><strong className={filteredIncomeTotal >= filteredExpenseTotal ? "finance-income" : "finance-expense"}>{currency(filteredIncomeTotal - filteredExpenseTotal)}</strong></div>
+            {selectedEntries.length > 0 && (
+              <div className="ledger-selected-total">
+                <span>{selectedEntries.length} selected · {currency(selectedIncomeTotal)} income · {currency(selectedExpenseTotal)} expenses</span>
+                <strong>Selected net: {currency(selectedIncomeTotal - selectedExpenseTotal)}</strong>
+              </div>
+            )}
+          </div>
           <div className="finance-table-wrap">
             <table className="data-table finance-table">
               <thead>
@@ -926,17 +937,6 @@ export function BookkeepingView({
                 : `No ${ledgerType === "income" ? "income" : ledgerType === "expense" ? "expense" : "bookkeeping"} entries for this month and year.`}
             </div>
           )}
-          <div className="ledger-totals">
-            <div><span>Filtered income</span><strong className="finance-income">{currency(filteredIncomeTotal)}</strong></div>
-            <div><span>Filtered expenses</span><strong className="finance-expense">{currency(filteredExpenseTotal)}</strong></div>
-            <div><span>Net</span><strong className={filteredIncomeTotal >= filteredExpenseTotal ? "finance-income" : "finance-expense"}>{currency(filteredIncomeTotal - filteredExpenseTotal)}</strong></div>
-            {selectedEntries.length > 0 && (
-              <div className="ledger-selected-total">
-                <span>{selectedEntries.length} selected · {currency(selectedIncomeTotal)} income · {currency(selectedExpenseTotal)} expenses</span>
-                <strong>Selected net: {currency(selectedIncomeTotal - selectedExpenseTotal)}</strong>
-              </div>
-            )}
-          </div>
         </section>
         <section className="surface finance-chart">
           <div className="surface-heading">

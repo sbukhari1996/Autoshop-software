@@ -1,24 +1,93 @@
-.parts-panel .part-row {
+.parts-head-row {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.parts-head-row h3 {
+  margin: 0;
+}
+.parts-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: #3a3a3c;
+  font-size: 13px;
+}
+.parts-problem {
+  color: #9b1c14;
+  font-weight: 600;
+}
+.parts-table {
+  overflow-x: auto;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+  background: #fff;
+}
+.parts-table-head,
+.parts-panel .part-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) 40px minmax(0, 1.5fr) 96px 170px 130px auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 920px;
+}
+.parts-table-head {
+  padding: 9px 14px;
+  background: #f6f6f8;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 600;
+}
+.parts-panel .part-row {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+.parts-panel .part-row > span:not(.part-vendor),
+.part-vendor {
+  color: #3a3a3c;
 }
 .parts-panel .part-main {
   display: grid;
   gap: 2px;
   min-width: 0;
 }
+.parts-panel .part-main strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .parts-panel .part-main small {
   color: #6b7280;
 }
+.parts-panel .part-vendor {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .parts-panel .part-controls {
   display: flex;
-  flex-wrap: wrap;
   gap: 6px;
-  align-items: center;
   justify-content: flex-end;
+}
+.parts-panel .part-status {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-weight: 600;
+  font-size: 12px;
+  background: #e1edff;
+  color: #0040a8;
+}
+.parts-panel .part-status-arrived {
+  background: #e3f6e8;
+  color: #13622b;
+}
+.parts-panel .part-status-problems {
+  background: #ffe3e1;
+  color: #8c1a12;
 }
 .parts-form {
   display: grid;
