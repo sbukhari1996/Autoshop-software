@@ -35,6 +35,7 @@ export function createOperationsRouter(prisma: PrismaClient) {
       await refreshExpenseTotal(tx, jobId);
       return created;
     });
+    await syncLedgerExpense(prisma, expense.id);
     res.status(201).json(expense);
   }));
 
