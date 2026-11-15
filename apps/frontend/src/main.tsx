@@ -1260,6 +1260,9 @@ function Dashboard({
             <JobTable jobs={data?.recentJobs || []} />
           </div>
         </div>
+        <div className="surface wide dashboard-arrivals">
+          <PartsArrivalsView request={request} />
+        </div>
         <div className="surface">
           <div className="surface-heading">
             <div>

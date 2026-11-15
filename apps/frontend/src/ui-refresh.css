@@ -914,3 +914,7 @@ input[type="search"] {
 .part-cost { width: 96px; }
 .ledger-link { display: block; }
 .filter-select { height: 36px; border-radius: 8px; padding: 0 10px; border: 1px solid rgba(0, 0, 0, 0.14); background: #fff; color: inherit; font: inherit; }
+
+/* Dashboard: parts arrivals under work orders, scrolls inside a fixed height. */
+.dashboard-arrivals .arrivals-scroll { max-height: 320px; }
+.dashboard-arrivals .parts-arrivals-head h2 { margin: 0; }
