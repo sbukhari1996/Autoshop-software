@@ -86,6 +86,7 @@ type Claim = {
   claimNumber: string | null;
   insuranceCompany: string | null;
   claimStatus: string;
+  followUps?: ClaimFollowUp[];
   customer: Customer;
   vehicle: Vehicle | null;
   customerName?: string | null;
@@ -1245,6 +1246,7 @@ function Dashboard({
       <section className="surface">
         <StickyNotes request={request} />
       </section>
+      <ClaimsWaitingFollowUp claims={claims} />
       <section className="dashboard-grid">
         <div className="surface wide">
           <div className="surface-heading">
@@ -1449,6 +1451,92 @@ function VehicleEditModal({ vehicle, customers, onClose, onSaved }: { vehicle: V
   const field = (key: keyof typeof form, label: string) => <label>{label}<input value={form[key]} onChange={(event) => update(key, event.target.value)} /></label>;
   return <div className="modal-backdrop" onClick={onClose}><form className="modal vehicle-edit-modal" onSubmit={save} onClick={(event) => event.stopPropagation()}><div className="modal-heading"><div><p className="eyebrow">Vehicle record</p><h2>Edit vehicle</h2></div><button type="button" className="close-button" onClick={onClose}><Icon name="close" /></button></div>{error && <div className="error-banner">{error}</div>}<Select name="customerId" label="Customer" options={customers.map((customer) => ({ value: customer.id, label: `${customer.firstName} ${customer.lastName}` }))} form={form} setForm={setForm} /><div className="vin-control-row">{field('vin', 'VIN')}<button type="button" className="secondary-button" onClick={() => void decode()} disabled={vinLoading}>{vinLoading ? 'Decoding...' : 'Decode VIN'}</button></div>{vinMessage && <p className="vin-success">{vinMessage}</p>}<div className="form-row">{field('year', 'Year')}{field('make', 'Make')}{field('model', 'Model')}</div><div className="form-row">{field('trim', 'Trim')}{field('bodyClass', 'Body style')}{field('color', 'Color')}</div><div className="form-row">{field('licensePlate', 'License plate')}{field('licenseState', 'Plate state')}</div><div className="modal-actions"><button type="button" className="danger-button" onClick={() => void remove()}>Delete vehicle</button><button className="orange-button submit-button">Save vehicle</button></div></form></div>;
 }
+type ClaimFollowUp = { id: string; notes: string; followedUpAt: string; nextFollowUpAt: string | null };
+
+function ClaimFollowUpModal({ claim, onClose }: { claim: Claim; onClose: () => void }) {
+  const [followUps, setFollowUps] = React.useState<ClaimFollowUp[]>([]);
+  const [notes, setNotes] = React.useState("");
+  const [nextDate, setNextDate] = React.useState("");
+  const [error, setError] = React.useState("");
+  const load = React.useCallback(() => fetchJson<ClaimFollowUp[]>(`/claims/${claim.id}/follow-ups`).then(setFollowUps), [claim.id]);
+  React.useEffect(() => {
+    load().catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Unable to load follow-ups"));
+  }, [load]);
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    try {
+      await fetchJson(`/claims/${claim.id}/follow-ups`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notes, nextFollowUpAt: nextDate || null }) });
+      setNotes("");
+      setNextDate("");
+      await load();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Unable to save follow-up");
+    }
+  }
+  const shortDate = (value: string) => new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return (
+    <div className="modal-backdrop">
+      <form className="modal finance-modal" onSubmit={save}>
+        <div className="modal-heading">
+          <div>
+            <p className="eyebrow">Follow up</p>
+            <h2>{claim.claimNumber || "Unnumbered claim"} · {claim.insuranceCompany || "Carrier pending"}</h2>
+            <small>{claim.customer.firstName} {claim.customer.lastName}</small>
+          </div>
+          <button type="button" className="close-button" onClick={onClose} aria-label="Close">×</button>
+        </div>
+        {error && <div className="error-banner">{error}</div>}
+        <div className="follow-up-list">
+          {followUps.length ? followUps.map((item) => (
+            <div key={item.id} className="follow-up-entry">
+              <strong>Followed up {shortDate(item.followedUpAt)}</strong>
+              <p>{item.notes}</p>
+              <small>{item.nextFollowUpAt ? `Next follow-up ${shortDate(item.nextFollowUpAt)}` : "No next follow-up set"}</small>
+            </div>
+          )) : <p className="records-muted">No follow-ups logged yet.</p>}
+        </div>
+        <label>Notes
+          <textarea required value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Example: State Farm will call back next week" />
+        </label>
+        <label>Next follow-up
+          <input type="date" value={nextDate} onChange={(event) => setNextDate(event.target.value)} />
+        </label>
+        <button className="orange-button submit-button">Save follow-up</button>
+      </form>
+    </div>
+  );
+}
+
+function ClaimsWaitingFollowUp({ claims }: { claims: Claim[] }) {
+  const waiting = claims.filter((claim) => claim.claimStatus === "follow_up");
+  return (
+    <section className="surface">
+      <div className="surface-heading">
+        <div>
+          <h2>Claims waiting on follow-up</h2>
+          <p>{waiting.length} claim{waiting.length === 1 ? "" : "s"} to call back on</p>
+        </div>
+      </div>
+      {waiting.length ? (
+        <div className="expense-list">
+          {waiting.map((claim) => {
+            const next = claim.followUps?.[0]?.nextFollowUpAt;
+            return (
+              <div key={claim.id}>
+                <span>
+                  <strong>{claim.insuranceCompany || "Carrier pending"} · {claim.claimNumber || "Unnumbered"}</strong>
+                  <small>{claim.customer.firstName} {claim.customer.lastName} · {next ? `next follow-up ${new Date(next).toLocaleDateString("en-US")}` : "no next follow-up set"}</small>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : <p className="records-muted">No claims waiting on follow-up.</p>}
+    </section>
+  );
+}
+
 function ClaimView({
   claims,
   customers,
@@ -1468,6 +1556,7 @@ function ClaimView({
 }) {
   const [selectedClaim, setSelectedClaim] = React.useState<Claim | null>(null);
   const [creating, setCreating] = React.useState(false);
+  const [followUpClaim, setFollowUpClaim] = React.useState<Claim | null>(null);
   const [query, setQuery] = React.useState("");
   React.useEffect(() => {
     if (focus?.kind !== "claim") return;
@@ -1512,12 +1601,17 @@ function ClaimView({
                   <td data-label="Carrier">{claim.insuranceCompany || "Carrier pending"}</td>
                   <td data-label="Repair order">{claim.jobs?.[0]?.jobNumber || "Unlinked"}</td>
                   <td data-label="Created">{claim.createdAt ? new Date(claim.createdAt).toLocaleDateString("en-US") : "—"}</td>
-                  <td data-label="Status"><span className={`status-pill claim-status-${claimStatusGroup(claim).key}`}>{claimStatusGroup(claim).label}</span></td>
+                  <td data-label="Status">
+                    {claim.claimStatus === "follow_up" ? (
+                      <button type="button" className="status-pill claim-status-follow-up" onClick={(event) => { event.stopPropagation(); setFollowUpClaim(claim); }}>Follow up</button>
+                    ) : <span className={`status-pill claim-status-${claimStatusGroup(claim).key}`}>{claimStatusGroup(claim).label}</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         ) : <EmptyState text={query.trim() ? `No claims match "${query.trim()}".` : "No claims have been entered yet. Start a claim intake to create the first record."} />}
+        {followUpClaim && <ClaimFollowUpModal claim={followUpClaim} onClose={() => setFollowUpClaim(null)} />}
       </div>
       {(selectedClaim || creating) && (
         <ClaimWorkspace

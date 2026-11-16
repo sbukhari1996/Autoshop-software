@@ -207,7 +207,7 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
   }));
 
   workflowsRouter.get('/claims', asyncHandler(async (_req, res) => {
-    const claims = await prisma.claim.findMany({ orderBy: { updatedAt: 'desc' }, include: { customer: true, vehicle: true, jobs: { select: { jobNumber: true, status: true } } } });
+    const claims = await prisma.claim.findMany({ orderBy: { updatedAt: 'desc' }, include: { customer: true, vehicle: true, jobs: { select: { jobNumber: true, status: true } }, followUps: { orderBy: { followedUpAt: 'desc' }, take: 1 } } });
     res.json(claims);
   }));
 
@@ -231,6 +231,17 @@ export function createWorkflowsRouter(prisma: PrismaClient) {
     const claim = await prisma.claim.findUnique({ where: { id: routeParam(req, 'claimId') }, include: claimInclude });
     if (!claim) throw new ApiError(404, 'Claim not found');
     res.json(claim);
+  }));
+
+  workflowsRouter.get('/claims/:claimId/follow-ups', asyncHandler(async (req, res) => {
+    res.json(await prisma.claimFollowUp.findMany({ where: { claimId: routeParam(req, 'claimId') }, orderBy: { followedUpAt: 'desc' } }));
+  }));
+
+  workflowsRouter.post('/claims/:claimId/follow-ups', asyncHandler(async (req, res) => {
+    const claimId = routeParam(req, 'claimId');
+    if (!(await prisma.claim.findUnique({ where: { id: claimId }, select: { id: true } }))) throw new ApiError(404, 'Claim not found');
+    const followUp = await prisma.claimFollowUp.create({ data: { claimId, notes: requiredText(req.body.notes, 'notes'), nextFollowUpAt: optionalDate(req.body.nextFollowUpAt, 'nextFollowUpAt') ?? null } });
+    res.status(201).json(followUp);
   }));
 
   workflowsRouter.get('/claims/:claimId/hub', asyncHandler(async (req, res) => {

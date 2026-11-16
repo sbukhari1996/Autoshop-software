@@ -918,3 +918,9 @@ input[type="search"] {
 /* Dashboard: parts arrivals under work orders, scrolls inside a fixed height. */
 .dashboard-arrivals .arrivals-scroll { max-height: 320px; }
 .dashboard-arrivals .parts-arrivals-head h2 { margin: 0; }
+
+/* Claim follow-ups: status button, log entries. */
+button.status-pill { border: 0; cursor: pointer; }
+.follow-up-list { display: grid; gap: 8px; max-height: 260px; overflow-y: auto; }
+.follow-up-entry { padding: 8px 10px; border-radius: 8px; background: rgba(0, 0, 0, .03); }
+.follow-up-entry p { margin: 4px 0; }

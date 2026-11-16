@@ -187,8 +187,22 @@ model Claim {
   inspections    Inspection[]
   invoices       Invoice[]
   financeEntries FinanceEntry[]
+  followUps      ClaimFollowUp[]
 
   @@map("claims")
+}
+
+model ClaimFollowUp {
+  id             String    @id @default(cuid())
+  claimId        String
+  notes          String
+  followedUpAt   DateTime  @default(now())
+  nextFollowUpAt DateTime?
+
+  claim Claim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([claimId])
+  @@map("claim_follow_ups")
 }
 
 model Estimate {
