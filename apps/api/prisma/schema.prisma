@@ -492,11 +492,34 @@ model Employee {
   startDate  DateTime         @default(now())
   active     Boolean          @default(true)
   notes      String?
+  ssnLast4              String?
+  federalFilingStatus   String?
+  w4Step2Checked        Boolean @default(false)
+  w4DependentsCredit    Float   @default(0)
+  w4OtherIncome         Float   @default(0)
+  w4Deductions          Float   @default(0)
+  w4ExtraWithholding    Float   @default(0)
+  nysAllowances         Int     @default(0)
+  nysAdditionalWithholding Float @default(0)
+  nycResident           Boolean @default(false)
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
   payments   PayrollPayment[]
 
   @@map("employees")
+}
+
+model TaxSetting {
+  id        String   @id @default(cuid())
+  year      Int
+  key       String
+  label     String
+  value     Float
+  notes     String?
+  updatedAt DateTime @updatedAt
+
+  @@unique([year, key])
+  @@map("tax_settings")
 }
 
 model PayrollPayment {

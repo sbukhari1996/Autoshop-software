@@ -6,7 +6,8 @@ import multer from 'multer';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
 import { receiptPdf } from '../receipt-pdf.js';
-import { optionalBoolean, optionalDate, optionalText, requiredText } from '../validation.js';
+import { optionalBoolean, optionalDate, optionalInteger, optionalText, requiredText } from '../validation.js';
+import { defaultTaxSettings } from '../payroll-tax-defaults.js';
 
 const entryTypes = ['income', 'expense'] as const;
 const frequencies = ['weekly', 'monthly', 'yearly'] as const;
@@ -14,18 +15,63 @@ const paymentMethods = ['cash', 'debit_card', 'credit_card', 'check', 'ach', 'ot
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
 const receiptUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+const filingStatuses = ['single', 'married_jointly', 'head_of_household'] as const;
+function payrollFields(body: Record<string, unknown>) {
+  const money = (value: unknown, field: string) => {
+    if (value === undefined || value === '') return undefined;
+    const result = Number(value);
+    if (!Number.isFinite(result) || result < 0) throw new ApiError(400, `${field} must be zero or greater`);
+    return result;
+  };
+  const ssnLast4 = body.ssnLast4 === undefined ? undefined : optionalText(body.ssnLast4, 'ssnLast4');
+  if (ssnLast4 && !/^\d{4}$/.test(ssnLast4)) throw new ApiError(400, 'ssnLast4 must be 4 digits');
+  const federalFilingStatus = body.federalFilingStatus === undefined ? undefined : optionalText(body.federalFilingStatus, 'federalFilingStatus');
+  if (federalFilingStatus && !(filingStatuses as readonly string[]).includes(federalFilingStatus)) throw new ApiError(400, 'federalFilingStatus is not valid');
+  return {
+    ssnLast4,
+    federalFilingStatus,
+    w4Step2Checked: body.w4Step2Checked === undefined ? undefined : Boolean(body.w4Step2Checked),
+    w4DependentsCredit: money(body.w4DependentsCredit, 'w4DependentsCredit'),
+    w4OtherIncome: money(body.w4OtherIncome, 'w4OtherIncome'),
+    w4Deductions: money(body.w4Deductions, 'w4Deductions'),
+    w4ExtraWithholding: money(body.w4ExtraWithholding, 'w4ExtraWithholding'),
+    nysAllowances: optionalInteger(body.nysAllowances, 'nysAllowances'),
+    nysAdditionalWithholding: money(body.nysAdditionalWithholding, 'nysAdditionalWithholding'),
+    nycResident: body.nycResident === undefined ? undefined : Boolean(body.nycResident),
+  };
+}
+
 export function createFinanceRouter(prisma: PrismaClient) {
   const router = Router();
   router.get('/employees', asyncHandler(async (_req, res) => {
     res.json(await prisma.employee.findMany({ orderBy: { name: 'asc' }, include: { payments: { orderBy: { paymentDate: 'desc' } } } }));
   }));
   router.post('/employees', asyncHandler(async (req, res) => {
-    const employee = await prisma.employee.create({ data: { name: requiredText(req.body.name, 'name'), phone: optionalText(req.body.phone, 'phone'), email: optionalText(req.body.email, 'email'), role: optionalText(req.body.role, 'role'), weeklyRate: req.body.weeklyRate === undefined ? undefined : nonNegativeWeeklyRate(req.body.weeklyRate), startDate: req.body.startDate ? date(req.body.startDate, 'startDate') : undefined, active: req.body.active === undefined ? undefined : Boolean(req.body.active), notes: optionalText(req.body.notes, 'notes') }, include: { payments: true } });
+    const employee = await prisma.employee.create({ data: { name: requiredText(req.body.name, 'name'), phone: optionalText(req.body.phone, 'phone'), email: optionalText(req.body.email, 'email'), role: optionalText(req.body.role, 'role'), weeklyRate: req.body.weeklyRate === undefined ? undefined : nonNegativeWeeklyRate(req.body.weeklyRate), startDate: req.body.startDate ? date(req.body.startDate, 'startDate') : undefined, active: req.body.active === undefined ? undefined : Boolean(req.body.active), notes: optionalText(req.body.notes, 'notes'), ...payrollFields(req.body) }, include: { payments: true } });
     res.status(201).json(employee);
   }));
   router.patch('/employees/:id', asyncHandler(async (req, res) => {
-    const employee = await prisma.employee.update({ where: { id: requiredText(req.params.id, 'id') }, data: { name: req.body.name === undefined ? undefined : requiredText(req.body.name, 'name'), phone: req.body.phone === undefined ? undefined : optionalText(req.body.phone, 'phone'), email: req.body.email === undefined ? undefined : optionalText(req.body.email, 'email'), role: req.body.role === undefined ? undefined : optionalText(req.body.role, 'role'), weeklyRate: req.body.weeklyRate === undefined ? undefined : nonNegativeWeeklyRate(req.body.weeklyRate), startDate: req.body.startDate === undefined ? undefined : date(req.body.startDate, 'startDate'), active: req.body.active === undefined ? undefined : optionalBoolean(req.body.active, 'active'), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes') }, include: { payments: true } });
+    const employee = await prisma.employee.update({ where: { id: requiredText(req.params.id, 'id') }, data: { name: req.body.name === undefined ? undefined : requiredText(req.body.name, 'name'), phone: req.body.phone === undefined ? undefined : optionalText(req.body.phone, 'phone'), email: req.body.email === undefined ? undefined : optionalText(req.body.email, 'email'), role: req.body.role === undefined ? undefined : optionalText(req.body.role, 'role'), weeklyRate: req.body.weeklyRate === undefined ? undefined : nonNegativeWeeklyRate(req.body.weeklyRate), startDate: req.body.startDate === undefined ? undefined : date(req.body.startDate, 'startDate'), active: req.body.active === undefined ? undefined : optionalBoolean(req.body.active, 'active'), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'), ...payrollFields(req.body) }, include: { payments: true } });
     res.json(employee);
+  }));
+  router.get('/tax-settings', asyncHandler(async (req, res) => {
+    const year = Number(req.query.year) || new Date().getFullYear();
+    if (!(await prisma.taxSetting.count({ where: { year } }))) await prisma.taxSetting.createMany({ data: defaultTaxSettings(year) });
+    res.json(await prisma.taxSetting.findMany({ where: { year }, orderBy: { key: 'asc' } }));
+  }));
+  router.put('/tax-settings/:year/:key', asyncHandler(async (req, res) => {
+    const value = Number(req.body.value);
+    if (!Number.isFinite(value) || value < 0) throw new ApiError(400, 'value must be zero or greater');
+    res.json(await prisma.taxSetting.update({ where: { year_key: { year: Number(req.params.year), key: requiredText(req.params.key, 'key') } }, data: { value, notes: optionalText(req.body.notes, 'notes') } }));
+  }));
+  router.post('/payroll/test-employees', asyncHandler(async (req, res) => {
+    const pick = <T,>(items: T[]) => items[Math.floor(Math.random() * items.length)];
+    const count = Math.min(Math.max(Number(req.body.count) || 2, 1), 10);
+    const created = [];
+    for (let index = 0; index < count; index += 1) {
+      created.push(await prisma.employee.create({ data: { name: `${pick(['Marcus', 'Dana', 'Luis', 'Keisha', 'Tyler', 'Priya'])} ${pick(['Reyes', 'Brooks', 'Nguyen', 'Patel', 'Owens', 'Walsh'])}`, role: 'Technician', weeklyRate: 600 + Math.round(Math.random() * 900), ssnLast4: String(1000 + Math.floor(Math.random() * 9000)), federalFilingStatus: pick(['single', 'married_jointly', 'head_of_household']), w4Step2Checked: Math.random() < 0.3, w4DependentsCredit: pick([0, 2000, 4000]), nysAllowances: Math.floor(Math.random() * 4), nycResident: true, notes: 'TEST DATA' } }));
+    }
+    res.status(201).json(created);
   }));
   router.delete('/employees/:id', asyncHandler(async (req, res) => { await prisma.employee.delete({ where: { id: requiredText(req.params.id, 'id') } }); res.status(204).send(); }));
   router.get('/payroll', asyncHandler(async (_req, res) => {
