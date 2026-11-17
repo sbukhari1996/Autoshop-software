@@ -101,6 +101,20 @@ Verify after deployment: server commit equals remote `prod`, API health at `http
 
 For code rollback, redeploy the previous production commit while retaining additive tables and all financial records. Explicitly created bank-only ledger entries remain real bookkeeping records; do not delete them as part of application rollback. Database restore is a separate destructive operation requiring deliberate authorization.
 
+### Verified deployment outcome
+
+Financial release `844349a` was pushed to both `prod` and `job-financials`, pulled into `/opt/autoshop/app`, built, migrated, and deployed on November 17, 2026. All four pending migrations applied before application container replacement. API/frontend containers were recreated successfully; PostgreSQL remained healthy and its data volumes were retained.
+
+Postdeployment checks:
+
+- Production API health returned HTTP 200; the served HTML referenced the new frontend assets.
+- The running API image contains **61 migrations**; Prisma reported no pending migrations and the database confirmed all 61 applied.
+- Authenticated, read-only smoke tests returned HTTP 200 for the quarterly reconciliation report, quarterly PDF (valid `%PDF-` header), quarterly CSV (transaction-support section present), and payroll pay-run read.
+- No production test statements, pay runs, matches, or ledger entries were created.
+- The subsequent documentation-only handoff update does not change application code or schema.
+
+Deployment tooling caveat: when sending a script through SSH using `echo BASE64 | base64 -d | bash`, container commands can consume the remaining script on stdin. Wrap the whole script in `{ ...; } </dev/null`, or invoke the deploy script directly with `</dev/null`. The first run applied migrations but did not restart containers because of this; the explicit subsequent deploy completed, and verification checked new container creation times and the running image's 61 migrations rather than relying only on Git HEAD or API health.
+
 ## Material limitations / next decisions
 
 - One-to-one matching only. Fees, split/partial payments and grouped deposits require recording the actual underlying transaction appropriately or leaving it flagged; no automatic split allocation exists.
