@@ -8,12 +8,18 @@ import { ApiError, asyncHandler } from '../errors.js';
 import { receiptPdf } from '../receipt-pdf.js';
 import { optionalBoolean, optionalDate, optionalInteger, optionalText, requiredText } from '../validation.js';
 import { defaultTaxSettings } from '../payroll-tax-defaults.js';
+import { payRunAmounts } from '../payroll-calc.js';
 
 const entryTypes = ['income', 'expense'] as const;
 const frequencies = ['weekly', 'monthly', 'yearly'] as const;
 const paymentMethods = ['cash', 'debit_card', 'credit_card', 'check', 'ach', 'other'] as const;
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
 const receiptUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+async function loadTaxSettings(prisma: PrismaClient, year: number) {
+  if (!(await prisma.taxSetting.count({ where: { year } }))) await prisma.taxSetting.createMany({ data: defaultTaxSettings(year) });
+  return Object.fromEntries((await prisma.taxSetting.findMany({ where: { year } })).map((row) => [row.key, row.value]));
+}
 
 const filingStatuses = ['single', 'married_jointly', 'head_of_household'] as const;
 function payrollFields(body: Record<string, unknown>) {
@@ -56,8 +62,7 @@ export function createFinanceRouter(prisma: PrismaClient) {
   }));
   router.get('/tax-settings', asyncHandler(async (req, res) => {
     const year = Number(req.query.year) || new Date().getFullYear();
-    if (!(await prisma.taxSetting.count({ where: { year } }))) await prisma.taxSetting.createMany({ data: defaultTaxSettings(year) });
-    res.json(await prisma.taxSetting.findMany({ where: { year }, orderBy: { key: 'asc' } }));
+    res.json(await prisma.taxSetting.findMany({ where: { year }, orderBy: { key: 'asc' } }).then(async (rows) => { if (rows.length) return rows; await loadTaxSettings(prisma, year); return prisma.taxSetting.findMany({ where: { year }, orderBy: { key: 'asc' } }); }));
   }));
   router.put('/tax-settings/:year/:key', asyncHandler(async (req, res) => {
     const value = Number(req.body.value);
@@ -72,6 +77,41 @@ export function createFinanceRouter(prisma: PrismaClient) {
       created.push(await prisma.employee.create({ data: { name: `${pick(['Marcus', 'Dana', 'Luis', 'Keisha', 'Tyler', 'Priya'])} ${pick(['Reyes', 'Brooks', 'Nguyen', 'Patel', 'Owens', 'Walsh'])}`, role: 'Technician', weeklyRate: 600 + Math.round(Math.random() * 900), ssnLast4: String(1000 + Math.floor(Math.random() * 9000)), federalFilingStatus: pick(['single', 'married_jointly', 'head_of_household']), w4Step2Checked: Math.random() < 0.3, w4DependentsCredit: pick([0, 2000, 4000]), nysAllowances: Math.floor(Math.random() * 4), nycResident: true, notes: 'TEST DATA' } }));
     }
     res.status(201).json(created);
+  }));
+  router.post('/payroll/runs', asyncHandler(async (req, res) => {
+    const payDate = date(req.body.payDate, 'payDate');
+    const year = payDate.getFullYear();
+    const settings = await loadTaxSettings(prisma, year);
+    const yearStart = new Date(year, 0, 1);
+    const employees = await prisma.employee.findMany({ where: { active: true }, orderBy: { name: 'asc' } });
+    const created = [];
+    for (const employee of employees) {
+      if (await prisma.payRun.findFirst({ where: { employeeId: employee.id, payDate } })) continue;
+      const earlier = await prisma.payRun.findMany({ where: { employeeId: employee.id, payDate: { gte: yearStart, lt: payDate } } });
+      const ytdGross = earlier.reduce((total, run) => total + run.grossPay, 0);
+      const amounts = payRunAmounts(employee, employee.weeklyRate, settings, { socialSecurityWages: ytdGross, futaWages: ytdGross, medicareWages: ytdGross });
+      created.push(await prisma.payRun.create({ data: { employeeId: employee.id, payDate, ...amounts } }));
+    }
+    res.status(201).json(created);
+  }));
+  router.get('/payroll/runs', asyncHandler(async (req, res) => {
+    const year = Number(req.query.year) || new Date().getFullYear();
+    res.json(await prisma.payRun.findMany({ where: { payDate: { gte: new Date(year, 0, 1), lt: new Date(year + 1, 0, 1) } }, include: { employee: { select: { name: true } } }, orderBy: [{ payDate: 'desc' }, { createdAt: 'asc' }] }));
+  }));
+  router.get('/payroll/w2', asyncHandler(async (req, res) => {
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const runs = await prisma.payRun.findMany({ where: { payDate: { gte: new Date(year, 0, 1), lt: new Date(year + 1, 0, 1) } }, include: { employee: { select: { name: true } } } });
+    const byEmployee = new Map<string, Record<string, number | string>>();
+    for (const run of runs) {
+      const fresh: Record<string, number | string> = { employeeId: run.employeeId, name: run.employee.name, runs: 0, grossWages: 0, federalWithholding: 0, nysWithholding: 0, nycWithholding: 0, socialSecurityTax: 0, medicareTax: 0, sdi: 0, pfl: 0, netPay: 0 };
+      const row = byEmployee.get(run.employeeId) ?? fresh;
+      const sum = (key: string, value: number) => { row[key] = Math.round(((row[key] as number) + value) * 100) / 100; };
+      row.runs = (row.runs as number) + 1;
+      sum('grossWages', run.grossPay); sum('federalWithholding', run.federalWithholding); sum('nysWithholding', run.nysWithholding); sum('nycWithholding', run.nycWithholding);
+      sum('socialSecurityTax', run.socialSecurityEmployee); sum('medicareTax', run.medicareEmployee); sum('sdi', run.sdiEmployee); sum('pfl', run.pflEmployee); sum('netPay', run.netPay);
+      byEmployee.set(run.employeeId, row);
+    }
+    res.json([...byEmployee.values()].sort((left, right) => String(left.name).localeCompare(String(right.name))));
   }));
   router.delete('/employees/:id', asyncHandler(async (req, res) => { await prisma.employee.delete({ where: { id: requiredText(req.params.id, 'id') } }); res.status(204).send(); }));
   router.get('/payroll', asyncHandler(async (_req, res) => {

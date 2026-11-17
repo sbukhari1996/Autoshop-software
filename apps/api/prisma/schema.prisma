@@ -505,8 +505,33 @@ model Employee {
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
   payments   PayrollPayment[]
+  payRuns    PayRun[]
 
   @@map("employees")
+}
+
+model PayRun {
+  id                     String   @id @default(cuid())
+  employeeId             String
+  payDate                DateTime
+  grossPay               Float
+  federalWithholding     Float
+  nysWithholding         Float
+  nycWithholding         Float
+  socialSecurityEmployee Float
+  medicareEmployee       Float
+  sdiEmployee            Float
+  pflEmployee            Float
+  netPay                 Float
+  socialSecurityEmployer Float
+  medicareEmployer       Float
+  futaEmployer           Float
+  createdAt              DateTime @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, payDate])
+  @@map("pay_runs")
 }
 
 model TaxSetting {
