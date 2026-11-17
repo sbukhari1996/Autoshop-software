@@ -4,7 +4,7 @@ import type { Invoice } from "./InvoiceView";
 // Lightweight shapes: only the fields the reports read.
 export type ReportJob = { id: string; jobNumber: string; status: string; totalRevenue: number; customer: { firstName: string; lastName: string } | null };
 export type ReportClaim = { id: string; claimNumber: string | null; insuranceCompany: string | null; claimStatus: string };
-export type ReportEntry = { id: string; type: "income" | "expense"; amount: number; category: string | null; entryDate: string };
+export type ReportEntry = { id: string; type: "income" | "expense" | "transfer_in" | "transfer_out"; amount: number; category: string | null; entryDate: string };
 export type ReportSummary = {
   metrics: { openJobs: number; inspections: number; customers: number; revenue: number; expenses: number };
   jobsByStatus: Array<{ status: string; count: number }>;

@@ -1,7 +1,7 @@
 import { zipSync, strToU8 } from "fflate";
 
 type StatementEntry = {
-  type: "income" | "expense";
+  type: "income" | "expense" | "transfer_in" | "transfer_out";
   description: string;
   category: string | null;
   amount: number;
@@ -110,11 +110,11 @@ export function createMonthlyStatementWorkbook(
       .map((value) => ({ value, style: 2 })),
     ...filtered.map((entry) => [
       { value: excelDate(entry.entryDate), style: 3 },
-      { value: entry.type === "income" ? "Income" : "Expense" },
+      { value: entry.type === "income" ? "Income" : entry.type === "expense" ? "Expense" : entry.type === "transfer_in" ? "Transfer in" : "Transfer out" },
       { value: entry.description },
       { value: entry.category || "" },
       { value: entry.paymentMethod?.replaceAll("_", " ") || "" },
-      { value: entry.type === "income" ? entry.amount : -entry.amount, style: 1 },
+      { value: entry.type === "income" || entry.type === "transfer_in" ? entry.amount : -entry.amount, style: 1 },
       { value: entry.notes || "" },
     ]),
   ];

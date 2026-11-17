@@ -283,7 +283,7 @@ type ReportsData = DashboardData & {
   estimateTotals: { count: number; total: number };
   documentCount: number;
 };
-type FinanceEntry = { id: string; type: "income" | "expense"; description: string; category: string | null; amount: number; paymentMethod: string | null; entryDate: string; notes: string | null; job?: { id: string; jobNumber: string } | null; claim?: { id: string; claimNumber: string | null } | null; documents: Array<{ id: string; fileName: string; createdAt: string }> };
+type FinanceEntry = { id: string; type: "income" | "expense" | "transfer_in" | "transfer_out"; description: string; category: string | null; amount: number; paymentMethod: string | null; entryDate: string; notes: string | null; job?: { id: string; jobNumber: string } | null; claim?: { id: string; claimNumber: string | null } | null; documents: Array<{ id: string; fileName: string; createdAt: string }> };
 type RecurringExpensePayment = { id: string; period: string; amount: number; paidAt: string };
 type RecurringExpense = { id: string; name: string; amount: number; category: string | null; frequency: "weekly" | "monthly" | "yearly"; startDate: string; endDate: string | null; active: boolean; payments: RecurringExpensePayment[] };
 type FinanceSummary = { income: number; generalExpenses: number; jobExpenses: number; expenses: number; net: number };

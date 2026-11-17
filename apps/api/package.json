@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "test": "tsx --test test/authorization-pdf-layout.test.ts test/documenso.test.ts test/documenso-routes.test.ts test/mv104.test.ts test/claim-inspection.test.ts test/shop-time.test.ts test/payroll-calc.test.ts",
+    "test": "tsx --test test/authorization-pdf-layout.test.ts test/documenso.test.ts test/documenso-routes.test.ts test/mv104.test.ts test/claim-inspection.test.ts test/shop-time.test.ts test/payroll-calc.test.ts test/payroll-statement.test.ts test/bank-statement-import.test.ts test/finance-import-routes.test.ts",
     "start": "node dist/server.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
@@ -21,8 +21,9 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "morgan": "^1.10.0",
-    "multer": "^2.4.0",
+    "multer": "^2.5.0",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.10.38",
     "pdfkit": "^0.20.2",
     "prisma": "^5.10.2"
   },

@@ -12,6 +12,9 @@
 }
 .ledger-type-icon.income { background: #e3f6ea; color: #15803d; }
 .ledger-type-icon.expense { background: #fde9df; color: #c2410c; }
+.ledger-type-icon.transfer_in,
+.ledger-type-icon.transfer_out { background: #e8eefc; color: #4058a0; }
+.finance-transfer { color: #4058a0; }
 
 .ledger-cards { display: none; }
 

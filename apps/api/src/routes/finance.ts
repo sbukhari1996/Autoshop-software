@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
 import multer from 'multer';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { ApiError, asyncHandler } from '../errors.js';
@@ -10,12 +10,33 @@ import { optionalBoolean, optionalDate, optionalInteger, optionalText, requiredT
 import { defaultTaxSettings } from '../payroll-tax-defaults.js';
 import { payRunAmounts } from '../payroll-calc.js';
 import { buildTaxPacket } from '../tax-packet.js';
+import { parseBankStatement } from '../bank-statement-import.js';
+import { buildPayrollStatementPdf } from '../payroll-statement.js';
 
-const entryTypes = ['income', 'expense'] as const;
+const entryTypes = ['income', 'expense', 'transfer_in', 'transfer_out'] as const;
 const frequencies = ['weekly', 'monthly', 'yearly'] as const;
 const paymentMethods = ['cash', 'debit_card', 'credit_card', 'check', 'ach', 'other'] as const;
 const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
 const receiptUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const bankStatementUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const uploadBankStatement: RequestHandler = (req, res, next) => {
+  bankStatementUpload.single('file')(req, res, (error) => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      return next(new ApiError(413, 'Bank statement must be 15 MB or smaller'));
+    }
+    return next(error);
+  });
+};
+type BankImportEntry = {
+  type: typeof entryTypes[number];
+  description: string;
+  category: string | null;
+  amount: number;
+  entryDate: Date;
+  sourceReference: string;
+  notes: string;
+};
 
 async function loadTaxSettings(prisma: PrismaClient, year: number) {
   await prisma.taxSetting.createMany({ data: defaultTaxSettings(year), skipDuplicates: true });
@@ -98,6 +119,62 @@ export function createFinanceRouter(prisma: PrismaClient) {
   router.get('/payroll/runs', asyncHandler(async (req, res) => {
     const year = Number(req.query.year) || new Date().getFullYear();
     res.json(await prisma.payRun.findMany({ where: { payDate: { gte: new Date(year, 0, 1), lt: new Date(year + 1, 0, 1) } }, include: { employee: { select: { name: true } } }, orderBy: [{ payDate: 'desc' }, { createdAt: 'asc' }] }));
+  }));
+  router.get('/payroll/runs/:id/statement', asyncHandler(async (req, res) => {
+    const run = await prisma.payRun.findUnique({
+      where: { id: requiredText(req.params.id, 'id') },
+      include: { employee: { select: { name: true, role: true } } },
+    });
+    if (!run) throw new ApiError(404, 'Pay run not found');
+    const pdf = await buildPayrollStatementPdf(run);
+    const employeeFileName = run.employee.name.normalize('NFKD').replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-|-$/g, '') || 'employee';
+    res.type('application/pdf').attachment(`pay-statement-${employeeFileName}-${run.payDate.toISOString().slice(0, 10)}.pdf`).send(pdf);
+  }));
+  router.post('/bank-import/preview', uploadBankStatement, asyncHandler(async (req, res) => {
+    const file = req.file;
+    if (!file || !file.size) throw new ApiError(400, 'Choose a non-empty PDF or CSV bank statement');
+    const preview = await parseBankStatement(file);
+    const sourceReferences = preview.transactions.map((transaction) => transaction.sourceReference);
+    const existing = await prisma.financeEntry.findMany({
+      where: { sourceReference: { in: sourceReferences } },
+      select: { sourceReference: true },
+    });
+    const existingReferences = new Set(existing.map((entry) => entry.sourceReference));
+    res.json({
+      ...preview,
+      transactions: preview.transactions.map((transaction) => ({
+        ...transaction,
+        duplicate: existingReferences.has(transaction.sourceReference),
+      })),
+    });
+  }));
+  router.post('/bank-import', asyncHandler(async (req, res) => {
+    if (!Array.isArray(req.body.transactions) || req.body.transactions.length < 1 || req.body.transactions.length > 1000) {
+      throw new ApiError(400, 'transactions must contain between 1 and 1000 reviewed statement rows');
+    }
+    const data: BankImportEntry[] = (req.body.transactions as unknown[]).map((value: unknown) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError(400, 'Each transaction must be an object');
+      const transaction = value as Record<string, unknown>;
+      const sourceReference = requiredText(transaction.sourceReference, 'sourceReference');
+      if (!/^bank-import:v1:[0-9a-f]{64}$/.test(sourceReference)) throw new ApiError(400, 'sourceReference is not valid');
+      return {
+        type: validate(transaction.type, entryTypes, 'type'),
+        description: requiredText(transaction.description, 'description'),
+        category: optionalText(transaction.category, 'category') ?? null,
+        amount: positive(transaction.amount),
+        entryDate: date(transaction.entryDate, 'entryDate'),
+        sourceReference,
+        notes: 'Imported from a reviewed bank statement',
+      };
+    });
+    const existing = await prisma.financeEntry.findMany({
+      where: { sourceReference: { in: data.map((transaction) => transaction.sourceReference) } },
+      select: { sourceReference: true },
+    });
+    const existingReferences = new Set(existing.map((entry) => entry.sourceReference).filter((reference): reference is string => reference !== null));
+    const candidates = data.filter((transaction) => !existingReferences.has(transaction.sourceReference));
+    const result = await prisma.financeEntry.createMany({ data: candidates, skipDuplicates: true });
+    res.status(201).json({ imported: result.count, duplicates: data.length - result.count });
   }));
   router.get('/payroll/w2', asyncHandler(async (req, res) => {
     const year = Number(req.query.year) || new Date().getFullYear();
@@ -442,7 +519,7 @@ function recurringAmountInMonth(item: { amount: number; frequency: string; start
   }
   return item.amount * occurrences;
 }
-function validate<T extends readonly string[]>(value: unknown, values: T, field: string) { const result = requiredText(value, field); if (!values.includes(result)) throw new ApiError(400, `${field} is invalid`); return result; }
+function validate<T extends readonly string[]>(value: unknown, values: T, field: string): T[number] { const result = requiredText(value, field); if (!values.includes(result)) throw new ApiError(400, `${field} is invalid`); return result as T[number]; }
 function fullPeriodsElapsed(startDate: Date, asOf: Date, frequency: string) {
   if (asOf < startDate) return 0;
   if (frequency === 'daily') return Math.floor((asOf.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
@@ -455,8 +532,8 @@ function fullPeriodsElapsed(startDate: Date, asOf: Date, frequency: string) {
 }
 async function calculateBankBalance(prisma: PrismaClient, startingBalance: number) {
   const entries = await prisma.financeEntry.findMany({ select: { type: true, amount: true } });
-  const income = entries.filter((entry) => entry.type === 'income').reduce((total, entry) => total + entry.amount, 0);
-  const expenses = entries.filter((entry) => entry.type === 'expense').reduce((total, entry) => total + entry.amount, 0);
+  const income = entries.filter((entry) => entry.type === 'income' || entry.type === 'transfer_in').reduce((total, entry) => total + entry.amount, 0);
+  const expenses = entries.filter((entry) => entry.type === 'expense' || entry.type === 'transfer_out').reduce((total, entry) => total + entry.amount, 0);
   return { startingBalance, income, expenses, currentBalance: startingBalance + income - expenses };
 }
 function startOf(value: Date, period: string) { if (period === 'year') return new Date(Date.UTC(value.getUTCFullYear(), 0, 1)); if (period === 'week') { const day = value.getUTCDay() || 7; return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate() - day + 1)); } return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1)); }
