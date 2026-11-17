@@ -1,6 +1,7 @@
 import React from "react";
 import { downloadMonthlyStatement, periodMatches } from "./monthlyStatement";
 import { formatLedgerDate } from "./ledgerDate";
+import { BankReconciliation } from "./BankReconciliation";
 import "./ledger-mobile.css";
 import "./bookkeeping-design.css";
 
@@ -72,7 +73,6 @@ type Employee = { id: string; name: string; phone: string | null; email: string 
 type TaxSetting = { year: number; key: string; label: string; value: number };
 type PayRunRow = { id: string; payDate: string; grossPay: number; federalWithholding: number; nysWithholding: number; nycWithholding: number; socialSecurityEmployee: number; medicareEmployee: number; sdiEmployee: number; pflEmployee: number; netPay: number; employee: { name: string } };
 type W2Row = { employeeId: string; name: string; runs: number; grossWages: number; federalWithholding: number; nysWithholding: number; nycWithholding: number; socialSecurityTax: number; medicareTax: number; sdi: number; pfl: number; netPay: number };
-type BankImportRow = { entryDate: string | null; description: string; amount: number; type: FinanceEntry["type"]; category: string; sourceReference: string; needsReview: boolean; duplicate: boolean; selected: boolean };
 type PayrollPayment = { id: string; amount: number; paymentDate: string; paymentMethod: string | null; notes: string | null };
 type RentalTenant = { id: string; name: string; phone: string | null; email: string | null; space: string; shift: string; rentAmount: number; rentFrequency: string; startDate: string; active: boolean; payments: RentalPayment[]; expectedRentToDate?: number; rentCollected?: number; sharedExpensesCollected?: number; totalCollected?: number; netCollected?: number };
 type RentalPayment = { id: string; type: "rent" | "shared_expense"; amount: number; paymentDate: string; paymentMethod: string | null; notes: string | null };
@@ -205,7 +205,7 @@ export function BookkeepingView({
   );
   const [bankBalance, setBankBalance] = React.useState<BankBalance | null>(null);
   const [startingBalance, setStartingBalance] = React.useState("");
-  const [activeTab, setActiveTab] = React.useState<"ledger" | "payroll" | "rentals">("ledger");
+  const [activeTab, setActiveTab] = React.useState<"ledger" | "payroll" | "rentals" | "bank">("ledger");
   const [ledgerSearch, setLedgerSearch] = React.useState("");
   const [employees, setEmployees] = React.useState<Employee[]>([]);
   const [employeeOpen, setEmployeeOpen] = React.useState(false);
@@ -215,11 +215,6 @@ export function BookkeepingView({
   const [payRuns, setPayRuns] = React.useState<PayRunRow[]>([]);
   const [w2Rows, setW2Rows] = React.useState<W2Row[]>([]);
   const [payStatementLoadingId, setPayStatementLoadingId] = React.useState<string | null>(null);
-  const [bankImportOpen, setBankImportOpen] = React.useState(false);
-  const [bankImportFile, setBankImportFile] = React.useState<File | null>(null);
-  const [bankImportRows, setBankImportRows] = React.useState<BankImportRow[]>([]);
-  const [bankImportWarnings, setBankImportWarnings] = React.useState<string[]>([]);
-  const [bankImportLoading, setBankImportLoading] = React.useState(false);
   const loadPayRuns = async () => {
     const year = new Date().getFullYear();
     setPayRuns(await request<PayRunRow[]>(`/finance/payroll/runs?year=${year}`));
@@ -254,58 +249,6 @@ export function BookkeepingView({
       setError(statementError instanceof Error ? statementError.message : "Unable to download pay statement");
     } finally {
       setPayStatementLoadingId(null);
-    }
-  };
-  const previewBankStatement = async (file: File) => {
-    setError("");
-    setBankImportFile(file);
-    setBankImportRows([]);
-    setBankImportWarnings([]);
-    setBankImportLoading(true);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const result = await request<{ transactions: Array<Omit<BankImportRow, "selected" | "duplicate"> & { duplicate: boolean }>; warnings: string[] }>("/finance/bank-import/preview", {
-        method: "POST",
-        body: form,
-      });
-      setBankImportRows(result.transactions.map((transaction) => ({ ...transaction, selected: !transaction.duplicate })));
-      setBankImportWarnings(result.warnings);
-    } catch (previewError) {
-      setError(previewError instanceof Error ? previewError.message : "Unable to read bank statement");
-    } finally {
-      setBankImportLoading(false);
-    }
-  };
-  const importBankStatement = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const selected = bankImportRows.filter((transaction) => transaction.selected && !transaction.duplicate);
-    if (!selected.length) {
-      setError("Select at least one new transaction to import.");
-      return;
-    }
-    if (selected.some((transaction) => !transaction.entryDate)) {
-      setError("Add a date for each selected check before importing.");
-      return;
-    }
-    setError("");
-    setBankImportLoading(true);
-    try {
-      const result = await request<{ imported: number; duplicates: number }>("/finance/bank-import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transactions: selected }),
-      });
-      await onChanged();
-      setBankImportOpen(false);
-      setBankImportFile(null);
-      setBankImportRows([]);
-      setBankImportWarnings([]);
-      setError(`Imported ${result.imported} transaction${result.imported === 1 ? "" : "s"}${result.duplicates ? `; skipped ${result.duplicates} duplicate${result.duplicates === 1 ? "" : "s"}` : ""}.`);
-    } catch (importError) {
-      setError(importError instanceof Error ? importError.message : "Unable to import bank statement");
-    } finally {
-      setBankImportLoading(false);
     }
   };
   const saveTaxSetting = async (setting: TaxSetting, raw: string) => {
@@ -776,10 +719,16 @@ export function BookkeepingView({
       </section>
       <div className="bookkeeping-tabs" role="tablist" aria-label="Bookkeeping views">
         <button type="button" className={activeTab === "ledger" ? "active" : ""} onClick={() => setActiveTab("ledger")}>Ledger</button>
+        <button type="button" className={activeTab === "bank" ? "active" : ""} onClick={() => setActiveTab("bank")}>Bank reconciliation</button>
         <button type="button" className={activeTab === "payroll" ? "active" : ""} onClick={() => setActiveTab("payroll")}>Employees &amp; payroll</button>
         <button type="button" className={activeTab === "rentals" ? "active" : ""} onClick={() => setActiveTab("rentals")}>Shop rentals</button>
       </div>
-      {activeTab === "rentals" ? <section className="payroll-workspace rental-workspace">
+      {activeTab === "bank" ? <BankReconciliation
+        request={request}
+        onChanged={onChanged}
+        year={ledgerYear}
+        quarter={ledgerMonth.startsWith("q") ? ledgerMonth : `q${Math.floor(new Date().getMonth() / 3) + 1}`}
+      /> : activeTab === "rentals" ? <section className="payroll-workspace rental-workspace">
         <div className="payroll-toolbar"><div><p className="eyebrow">Shared facility</p><h2>Shop rentals</h2><p className="subheading">Track daytime and nighttime mechanical renters, rent collected, and shared expenses.</p></div><button className="orange-button" onClick={() => setRentalOpen(true)}>Add renter</button></div>
         <div className="payroll-summary"><div><span>Active renters</span><strong>{rentals.filter((renter) => renter.active).length}</strong><small>Day and night spaces</small></div><div><span>Rent collected</span><strong>{currency(rentals.reduce((total, renter) => total + (renter.rentCollected || 0), 0))}</strong><small>Recorded rental income</small></div><div><span>Shared expenses</span><strong>{currency(rentals.reduce((total, renter) => total + (renter.sharedExpensesCollected || 0), 0))}</strong><small>Contributions received</small></div></div>
         <div className="employee-list">{rentals.map((renter) => <article className="employee-card rental-card" key={renter.id}><div className="employee-card-heading"><div><strong>{renter.name}</strong><small>{renter.shift} shift · {renter.space} · {renter.rentFrequency} rent</small></div><span className={renter.active ? "active-dot" : "inactive-dot"} /></div><div className="employee-metrics"><div><span>Rent target</span><strong>{currency(renter.rentAmount)}</strong></div><div><span>Expected</span><strong>{currency(renter.expectedRentToDate || 0)}</strong></div><div><span>Rent paid</span><strong className="finance-income">{currency(renter.rentCollected || 0)}</strong></div><div><span>Rent due</span><strong className={(renter.expectedRentToDate || 0) > (renter.rentCollected || 0) ? "payroll-due" : "finance-income"}>{currency(Math.max(0, (renter.expectedRentToDate || 0) - (renter.rentCollected || 0)))}</strong></div></div><div className="rental-card-footer"><span>Shared expenses: <b>{currency(renter.sharedExpensesCollected || 0)}</b></span><button className="orange-button" onClick={() => setPaymentRental(renter)}>Record payment</button></div></article>)}{!rentals.length && <div className="empty-state">No renters yet. Add the daytime or nighttime mechanical renter to begin tracking.</div>}</div>
@@ -882,7 +831,7 @@ export function BookkeepingView({
                   </button>
                 ))}
               </div>
-              <button type="button" className="secondary-button" onClick={() => { setError(""); setBankImportOpen(true); }}>
+              <button type="button" className="secondary-button" onClick={() => setActiveTab("bank")}>
                 Import bank statement
               </button>
               <button
@@ -1251,89 +1200,6 @@ export function BookkeepingView({
         </div>
       </section>
       </>}
-      {bankImportOpen && (
-        <div className="modal-backdrop bank-import-backdrop">
-          <form className="modal finance-modal bank-import-modal" onSubmit={importBankStatement}>
-            <div className="modal-heading">
-              <div>
-                <p className="eyebrow">Ledger import</p>
-                <h2>Import bank statement</h2>
-                <small>Upload a PDF or CSV, review every suggested category, then save the selected transactions.</small>
-              </div>
-              <button type="button" className="close-button" onClick={() => { setBankImportOpen(false); setBankImportRows([]); setBankImportWarnings([]); }}>×</button>
-            </div>
-            <label className="bank-import-file">
-              Bank statement file
-              <input
-                type="file"
-                accept=".pdf,.csv,application/pdf,text/csv"
-                onChange={(event) => {
-                  const file = event.currentTarget.files?.[0];
-                  event.currentTarget.value = "";
-                  if (file) void previewBankStatement(file);
-                }}
-              />
-            </label>
-            {bankImportFile && <p className="muted">{bankImportFile.name}</p>}
-            {bankImportLoading && <p className="muted">Reading or importing statement…</p>}
-            {bankImportWarnings.map((warning) => <p className="bank-import-warning" key={warning}>{warning}</p>)}
-            {bankImportRows.length > 0 && (
-              <>
-                <p className="muted">{bankImportRows.filter((transaction) => transaction.selected && !transaction.duplicate).length} selected of {bankImportRows.length} transactions. Duplicate transactions are not selected.</p>
-                <div className="bank-import-review">
-                  <table className="finance-table bank-import-table">
-                    <thead><tr><th>Import</th><th>Date</th><th>Description</th><th>Amount</th><th>Type</th><th>Category</th><th>Review</th></tr></thead>
-                    <tbody>
-                      {bankImportRows.map((transaction) => (
-                        <tr key={transaction.sourceReference} className={transaction.duplicate ? "bank-import-duplicate" : ""}>
-                          <td data-label="Import">
-                            <input
-                              type="checkbox"
-                              aria-label={`Import ${transaction.description}`}
-                              checked={transaction.selected}
-                              disabled={transaction.duplicate || bankImportLoading}
-                              onChange={(event) => setBankImportRows((rows) => rows.map((row) => row.sourceReference === transaction.sourceReference ? { ...row, selected: event.target.checked } : row))}
-                            />
-                          </td>
-                          <td data-label="Date">
-                            <input
-                              required={transaction.selected && !transaction.duplicate}
-                              type="date"
-                              value={transaction.entryDate || ""}
-                              aria-label={`Date for ${transaction.description}`}
-                              onChange={(event) => setBankImportRows((rows) => rows.map((row) => row.sourceReference === transaction.sourceReference ? { ...row, entryDate: event.target.value || null } : row))}
-                            />
-                          </td>
-                          <td data-label="Description"><input value={transaction.description} aria-label={`Description for ${transaction.description}`} onChange={(event) => setBankImportRows((rows) => rows.map((row) => row.sourceReference === transaction.sourceReference ? { ...row, description: event.target.value } : row))} /></td>
-                          <td data-label="Amount"><input required min="0.01" step="0.01" type="number" value={transaction.amount} aria-label={`Amount for ${transaction.description}`} onChange={(event) => setBankImportRows((rows) => rows.map((row) => row.sourceReference === transaction.sourceReference ? { ...row, amount: Number(event.target.value) } : row))} /></td>
-                          <td data-label="Type">
-                            <select value={transaction.type} aria-label={`Type for ${transaction.description}`} onChange={(event) => setBankImportRows((rows) => rows.map((row) => row.sourceReference === transaction.sourceReference ? { ...row, type: event.target.value as FinanceEntry["type"] } : row))}>
-                              <option value="income">Income</option><option value="expense">Expense</option><option value="transfer_in">Transfer in</option><option value="transfer_out">Transfer out</option>
-                            </select>
-                          </td>
-                          <td data-label="Category">
-                            <select value={transaction.category} aria-label={`Category for ${transaction.description}`} onChange={(event) => setBankImportRows((rows) => rows.map((row) => row.sourceReference === transaction.sourceReference ? { ...row, category: event.target.value, needsReview: false } : row))}>
-                              {categories.map((category) => <option key={category} value={category}>{category}</option>)}
-                              {!categories.includes(transaction.category) && <option value={transaction.category}>{transaction.category}</option>}
-                            </select>
-                          </td>
-                          <td data-label="Review">{transaction.duplicate ? "Already imported" : transaction.needsReview ? "Check category" : "Suggested"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-            <div className="bank-import-actions">
-              <button type="button" className="secondary-button" onClick={() => { setBankImportOpen(false); setBankImportRows([]); setBankImportWarnings([]); }}>Cancel</button>
-              <button type="submit" className="orange-button" disabled={bankImportLoading || !bankImportRows.some((transaction) => transaction.selected && !transaction.duplicate)}>
-                {bankImportLoading ? "Please wait…" : "Import selected transactions"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
       {rentalOpen && <div className="modal-backdrop"><form className="modal finance-modal" onSubmit={saveRental}><div className="modal-heading"><div><p className="eyebrow">Mechanical space</p><h2>Add renter</h2></div><button type="button" className="close-button" onClick={() => setRentalOpen(false)}>×</button></div><label>Name<input required value={rentalForm.name} onChange={(event) => setRentalForm({ ...rentalForm, name: event.target.value })} /></label><label>Phone<input type="tel" value={rentalForm.phone} onChange={(event) => setRentalForm({ ...rentalForm, phone: event.target.value })} /></label><label>Email<input type="email" value={rentalForm.email} onChange={(event) => setRentalForm({ ...rentalForm, email: event.target.value })} /></label><label>Shift<select value={rentalForm.shift} onChange={(event) => setRentalForm({ ...rentalForm, shift: event.target.value })}><option value="day">Day</option><option value="night">Night</option></select></label><label>Rent amount<input required min="0" step="0.01" type="number" value={rentalForm.rentAmount} onChange={(event) => setRentalForm({ ...rentalForm, rentAmount: event.target.value })} /></label><label>Rent frequency<select value={rentalForm.rentFrequency} onChange={(event) => setRentalForm({ ...rentalForm, rentFrequency: event.target.value })}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label><label>Start date<input required type="date" value={rentalForm.startDate} onChange={(event) => setRentalForm({ ...rentalForm, startDate: event.target.value })} /></label><button className="orange-button submit-button" disabled={saving}>{saving ? "Saving..." : "Add renter"}</button></form></div>}
       {paymentRental && <div className="modal-backdrop"><form className="modal finance-modal" onSubmit={saveRentalPayment}><div className="modal-heading"><div><p className="eyebrow">Rental payment</p><h2>Record payment</h2><small>{paymentRental.name} · {paymentRental.shift} shift</small></div><button type="button" className="close-button" onClick={() => setPaymentRental(null)}>×</button></div><label>Payment type<select value={rentalPaymentForm.type} onChange={(event) => setRentalPaymentForm({ ...rentalPaymentForm, type: event.target.value })}><option value="rent">Rent</option><option value="shared_expense">Shared expense contribution</option></select></label><label>Amount<input required min="0.01" step="0.01" type="number" value={rentalPaymentForm.amount} onChange={(event) => setRentalPaymentForm({ ...rentalPaymentForm, amount: event.target.value })} /></label><label>Payment date<input required type="date" value={rentalPaymentForm.paymentDate} onChange={(event) => setRentalPaymentForm({ ...rentalPaymentForm, paymentDate: event.target.value })} /></label><label>Payment method<select value={rentalPaymentForm.paymentMethod} onChange={(event) => setRentalPaymentForm({ ...rentalPaymentForm, paymentMethod: event.target.value })}>{paymentMethods.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Notes<textarea value={rentalPaymentForm.notes} onChange={(event) => setRentalPaymentForm({ ...rentalPaymentForm, notes: event.target.value })} /></label><button className="orange-button submit-button" disabled={saving}>{saving ? "Saving..." : "Record payment"}</button></form></div>}
       {employeeOpen && <div className="modal-backdrop"><form className="modal finance-modal" onSubmit={saveEmployee}><div className="modal-heading"><div><p className="eyebrow">Team member</p><h2>Add employee</h2></div><button type="button" className="close-button" onClick={() => setEmployeeOpen(false)}>×</button></div><label>Name<input required value={employeeForm.name} onChange={(event) => setEmployeeForm({ ...employeeForm, name: event.target.value })} /></label><label>Role<input value={employeeForm.role} onChange={(event) => setEmployeeForm({ ...employeeForm, role: event.target.value })} placeholder="Technician, painter, office" /></label><label>Phone<input type="tel" value={employeeForm.phone} onChange={(event) => setEmployeeForm({ ...employeeForm, phone: event.target.value })} /></label><label>Weekly target<input required min="0" step="0.01" type="number" value={employeeForm.weeklyRate} onChange={(event) => setEmployeeForm({ ...employeeForm, weeklyRate: event.target.value })} /></label><label>Start date<input required type="date" value={employeeForm.startDate} onChange={(event) => setEmployeeForm({ ...employeeForm, startDate: event.target.value })} /></label><label>SSN last 4<input maxLength={4} inputMode="numeric" pattern="[0-9]{4}" value={employeeForm.ssnLast4} onChange={(event) => setEmployeeForm({ ...employeeForm, ssnLast4: event.target.value })} /></label><label>Federal filing status (W-4)<select value={employeeForm.federalFilingStatus} onChange={(event) => setEmployeeForm({ ...employeeForm, federalFilingStatus: event.target.value })}><option value="single">Single or married filing separately</option><option value="married_jointly">Married filing jointly</option><option value="head_of_household">Head of household</option></select></label><label className="checkbox-row"><input type="checkbox" checked={employeeForm.w4Step2Checked} onChange={(event) => setEmployeeForm({ ...employeeForm, w4Step2Checked: event.target.checked })} />W-4 Step 2 box checked (multiple jobs)</label><label>NYS IT-2104 allowances<input type="number" min="0" step="1" value={employeeForm.nysAllowances} onChange={(event) => setEmployeeForm({ ...employeeForm, nysAllowances: event.target.value })} /></label><label className="checkbox-row"><input type="checkbox" checked={employeeForm.nycResident} onChange={(event) => setEmployeeForm({ ...employeeForm, nycResident: event.target.checked })} />NYC resident</label><button className="orange-button submit-button" disabled={saving}>{saving ? "Saving..." : "Add employee"}</button></form></div>}

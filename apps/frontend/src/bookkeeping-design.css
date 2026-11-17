@@ -18,19 +18,3 @@
 .bookkeeping-workspace .recurring-period {
   border-radius: 12px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .08);
 }
-.bookkeeping-workspace .bank-import-modal {
-  display: flex; flex-direction: column; gap: 12px;
-  width: min(96vw, 1280px); max-height: 94vh;
-}
-.bookkeeping-workspace .bank-import-modal > label { align-self: flex-start; min-width: min(100%, 360px); }
-.bookkeeping-workspace .bank-import-review {
-  overflow: auto; max-height: 55vh; border: 1px solid rgba(0, 0, 0, .1);
-  border-radius: 10px; background: #fff;
-}
-.bookkeeping-workspace .bank-import-table { min-width: 1080px; }
-.bookkeeping-workspace .bank-import-table input:not([type="checkbox"]),
-.bookkeeping-workspace .bank-import-table select { min-width: 110px; }
-.bookkeeping-workspace .bank-import-table td[data-label="Description"] input { min-width: 260px; }
-.bookkeeping-workspace .bank-import-duplicate { opacity: .58; }
-.bookkeeping-workspace .bank-import-warning { margin: 0; color: #8c4a00; font-weight: 600; }
-.bookkeeping-workspace .bank-import-actions { display: flex; justify-content: flex-end; gap: 10px; }

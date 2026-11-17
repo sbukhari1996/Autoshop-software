@@ -12,6 +12,7 @@ import { payRunAmounts } from '../payroll-calc.js';
 import { buildTaxPacket } from '../tax-packet.js';
 import { parseBankStatement } from '../bank-statement-import.js';
 import { buildPayrollStatementPdf, totalPayrollAmounts } from '../payroll-statement.js';
+import { createReconciliationRouter } from './reconciliation.js';
 
 const entryTypes = ['income', 'expense', 'transfer_in', 'transfer_out'] as const;
 const frequencies = ['weekly', 'monthly', 'yearly'] as const;
@@ -27,15 +28,6 @@ const uploadBankStatement: RequestHandler = (req, res, next) => {
     }
     return next(error);
   });
-};
-type BankImportEntry = {
-  type: typeof entryTypes[number];
-  description: string;
-  category: string | null;
-  amount: number;
-  entryDate: Date;
-  sourceReference: string;
-  notes: string;
 };
 
 async function loadTaxSettings(prisma: PrismaClient, year: number) {
@@ -71,6 +63,7 @@ function payrollFields(body: Record<string, unknown>) {
 
 export function createFinanceRouter(prisma: PrismaClient) {
   const router = Router();
+  router.use('/reconciliation', createReconciliationRouter(prisma, uploadBankStatement));
   router.get('/employees', asyncHandler(async (_req, res) => {
     res.json(await prisma.employee.findMany({ orderBy: { name: 'asc' }, include: { payments: { orderBy: { paymentDate: 'desc' } } } }));
   }));
@@ -154,34 +147,9 @@ export function createFinanceRouter(prisma: PrismaClient) {
       })),
     });
   }));
-  router.post('/bank-import', asyncHandler(async (req, res) => {
-    if (!Array.isArray(req.body.transactions) || req.body.transactions.length < 1 || req.body.transactions.length > 1000) {
-      throw new ApiError(400, 'transactions must contain between 1 and 1000 reviewed statement rows');
-    }
-    const data: BankImportEntry[] = (req.body.transactions as unknown[]).map((value: unknown) => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError(400, 'Each transaction must be an object');
-      const transaction = value as Record<string, unknown>;
-      const sourceReference = requiredText(transaction.sourceReference, 'sourceReference');
-      if (!/^bank-import:v1:[0-9a-f]{64}$/.test(sourceReference)) throw new ApiError(400, 'sourceReference is not valid');
-      return {
-        type: validate(transaction.type, entryTypes, 'type'),
-        description: requiredText(transaction.description, 'description'),
-        category: optionalText(transaction.category, 'category') ?? null,
-        amount: positive(transaction.amount),
-        entryDate: date(transaction.entryDate, 'entryDate'),
-        sourceReference,
-        notes: 'Imported from a reviewed bank statement',
-      };
-    });
-    const existing = await prisma.financeEntry.findMany({
-      where: { sourceReference: { in: data.map((transaction) => transaction.sourceReference) } },
-      select: { sourceReference: true },
-    });
-    const existingReferences = new Set(existing.map((entry) => entry.sourceReference).filter((reference): reference is string => reference !== null));
-    const candidates = data.filter((transaction) => !existingReferences.has(transaction.sourceReference));
-    const result = await prisma.financeEntry.createMany({ data: candidates, skipDuplicates: true });
-    res.status(201).json({ imported: result.count, duplicates: data.length - result.count });
-  }));
+  router.post('/bank-import', (_req, _res, next) => {
+    next(new ApiError(409, 'Direct bank import has been replaced by Bank reconciliation. Upload the statement there and review matches before adding ledger entries.'));
+  });
   router.get('/payroll/w2', asyncHandler(async (req, res) => {
     const year = Number(req.query.year) || new Date().getFullYear();
     const runs = await prisma.payRun.findMany({ where: { payDate: { gte: new Date(year, 0, 1), lt: new Date(year + 1, 0, 1) } }, include: { employee: { select: { name: true } } } });

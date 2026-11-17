@@ -1,0 +1,94 @@
+.bank-reconciliation { display: flex; flex-direction: column; gap: 16px; }
+.bank-reconciliation .surface { padding: 18px; }
+.recon-header, .recon-toolbar, .recon-upload-footer, .recon-review-form, .recon-row-actions { display: flex; align-items: center; gap: 12px; }
+.recon-header { justify-content: space-between; align-items: flex-start; }
+.recon-header h2 { margin: 3px 0 6px; font-size: 26px; }
+.recon-header p:not(.eyebrow) { margin: 0; max-width: 760px; color: #62656b; line-height: 1.45; }
+.recon-status, .recon-badge { border-radius: 999px; padding: 6px 10px; white-space: nowrap; font-size: 12px; font-weight: 750; text-transform: capitalize; }
+.recon-badge.conflicting { white-space: normal; line-height: 1.25; }
+.recon-status.needs-review, .recon-badge.unmatched, .recon-badge.conflicting { color: #7a3d00; background: #fff0d6; }
+.recon-status.review-complete, .recon-badge.matched { color: #175b3a; background: #e2f5e9; }
+.recon-badge.excluded { color: #52565d; background: #eceef1; }
+.recon-toolbar { flex-wrap: wrap; padding: 12px 14px; background: #f7f7f8; border: 1px solid #e6e6e8; border-radius: 12px; }
+.recon-toolbar label, .recon-upload-fields label, .recon-review-form label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #4e5157; font-weight: 650; }
+.recon-toolbar select, .recon-upload input, .recon-review-form input, .recon-review-form select, .recon-review-form textarea { min-height: 38px; border: 1px solid #d5d7db; border-radius: 7px; padding: 8px 10px; color: #202126; background: white; font: inherit; }
+.recon-period { color: #5b5e65; font-size: 13px; }
+.recon-download-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.recon-alert { border-radius: 9px; padding: 11px 14px; font-weight: 650; }
+.recon-error { color: #812b24; background: #fff0ee; border: 1px solid #f0c1bb; }
+.recon-success { color: #175b3a; background: #eaf7ed; border: 1px solid #b9dfc5; }
+.recon-upload { display: flex; flex-direction: column; gap: 14px; }
+.recon-upload .surface-heading, .recon-highlights .surface-heading, .recon-statements .surface-heading, .recon-transactions .surface-heading, .recon-unbanked .surface-heading { margin-bottom: 0; }
+.recon-upload h3, .recon-highlights h3, .recon-statements h3, .recon-transactions h3, .recon-unbanked h3 { margin: 2px 0 5px; }
+.recon-upload .muted, .recon-transactions .muted, .recon-unbanked .muted { margin: 3px 0 0; }
+.recon-upload-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.recon-upload input { width: 100%; }
+.optional-label { color: #777b83; font-size: 11px; font-weight: 500; }
+.recon-upload-footer { justify-content: space-between; flex-wrap: wrap; color: #696c72; }
+.recon-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.recon-metric { display: flex; flex-direction: column; gap: 5px; min-height: 78px; padding: 13px; border: 1px solid #e4e5e8; border-radius: 11px; background: #fff; }
+.recon-metric span { color: #666971; font-size: 12px; }
+.recon-metric strong { font-size: 18px; }
+.recon-metric.warning { border-color: #efcf97; background: #fffaf0; }
+.recon-highlights ul { margin: 12px 0; padding-left: 21px; color: #45484e; }
+.recon-highlights li { margin: 5px 0; }
+.recon-review-counts { margin: 12px 0 0; padding: 9px 11px; border-radius: 8px; background: #f7f7f8; color: #555860; font-size: 13px; }
+.recon-review-counts strong { color: #25272c; }
+.recon-warning { color: #8a4b00; }
+.recon-disclaimer { margin: 14px 0 0; padding-top: 11px; border-top: 1px solid #e7e8ea; font-size: 12px; color: #666971; }
+.recon-table-scroll { width: 100%; overflow: auto; margin-top: 12px; border: 1px solid #e4e5e8; border-radius: 9px; }
+.recon-table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 13px; }
+.recon-table th, .recon-table td { padding: 10px 11px; text-align: left; vertical-align: top; border-bottom: 1px solid #ececef; }
+.recon-table th { background: #f7f7f8; color: #565960; font-size: 11px; text-transform: uppercase; letter-spacing: .035em; }
+.recon-table td strong, .recon-table td span { display: block; }
+.recon-table td span { margin-top: 3px; color: #70737a; font-size: 12px; }
+.recon-table tr:last-child td { border-bottom: 0; }
+.recon-balance-form { display: grid; grid-template-columns: repeat(2, minmax(125px, 1fr)); gap: 7px; min-width: 290px; }
+.recon-balance-form label { display: flex; flex-direction: column; gap: 4px; color: #565960; font-size: 11px; font-weight: 650; }
+.recon-balance-form input { width: 100%; min-height: 34px; padding: 6px 8px; border: 1px solid #d5d7db; border-radius: 6px; font: inherit; }
+.recon-balance-form button { grid-column: 1 / -1; justify-self: start; font-size: 12px; }
+.recon-transactions .surface-heading { display: flex; justify-content: space-between; align-items: flex-start; }
+.recon-transaction-list { display: flex; flex-direction: column; gap: 11px; margin-top: 14px; }
+.recon-transaction-card { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(300px, .95fr); gap: 16px; padding: 14px; border: 1px solid #e1e2e5; border-radius: 11px; background: #fff; }
+.recon-transaction-card.state-conflicting { border-color: #ecc588; background: #fffdf8; }
+.recon-transaction-title { display: flex; align-items: flex-start; gap: 9px; }
+.recon-transaction-title > strong { padding-top: 4px; font-size: 15px; overflow-wrap: anywhere; }
+.recon-transaction-facts { display: flex; flex-wrap: wrap; gap: 5px 14px; margin-top: 12px; color: #51545a; font-size: 12px; }
+.recon-transaction-facts b { color: #292b30; }
+.recon-reason, .recon-match-info { margin: 9px 0 0; color: #555860; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.recon-candidates { margin-top: 10px; padding: 9px 11px; background: #f7f7f8; border-radius: 8px; font-size: 12px; }
+.recon-candidates ul { padding-left: 18px; margin: 6px 0 0; }
+.recon-candidates li { margin: 4px 0; color: #555860; overflow-wrap: anywhere; }
+.recon-review-form { flex-direction: column; align-items: stretch; padding-left: 14px; border-left: 1px solid #e7e8ea; }
+.recon-review-form label { width: 100%; }
+.recon-review-form input, .recon-review-form select, .recon-review-form textarea { width: 100%; }
+.recon-review-form textarea { resize: vertical; }
+.recon-selection-note { margin: -4px 0 0; color: #5e6168; font-size: 12px; line-height: 1.4; }
+.recon-create-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; width: 100%; padding: 10px; border: 1px solid #e2e3e6; border-radius: 8px; background: #f8f8f9; }
+.recon-create-fields > strong, .recon-create-fields > p { grid-column: 1 / -1; margin: 0; }
+.recon-create-fields > p { color: #6a6d74; font-size: 11px; }
+.recon-row-actions { flex-wrap: wrap; }
+.recon-row-actions button { min-height: 35px; }
+.recon-reset-help { flex: 1 1 100%; color: #686b72; font-size: 12px; line-height: 1.4; }
+.recon-empty { margin: 12px 0 0; padding: 13px; border-radius: 8px; background: #f7f7f8; color: #686b72; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 900px) {
+  .recon-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .recon-upload-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .recon-transaction-card { grid-template-columns: 1fr; }
+  .recon-review-form { padding-left: 0; padding-top: 12px; border-left: 0; border-top: 1px solid #e7e8ea; }
+}
+@media (max-width: 600px) {
+  .recon-header { flex-direction: column; }
+  .recon-toolbar { align-items: stretch; }
+  .recon-toolbar label { min-width: 105px; flex: 1; }
+  .recon-download-actions { width: 100%; margin-left: 0; }
+  .recon-download-actions button { flex: 1; }
+  .recon-upload-fields, .recon-create-fields { grid-template-columns: 1fr; }
+  .recon-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .recon-transactions .surface-heading { flex-direction: column; }
+  .recon-transaction-card { padding: 11px; }
+  .recon-row-actions { align-items: stretch; }
+  .recon-row-actions button { flex: 1 1 100%; }
+}

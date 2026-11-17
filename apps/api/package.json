@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "test": "tsx --test test/authorization-pdf-layout.test.ts test/documenso.test.ts test/documenso-routes.test.ts test/mv104.test.ts test/claim-inspection.test.ts test/shop-time.test.ts test/payroll-calc.test.ts test/payroll-statement.test.ts test/bank-statement-import.test.ts test/finance-import-routes.test.ts",
+    "test": "tsx --test test/authorization-pdf-layout.test.ts test/documenso.test.ts test/documenso-routes.test.ts test/mv104.test.ts test/claim-inspection.test.ts test/shop-time.test.ts test/payroll-calc.test.ts test/payroll-statement.test.ts test/bank-statement-import.test.ts test/finance-import-routes.test.ts test/bank-reconciliation.test.ts",
     "start": "node dist/server.js",
+    "test:reconciliation-db": "tsx --test test/reconciliation-db.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",

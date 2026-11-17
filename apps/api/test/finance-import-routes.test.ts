@@ -6,6 +6,7 @@ import type { PrismaClient } from '@prisma/client';
 import { PDFDocument } from 'pdf-lib';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { createFinanceRouter } from '../src/routes/finance.js';
+import { errorHandler } from '../src/errors.js';
 
 type StoredEntry = { sourceReference: string | null; type: string; amount: number };
 
@@ -66,6 +67,7 @@ async function createServer(prisma: PrismaClient) {
   const app = express();
   app.use(express.json());
   app.use('/finance', createFinanceRouter(prisma));
+  app.use(errorHandler);
   const server = app.listen(0);
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const address = server.address() as AddressInfo;
@@ -80,7 +82,7 @@ function statementForm() {
   return form;
 }
 
-test('bank import preview and save are idempotent and owner transfers affect cash, not income', async (context) => {
+test('legacy bank preview identifies owner transfers but unsafe direct import is retired', async (context) => {
   const { entries, prisma } = createPrisma();
   const { baseUrl, server } = await createServer(prisma);
   context.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
@@ -98,21 +100,9 @@ test('bank import preview and save are idempotent and owner transfers affect cas
     body: JSON.stringify({ transactions: preview.transactions }),
   });
   const firstSave = await save();
-  assert.equal(firstSave.status, 201);
-  assert.deepEqual(await firstSave.json(), { imported: 1, duplicates: 0 });
-  assert.equal(entries[0].type, 'transfer_in');
-
-  const duplicatePreviewResponse = await fetch(`${baseUrl}/bank-import/preview`, { method: 'POST', body: statementForm() });
-  const duplicatePreview = await duplicatePreviewResponse.json() as { transactions: Array<{ duplicate: boolean }> };
-  assert.equal(duplicatePreview.transactions[0].duplicate, true);
-  const secondSave = await save();
-  assert.deepEqual(await secondSave.json(), { imported: 0, duplicates: 1 });
-
-  const balanceResponse = await fetch(`${baseUrl}/bank-balance`);
-  assert.deepEqual(await balanceResponse.json(), { startingBalance: 100, income: 500, expenses: 0, currentBalance: 600 });
-  const summaryResponse = await fetch(`${baseUrl}/summary?period=year`);
-  const summary = await summaryResponse.json() as { income: number; expenses: number };
-  assert.deepEqual({ income: summary.income, expenses: summary.expenses }, { income: 0, expenses: 0 });
+  assert.equal(firstSave.status, 409);
+  assert.match((await firstSave.json() as { error: string }).error, /reconciliation/);
+  assert.equal(entries.length, 0);
 });
 
 test('pay-run statement endpoint returns a downloadable one-page PDF', async (context) => {

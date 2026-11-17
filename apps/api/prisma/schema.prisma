@@ -469,6 +469,48 @@ model FinanceEntry {
   @@map("finance_entries")
 }
 
+model BankStatement {
+  id             String   @id @default(cuid())
+  accountKey     String
+  accountName    String
+  fileName       String
+  fileHash       String
+  periodStart    DateTime
+  periodEnd      DateTime
+  openingBalance Float?
+  closingBalance Float?
+  warnings       String[]
+  createdAt      DateTime @default(now())
+  transactions   BankTransaction[]
+
+  @@unique([accountKey, fileHash])
+  @@index([periodStart, periodEnd])
+  @@map("bank_statements")
+}
+
+model BankTransaction {
+  id              String   @id @default(cuid())
+  accountKey      String
+  sourceReference String
+  entryDate       DateTime?
+  originalDate    String?
+  description     String
+  amount          Float
+  direction       String
+  type            String
+  category        String?
+  status          String   @default("pending")
+  matchedSource   String?  @unique
+  reviewNote      String?
+  reviewedAt      DateTime?
+  createdAt       DateTime @default(now())
+  statements      BankStatement[]
+
+  @@unique([accountKey, sourceReference])
+  @@index([entryDate])
+  @@map("bank_transactions")
+}
+
 model FinanceEntryDocument {
   id        String   @id @default(cuid())
   entryId   String

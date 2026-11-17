@@ -24,6 +24,31 @@ In Bookkeeping's payroll pay-run list, use **Print PDF** to download an employee
 
 Pay runs currently store a pay date and weekly amounts, not hours or separate work-period dates. The displayed weekly period is the seven days ending on the pay date. Employee addresses and unrecorded hours are not fabricated; an SSN is displayed only as a masked last four digits when available.
 
+## Bank reconciliation and quarterly reporting
+
+Open **Bookkeeping > Bank reconciliation** (or **Import bank statement** on the ledger). Select the quarter/year, give the bank account a consistent label, and upload each PDF/CSV with its statement start/end dates. Opening and closing balances are optional but required to verify the statement movement; they can be filled in or corrected afterward. Uploading saves the bank evidence separately and **does not add income or expenses**. The account label distinguishes accounts; use the same label for later statements from the same account.
+
+Review each bank row:
+
+- **Match** links an existing invoice payment, job payment, ledger entry, job expense, paid recurring expense, payroll payment, or rental receipt. Exact amount and cash direction are required; a date difference over seven days needs an explanation. Suggestions are never automatically confirmed, and a bookkeeping record cannot clear two bank rows.
+- **Create** adds one bank-only ledger entry after explicit review of its type and category. A possible existing match requires an explanation before creating a separate record. Rows imported by the earlier importer must be matched to their existing ledger entries, not imported again.
+- **Exclude** requires a reason and does not change bank movement totals. Use transfers rather than income/expenses when appropriate.
+- **Reset** reopens a reviewed match. If the bank row created a ledger entry, remove that entry first before changing the decision; the workflow never silently deletes financial records. Changed/deleted internal records invalidate their saved match and appear as conflicts.
+
+Repeated uploads of the same file/account are reused. Overlapping statements share identical parsed transactions for that account; different descriptions, account labels, or differently grouped deposits can still require duplicate review. Partial payments, bank fees, or grouped deposits are flagged for manual review; the tool does not invent split allocations. Record/adjust the actual underlying payment(s) before confirming a one-to-one match.
+
+Download **Quarterly PDF packet** for the printable summary, highlighted exceptions, statement register/balance checks, every bank transaction and matching decision, combined internal bookkeeping support, internal-only exceptions, invoice register, and calculated payroll runs. **Transaction CSV** provides the same supporting data for spreadsheet/CPA review. The report uses cash-basis recorded transactions; unpaid invoices and calculated pay runs are listed separately, not added/subtracted again as cash. Invoice paid/balance fields are current values, not reconstructed historical quarter-end balances.
+
+Matched bank rows are not added a second time to income/expenses. Job expenses already synced to the ledger are counted once using their explicit source link. Independently entered records across bookkeeping modules are not assumed to be duplicates merely because amounts match; review and correct those records before relying on totals. Confirm that all business accounts and all quarter statements have been supplied. Missing coverage, parser warnings, unchecked/different balances, unresolved rows, timing differences, and internal-only records remain visible. This is a review packet, **not an audited reconciliation, certified earnings report, or tax filing**. Original uploaded file bytes are not retained by this workflow; retain the original statements with the exported packet. Parsed transaction details, source hashes and review decisions are retained in the database.
+
+### Reconciliation rollout and validation
+
+Back up the database, then run `npm run db:migrate --workspace apps/api` before starting the updated API. Migration `20261117140000_bank_reconciliation` adds only new bank statement/transaction tables, indexes, and their join table; existing financial data is unchanged and old application versions can still run. The old direct `/finance/bank-import` save endpoint now returns an explicit conflict directing clients to reconciliation, so refresh older browser tabs after deployment.
+
+For application rollback, run the prior application version and retain the additive tables and review evidence. Bank-only ledger entries explicitly created by reviewers remain real bookkeeping records; rollback must not delete them. No destructive down migration is run automatically.
+
+`npm test --workspace apps/api` covers pure reconciliation and packet generation. For persisted route/matching tests, migrate a separate disposable PostgreSQL database whose name contains `reconciliation_test`, set both `DATABASE_URL` (migration) and `RECONCILIATION_TEST_DATABASE_URL` (test) to that database, then run `npm run test:reconciliation-db --workspace apps/api`. Never point this fixture-writing test at a live shop database.
+
 ## Local setup
 
 Development login defaults to `admin@mastercraftautony.com` / `Mastercraft2026!`. Override `DEFAULT_ADMIN_EMAIL` and `DEFAULT_ADMIN_PASSWORD` in `apps/api/.env`; do not use predictable defaults in production.
