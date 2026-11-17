@@ -196,7 +196,7 @@
 .ledger-sheet { width: min(100%, 380px); height: 100%; max-height: none; border-radius: 0; border-width: 0 0 0 1px; }
 
 /* Ledger table: macOS-style rows and pills, per the design. */
-.ledger-panel .finance-table-wrap { border-radius: 10px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .08); overflow: hidden; background: #fff; }
+.ledger-panel .finance-table-wrap { border-radius: 10px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .08); overflow: auto; background: #fff; }
 .ledger-panel .finance-table thead th { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600; color: #6e6e73; background: #f6f6f8; padding: 9px 14px; }
 .ledger-panel .finance-table tbody td { padding: 11px 14px; border-bottom: 1px solid rgba(0, 0, 0, .06); vertical-align: middle; }
 .ledger-panel .finance-table tbody tr:hover { background: #fafafc; }

@@ -67,6 +67,13 @@ function workbookBytes(summary: SheetCell[][], transactions: SheetCell[][]) {
   return zipSync(files, { level: 6 });
 }
 
+// month filter: "all", "01".."12", or "q1".."q4"
+export function periodMatches(entryMonth: string, period: string) {
+  if (period === "all") return true;
+  if (period.startsWith("q")) return Math.ceil(Number(entryMonth) / 3) === Number(period.slice(1));
+  return entryMonth === period;
+}
+
 export function createMonthlyStatementWorkbook(
   entries: readonly StatementEntry[],
   year: string,
@@ -76,7 +83,7 @@ export function createMonthlyStatementWorkbook(
   const filtered = entries
     .filter((entry) =>
       entry.entryDate.slice(0, 4) === year
-      && (month === "all" || entry.entryDate.slice(5, 7) === month)
+      && periodMatches(entry.entryDate.slice(5, 7), month)
       && (type === "all" || entry.type === type))
     .sort((left, right) =>
       Number(right.type === "income") - Number(left.type === "income")
@@ -85,7 +92,9 @@ export function createMonthlyStatementWorkbook(
   const expenses = filtered.filter((entry) => entry.type === "expense").reduce((sum, entry) => sum + entry.amount, 0);
   const period = month === "all"
     ? year
-    : `${new Date(Number(year), Number(month) - 1, 1).toLocaleString("en-US", { month: "long" })} ${year}`;
+    : month.startsWith("q")
+      ? `Q${month.slice(1)} ${year}`
+      : `${new Date(Number(year), Number(month) - 1, 1).toLocaleString("en-US", { month: "long" })} ${year}`;
   const summary: SheetCell[][] = [
     [{ value: "MASTERCRAFT AUTO REPAIR & COLLISION", style: 2 }],
     [{ value: month === "all" ? "Annual Statement" : "Monthly Statement", style: 2 }],
@@ -124,7 +133,7 @@ export function downloadMonthlyStatement(
   }));
   const link = document.createElement("a");
   link.href = url;
-  link.download = `mastercraft-statement-${year}${month === "all" ? "" : `-${month}`}${type === "all" ? "" : `-${type}`}.xlsx`;
+  link.download = `mastercraft-statement-${year}${month === "all" ? "" : `-${month.startsWith("q") ? month.toUpperCase() : month}`}${type === "all" ? "" : `-${type}`}.xlsx`;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

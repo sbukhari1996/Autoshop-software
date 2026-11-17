@@ -1,5 +1,5 @@
 import React from "react";
-import { downloadMonthlyStatement } from "./monthlyStatement";
+import { downloadMonthlyStatement, periodMatches } from "./monthlyStatement";
 import { formatLedgerDate } from "./ledgerDate";
 import "./ledger-mobile.css";
 import "./bookkeeping-design.css";
@@ -218,7 +218,7 @@ export function BookkeepingView({
   ])].sort((left, right) => Number(right) - Number(left));
   const filteredEntries = entries.filter((item) => {
     const [year, month] = item.entryDate.slice(0, 7).split("-");
-    if (year !== ledgerYear || (ledgerMonth !== "all" && month !== ledgerMonth)) return false;
+    if (year !== ledgerYear || !periodMatches(month, ledgerMonth)) return false;
     if (ledgerType !== "all" && item.type !== ledgerType) return false;
     const query = ledgerSearch.trim().toLocaleLowerCase();
     if (!query) return true;
@@ -709,6 +709,10 @@ export function BookkeepingView({
                 Month
                 <select value={ledgerMonth} onChange={(event) => setLedgerMonth(event.target.value)}>
                   <option value="all">All months</option>
+                  <option value="q1">Q1 (Jan–Mar)</option>
+                  <option value="q2">Q2 (Apr–Jun)</option>
+                  <option value="q3">Q3 (Jul–Sep)</option>
+                  <option value="q4">Q4 (Oct–Dec)</option>
                   {Array.from({ length: 12 }, (_, index) => {
                     const month = String(index + 1).padStart(2, "0");
                     return <option value={month} key={month}>{new Date(`2026-${month}-15T12:00:00`).toLocaleDateString(undefined, { month: "long" })}</option>;
