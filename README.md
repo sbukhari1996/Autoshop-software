@@ -18,6 +18,12 @@ Save an **Adjuster visit** date/time on a claim to create a linked inspection in
 
 Editing a linked schedule event updates the claim's visit and adjuster details too. Completing, cancelling, or deleting that event clears the claim visit when it matches the event; clearing the matching visit in the claim cancels the scheduled event. Other scheduled events and inspection notes are preserved. **Inspection scheduled** is also available as a claim status; choosing that status alone does not set an appointment time.
 
+## Weekly payroll statements
+
+In Bookkeeping's payroll pay-run list, use **Print PDF** to download an employee's one-page pay stub. The statement includes employee information, weekly pay-period dates, and current-pay and year-to-date columns for gross earnings, each employee tax/deduction, net pay, and employer-paid taxes. YTD totals use only that employee's recorded pay runs dated January 1 through the selected paycheck's pay date, including that paycheck; they exclude later checks and other years. Changing current tax settings does not recalculate recorded amounts.
+
+Pay runs currently store a pay date and weekly amounts, not hours or separate work-period dates. The displayed weekly period is the seven days ending on the pay date. Employee addresses and unrecorded hours are not fabricated; an SSN is displayed only as a masked last four digits when available.
+
 ## Local setup
 
 Development login defaults to `admin@mastercraftautony.com` / `Mastercraft2026!`. Override `DEFAULT_ADMIN_EMAIL` and `DEFAULT_ADMIN_PASSWORD` in `apps/api/.env`; do not use predictable defaults in production.

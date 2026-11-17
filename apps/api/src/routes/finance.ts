@@ -11,7 +11,7 @@ import { defaultTaxSettings } from '../payroll-tax-defaults.js';
 import { payRunAmounts } from '../payroll-calc.js';
 import { buildTaxPacket } from '../tax-packet.js';
 import { parseBankStatement } from '../bank-statement-import.js';
-import { buildPayrollStatementPdf } from '../payroll-statement.js';
+import { buildPayrollStatementPdf, totalPayrollAmounts } from '../payroll-statement.js';
 
 const entryTypes = ['income', 'expense', 'transfer_in', 'transfer_out'] as const;
 const frequencies = ['weekly', 'monthly', 'yearly'] as const;
@@ -123,10 +123,16 @@ export function createFinanceRouter(prisma: PrismaClient) {
   router.get('/payroll/runs/:id/statement', asyncHandler(async (req, res) => {
     const run = await prisma.payRun.findUnique({
       where: { id: requiredText(req.params.id, 'id') },
-      include: { employee: { select: { name: true, role: true } } },
+      include: { employee: { select: { name: true, role: true, ssnLast4: true } } },
     });
     if (!run) throw new ApiError(404, 'Pay run not found');
-    const pdf = await buildPayrollStatementPdf(run);
+    const yearRuns = await prisma.payRun.findMany({
+      where: {
+        employeeId: run.employeeId,
+        payDate: { gte: new Date(Date.UTC(run.payDate.getUTCFullYear(), 0, 1)), lte: run.payDate },
+      },
+    });
+    const pdf = await buildPayrollStatementPdf(run, totalPayrollAmounts(yearRuns));
     const employeeFileName = run.employee.name.normalize('NFKD').replace(/[^a-zA-Z0-9-]+/g, '-').replace(/^-|-$/g, '') || 'employee';
     res.type('application/pdf').attachment(`pay-statement-${employeeFileName}-${run.payDate.toISOString().slice(0, 10)}.pdf`).send(pdf);
   }));
