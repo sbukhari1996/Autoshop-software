@@ -25,6 +25,16 @@ type FinanceEntryDocument = { id: string; fileName: string; createdAt: string };
 type LedgerCustomer = { id: string; firstName: string; lastName: string };
 type LedgerVehicle = { id: string; customerId: string; year: number | null; make: string | null; model: string | null };
 type LedgerJob = { id: string; jobNumber: string; customerId: string; vehicleId: string | null };
+async function downloadTaxPacket(year: string, quarter: string) {
+  const response = await fetch(`${API_URL}/finance/tax-packet?year=${year}&quarter=${quarter.slice(1)}`, { headers: { Authorization: `Bearer ${localStorage.getItem("repairos_token") || ""}` } });
+  if (!response.ok) throw new Error("Unable to build the tax packet");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `tax-packet-${year}-${quarter.toUpperCase()}.csv`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 function blankEmployee() {
   return { name: "", role: "", phone: "", weeklyRate: "", startDate: new Date().toISOString().slice(0, 10), ssnLast4: "", federalFilingStatus: "single", w4Step2Checked: false, nysAllowances: "0", nycResident: false };
 }
@@ -767,6 +777,14 @@ export function BookkeepingView({
                 onClick={() => downloadMonthlyStatement(selectedEntries.length ? selectedEntries : filteredEntries, ledgerYear, ledgerMonth, ledgerType)}
               >
                 Download statement
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                title="Choose Q1 to Q4 in the Month filter first"
+                onClick={() => (ledgerMonth.startsWith("q") ? downloadTaxPacket(ledgerYear, ledgerMonth).catch((packetError) => setError(packetError instanceof Error ? packetError.message : "Unable to build the tax packet")) : setError("Choose Q1 to Q4 in the Month filter to build the CPA packet."))}
+              >
+                CPA packet
               </button>
               <button className="text-button" onClick={() => openEntryForm()}>
                 Add entry <span>+</span>

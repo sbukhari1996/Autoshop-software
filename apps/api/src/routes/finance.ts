@@ -9,6 +9,7 @@ import { receiptPdf } from '../receipt-pdf.js';
 import { optionalBoolean, optionalDate, optionalInteger, optionalText, requiredText } from '../validation.js';
 import { defaultTaxSettings } from '../payroll-tax-defaults.js';
 import { payRunAmounts } from '../payroll-calc.js';
+import { buildTaxPacket } from '../tax-packet.js';
 
 const entryTypes = ['income', 'expense'] as const;
 const frequencies = ['weekly', 'monthly', 'yearly'] as const;
@@ -17,7 +18,7 @@ const uploadDirectory = path.resolve(process.env.UPLOAD_DIR || 'uploads');
 const receiptUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 async function loadTaxSettings(prisma: PrismaClient, year: number) {
-  if (!(await prisma.taxSetting.count({ where: { year } }))) await prisma.taxSetting.createMany({ data: defaultTaxSettings(year) });
+  await prisma.taxSetting.createMany({ data: defaultTaxSettings(year), skipDuplicates: true });
   return Object.fromEntries((await prisma.taxSetting.findMany({ where: { year } })).map((row) => [row.key, row.value]));
 }
 
@@ -112,6 +113,20 @@ export function createFinanceRouter(prisma: PrismaClient) {
       byEmployee.set(run.employeeId, row);
     }
     res.json([...byEmployee.values()].sort((left, right) => String(left.name).localeCompare(String(right.name))));
+  }));
+  router.get('/tax-packet', asyncHandler(async (req, res) => {
+    const year = Number(req.query.year) || new Date().getFullYear();
+    const quarter = Number(req.query.quarter);
+    if (![1, 2, 3, 4].includes(quarter)) throw new ApiError(400, 'quarter must be 1 to 4');
+    const settings = await loadTaxSettings(prisma, year);
+    const periodEnd = new Date(year, quarter * 3, 1);
+    const yearStart = new Date(year, 0, 1);
+    const quarterStart = new Date(year, (quarter - 1) * 3, 1);
+    const entries = await prisma.financeEntry.findMany({ where: { entryDate: { gte: yearStart, lt: periodEnd } } });
+    const runs = await prisma.payRun.findMany({ where: { payDate: { gte: yearStart, lt: periodEnd } }, include: { employee: { select: { name: true } } } });
+    const rows = buildTaxPacket({ year, quarter, quarterStart, entries, runs, settings });
+    const csv = rows.map((row) => row.map((cell) => (/[",\n]/.test(String(cell)) ? `"${String(cell).replaceAll('"', '""')}"` : String(cell))).join(',')).join('\n');
+    res.type('text/csv').attachment(`tax-packet-${year}-Q${quarter}.csv`).send(csv);
   }));
   router.delete('/employees/:id', asyncHandler(async (req, res) => { await prisma.employee.delete({ where: { id: requiredText(req.params.id, 'id') } }); res.status(204).send(); }));
   router.get('/payroll', asyncHandler(async (_req, res) => {

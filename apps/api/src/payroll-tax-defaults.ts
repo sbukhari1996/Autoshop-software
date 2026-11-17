@@ -10,4 +10,10 @@ export const defaultTaxSettings = (year: number) => [
   { key: 'nys_sdi_rate', label: 'NYS disability (SDI) rate', value: 0.005, notes: 'verify' },
   { key: 'nys_sdi_weekly_max', label: 'NYS SDI max per week', value: 0.6, notes: 'verify' },
   { key: 'nys_pfl_rate', label: 'NYS paid family leave rate', value: 0.00388, notes: 'verify' },
+  // Self-employed estimate (CPA packet)
+  { key: 'se_rate', label: 'Self-employment tax rate (combined)', value: 0.153, notes: 'verify' },
+  { key: 'federal_standard_deduction_single', label: 'Federal standard deduction (single)', value: 16100, notes: 'verify' },
+  { key: 'nys_standard_deduction_single', label: 'NYS standard deduction (single)', value: 8000, notes: 'verify' },
+  { key: 'nyc_ubt_rate', label: 'NYC unincorporated business tax rate', value: 0.04, notes: 'rough: NYC-202 has credits and phase-outs' },
+  { key: 'nyc_ubt_allowance', label: 'NYC UBT allowance', value: 5000, notes: 'verify' },
 ].map((setting) => ({ year, ...setting }));
