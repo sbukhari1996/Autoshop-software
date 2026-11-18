@@ -60,9 +60,10 @@ export function createInvoicesRouter(prisma: PrismaClient) {
     const links = await validateLinks(prisma, req.body.customerId, req.body.jobId, req.body.claimId);
     const lineItems = parseLineItems(req.body.lineItems);
     const invoice = await prisma.$transaction(async (tx) => {
-      const totals = totalsFor(lineItems, req.body.taxRate);
+      const discount = parseDiscount(req.body);
+      const totals = totalsFor(lineItems, req.body.taxRate, discount);
       const invoiceNumber = optionalText(req.body.invoiceNumber, 'invoiceNumber') || await nextInvoiceNumber(tx);
-      return tx.invoice.create({ data: { invoiceNumber, customerId: links.customerId, jobId: links.jobId, claimId: links.claimId, ...parseWalkInDetails(req.body), status: req.body.status === undefined ? 'draft' : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate ? parseDate(req.body.issueDate, 'issueDate') : new Date(), dueDate: req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : undefined, subtotal: totals.subtotal, tax: totals.tax, total: totals.total, amountPaid: 0, balanceDue: totals.total, notes: optionalText(req.body.notes, 'notes'), lineItems: { create: lineItems } }, include: { lineItems: true, payments: true } });
+      return tx.invoice.create({ data: { invoiceNumber, customerId: links.customerId, jobId: links.jobId, claimId: links.claimId, ...parseWalkInDetails(req.body), status: req.body.status === undefined ? 'draft' : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate ? parseDate(req.body.issueDate, 'issueDate') : new Date(), dueDate: req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : undefined, subtotal: totals.subtotal, discountType: discount.type, discountValue: discount.value, discountAmount: totals.discountAmount, tax: totals.tax, total: totals.total, amountPaid: 0, balanceDue: totals.total, notes: optionalText(req.body.notes, 'notes'), lineItems: { create: lineItems } }, include: { lineItems: true, payments: true } });
     });
     res.status(201).json(invoice);
   }));
@@ -94,11 +95,17 @@ export function createInvoicesRouter(prisma: PrismaClient) {
     const links = await validateLinks(prisma, req.body.customerId === undefined ? existing.customerId : req.body.customerId, req.body.jobId === undefined ? existing.jobId : req.body.jobId, req.body.claimId === undefined ? existing.claimId : req.body.claimId);
     const lineItems = req.body.lineItems === undefined ? undefined : parseLineItems(req.body.lineItems);
     const invoice = await prisma.$transaction(async (tx) => {
-      const totals = lineItems ? totalsFor(lineItems, req.body.taxRate) : undefined;
+      const discountChanged = req.body.discountType !== undefined || req.body.discountValue !== undefined;
+      const discount = parseDiscount(req.body, existing);
+      const items = lineItems ?? (discountChanged || req.body.taxRate !== undefined ? await tx.invoiceLineItem.findMany({ where: { invoiceId: id } }) : undefined);
+      // Keep the invoice's current tax rate when only the discount changes.
+      const taxableBefore = existing.subtotal - existing.discountAmount;
+      const currentRate = taxableBefore > 0 ? existing.tax * 100 / taxableBefore : defaultTaxRate;
+      const totals = items ? totalsFor(items, req.body.taxRate ?? currentRate, discount) : undefined;
       if (lineItems) await tx.invoiceLineItem.deleteMany({ where: { invoiceId: id } });
       const amountPaid = existing.amountPaid;
       const total = totals?.total ?? existing.total;
-      return tx.invoice.update({ where: { id }, data: { customerId: links.customerId, jobId: links.jobId, claimId: links.claimId, ...parseWalkInDetails(req.body), status: req.body.status === undefined ? undefined : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate === undefined ? undefined : parseDate(req.body.issueDate, 'issueDate'), dueDate: req.body.dueDate === undefined ? undefined : (req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : null), subtotal: totals?.subtotal, tax: totals?.tax, total, balanceDue: Math.max(0, total - amountPaid), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'), lineItems: lineItems ? { create: lineItems } : undefined }, include: { lineItems: true, payments: true } });
+      return tx.invoice.update({ where: { id }, data: { customerId: links.customerId, jobId: links.jobId, claimId: links.claimId, ...parseWalkInDetails(req.body), status: req.body.status === undefined ? undefined : validate(req.body.status, statuses, 'status'), issueDate: req.body.issueDate === undefined ? undefined : parseDate(req.body.issueDate, 'issueDate'), dueDate: req.body.dueDate === undefined ? undefined : (req.body.dueDate ? parseDate(req.body.dueDate, 'dueDate') : null), subtotal: totals?.subtotal, discountType: totals ? discount.type : undefined, discountValue: totals ? discount.value : undefined, discountAmount: totals?.discountAmount, tax: totals?.tax, total, balanceDue: Math.max(0, total - amountPaid), notes: req.body.notes === undefined ? undefined : optionalText(req.body.notes, 'notes'), lineItems: lineItems ? { create: lineItems } : undefined }, include: { lineItems: true, payments: true } });
     });
     res.json(invoice);
   }));
@@ -219,7 +226,17 @@ function parseWalkInDetails(body: Record<string, unknown>) {
     walkInVehicleState: optionalText(body.walkInVehicleState, 'walkInVehicleState')?.toUpperCase(),
   };
 }
-function totalsFor(items: Array<{ quantity: number; unitPrice: number }>, taxRateValue: unknown) { const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100; const subtotal = roundCurrency(items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)); const taxRate = taxRateValue === undefined ? defaultTaxRate : nonNegative(taxRateValue); const tax = roundCurrency(subtotal * taxRate / 100); const total = roundCurrency(subtotal + tax); return { subtotal, tax, total }; }
+function totalsFor(items: Array<{ quantity: number; unitPrice: number }>, taxRateValue: unknown, discount: Discount = { type: null, value: 0 }) { const roundCurrency = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100; const subtotal = roundCurrency(items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0)); const discountAmount = roundCurrency(Math.min(subtotal, discount.type === 'percent' ? subtotal * discount.value / 100 : discount.value)); const taxRate = taxRateValue === undefined ? defaultTaxRate : nonNegative(taxRateValue); const tax = roundCurrency((subtotal - discountAmount) * taxRate / 100); const total = roundCurrency(subtotal - discountAmount + tax); return { subtotal, discountAmount, tax, total }; }
+// Discount from the request: a percent (0-100) or a dollar amount. Missing means no discount.
+type Discount = { type: 'percent' | 'amount' | null; value: number };
+function parseDiscount(body: Record<string, unknown>, existing?: { discountType: string | null; discountValue: number }): Discount {
+  if (body.discountType === undefined && body.discountValue === undefined) return existing ? { type: existing.discountType as Discount['type'], value: existing.discountValue } : { type: null, value: 0 };
+  if (body.discountType === null || body.discountType === '' || Number(body.discountValue || 0) === 0) return { type: null, value: 0 };
+  const type = validate(body.discountType, ['percent', 'amount'] as const, 'discountType') as 'percent' | 'amount';
+  const value = nonNegative(body.discountValue);
+  if (type === 'percent' && value > 100) throw new ApiError(400, 'discount percent cannot be over 100');
+  return { type, value };
+}
 function routeParam(req: { params: Record<string, string | string[]> }, name: string) { const value = req.params[name]; if (typeof value !== 'string' || !value) throw new ApiError(400, `${name} is required`); return value; }
 function parseDate(value: unknown, field: string) { const result = new Date(String(value)); if (Number.isNaN(result.getTime())) throw new ApiError(400, `${field} must be a valid date`); return result; }
 function positive(value: unknown) { const result = Number(value); if (!Number.isFinite(result) || result <= 0) throw new ApiError(400, 'amount must be a positive number'); return result; }
@@ -448,6 +465,7 @@ async function createInvoicePdf(invoice: {
   const totalsWidth = width - 300;
   const totalRows: Array<[string, string, boolean?]> = [
     ['Subtotal', money(invoice.subtotal)],
+    ...(invoice.discountAmount > 0 ? [[invoice.discountType === 'percent' ? `Discount (${invoice.discountValue}%)` : 'Discount', `-${money(invoice.discountAmount)}`] as [string, string]] : []),
     ['Sales tax', money(invoice.tax)],
     ['Total', money(invoice.total), true],
     ['Amount paid', money(invoice.amountPaid)],

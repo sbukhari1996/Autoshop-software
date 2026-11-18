@@ -11,6 +11,7 @@ export type InvoicePreviewData = {
   lines: { description: string; quantity: number; unitPrice: number }[];
   taxRate: number;
   subtotal: number;
+  discount?: number;
   tax: number;
   total: number;
   amountPaid?: number;
@@ -77,6 +78,7 @@ export function InvoicePreview({ data }: { data: InvoicePreviewData }) {
 
       <div className="inv-totals">
         <div><span>Subtotal</span><b>{money(data.subtotal)}</b></div>
+        {!!data.discount && <div><span>Discount</span><b>-{money(data.discount)}</b></div>}
         <div><span>Sales tax ({data.taxRate || 0}%)</span><b>{money(data.tax)}</b></div>
         <div className="inv-grand"><span>Total cost of repairs</span><b>{money(data.total)}</b></div>
         {data.amountPaid !== undefined && <>

@@ -679,6 +679,9 @@ model Invoice {
   issueDate     DateTime  @default(now())
   dueDate       DateTime?
   subtotal      Float     @default(0)
+  discountType  String?
+  discountValue Float     @default(0)
+  discountAmount Float    @default(0)
   tax           Float     @default(0)
   total         Float     @default(0)
   amountPaid    Float     @default(0)

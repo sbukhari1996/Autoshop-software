@@ -9,7 +9,7 @@ type Claim = { id: string; claimNumber: string | null; customer: Customer };
 type LineItem = { id?: string; description: string; quantity: number | string; unitPrice: number | string };
 type Payment = { id: string; method: string; amount: number; date: string; notes: string | null };
 type InvoiceDocument = { id: string; fileName: string; documentType: string; description: string | null; createdAt: string };
-export type Invoice = { id: string; invoiceNumber: string; customerId?: string | null; customer: Customer | null; jobId?: string | null; job?: { id: string; jobNumber: string } | null; claimId?: string | null; claim?: { id: string; claimNumber: string | null } | null; walkInCustomerName?: string | null; walkInCustomerAddress?: string | null; walkInCustomerPhone?: string | null; walkInCustomerEmail?: string | null; walkInVehicleYear?: number | null; walkInVehicleMake?: string | null; walkInVehicleModel?: string | null; walkInVehicleTrim?: string | null; walkInVehicleVin?: string | null; walkInVehicleLicense?: string | null; walkInVehicleState?: string | null; status: string; issueDate: string; dueDate: string | null; subtotal: number; tax: number; total: number; amountPaid: number; balanceDue: number; lineItems: LineItem[]; payments: Payment[]; documents?: InvoiceDocument[]; notes: string | null };
+export type Invoice = { id: string; invoiceNumber: string; customerId?: string | null; customer: Customer | null; jobId?: string | null; job?: { id: string; jobNumber: string } | null; claimId?: string | null; claim?: { id: string; claimNumber: string | null } | null; walkInCustomerName?: string | null; walkInCustomerAddress?: string | null; walkInCustomerPhone?: string | null; walkInCustomerEmail?: string | null; walkInVehicleYear?: number | null; walkInVehicleMake?: string | null; walkInVehicleModel?: string | null; walkInVehicleTrim?: string | null; walkInVehicleVin?: string | null; walkInVehicleLicense?: string | null; walkInVehicleState?: string | null; status: string; issueDate: string; dueDate: string | null; subtotal: number; discountType?: string | null; discountValue?: number; discountAmount?: number; tax: number; total: number; amountPaid: number; balanceDue: number; lineItems: LineItem[]; payments: Payment[]; documents?: InvoiceDocument[]; notes: string | null };
 type Request = <T>(path: string, options?: RequestInit) => Promise<T>;
 type FormLine = { description: string; quantity: string; unitPrice: string };
 type PdfResult = { downloadUrl: string; fileName: string };
@@ -65,6 +65,8 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
   const [number, setNumber] = React.useState(invoice?.invoiceNumber || "");
   const [issueDate, setIssueDate] = React.useState(invoice?.issueDate?.slice(0, 10) || today());
   const [dueDate, setDueDate] = React.useState(invoice?.dueDate?.slice(0, 10) || today());
+  const [discountType, setDiscountType] = React.useState<"amount" | "percent">(invoice?.discountType === "percent" ? "percent" : "amount");
+  const [discountValue, setDiscountValue] = React.useState(String(invoice?.discountValue ?? 0));
   const [taxRate, setTaxRate] = React.useState(invoice ? String(Number((invoice.tax * 100 / Math.max(invoice.subtotal, 0.01)).toFixed(3))) : "8.875");
   const [lines, setLines] = React.useState<FormLine[]>(invoice?.lineItems.map((line) => ({ description: line.description, quantity: String(line.quantity), unitPrice: String(line.unitPrice) })) || [freshLine()]);
   const [payment, setPayment] = React.useState({ method: "cash", amount: "", date: today(), notes: "" });
@@ -110,9 +112,10 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
   const availableJobs = jobs.filter((job) => job.customer.id === customerId);
   const availableClaims = claims.filter((claim) => claim.customer.id === customerId);
   const subtotal = lines.reduce((sum, line) => sum + Number(line.quantity || 0) * Number(line.unitPrice || 0), 0);
-  const tax = subtotal * Number(taxRate || 0) / 100;
-  const total = subtotal + tax;
-  async function save(event: React.FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { await request(mode === "create" ? "/invoices" : `/invoices/${invoice?.id}`, { method: mode === "create" ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customerId: customerId || null, jobId: jobId || null, claimId: claimId || null, walkInCustomerName: customerId ? null : walkInCustomerName, walkInCustomerAddress: customerId ? null : walkInCustomerAddress, walkInCustomerPhone: customerId ? null : walkInCustomerPhone, walkInCustomerEmail: customerId ? null : walkInCustomerEmail, walkInVehicleYear: walkInVehicleYear ? Number(walkInVehicleYear) : null, walkInVehicleMake, walkInVehicleModel, walkInVehicleTrim, walkInVehicleVin, walkInVehicleLicense, walkInVehicleState, invoiceNumber: number || undefined, issueDate, dueDate: dueDate || undefined, taxRate: Number(taxRate || 0), lineItems: lines.map((line) => ({ description: line.description, quantity: Number(line.quantity), unitPrice: Number(line.unitPrice) })) }) }); await onSaved(); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to save invoice"); } finally { setBusy(false); } }
+  const discountAmount = Math.min(subtotal, discountType === "percent" ? subtotal * Number(discountValue || 0) / 100 : Number(discountValue || 0));
+  const tax = (subtotal - discountAmount) * Number(taxRate || 0) / 100;
+  const total = subtotal - discountAmount + tax;
+  async function save(event: React.FormEvent) { event.preventDefault(); setBusy(true); setError(""); try { await request(mode === "create" ? "/invoices" : `/invoices/${invoice?.id}`, { method: mode === "create" ? "POST" : "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ customerId: customerId || null, jobId: jobId || null, claimId: claimId || null, walkInCustomerName: customerId ? null : walkInCustomerName, walkInCustomerAddress: customerId ? null : walkInCustomerAddress, walkInCustomerPhone: customerId ? null : walkInCustomerPhone, walkInCustomerEmail: customerId ? null : walkInCustomerEmail, walkInVehicleYear: walkInVehicleYear ? Number(walkInVehicleYear) : null, walkInVehicleMake, walkInVehicleModel, walkInVehicleTrim, walkInVehicleVin, walkInVehicleLicense, walkInVehicleState, invoiceNumber: number || undefined, issueDate, dueDate: dueDate || undefined, taxRate: Number(taxRate || 0), discountType: discountAmount > 0 ? discountType : null, discountValue: Number(discountValue || 0), lineItems: lines.map((line) => ({ description: line.description, quantity: Number(line.quantity), unitPrice: Number(line.unitPrice) })) }) }); await onSaved(); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Unable to save invoice"); } finally { setBusy(false); } }
   async function recordPayment(event: React.FormEvent) { event.preventDefault(); if (!invoice) return; setBusy(true); setError(""); try { await request(`/invoices/${invoice.id}/payments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payment, amount: Number(payment.amount) }) }); await onSaved(); } catch (paymentError) { setError(paymentError instanceof Error ? paymentError.message : "Unable to record payment"); } finally { setBusy(false); } }
   async function deleteInvoice() { if (!invoice || !window.confirm(`Delete invoice ${invoice.invoiceNumber}? This cannot be undone.`)) return; setBusy(true); setError(""); try { await request(`/invoices/${invoice.id}`, { method: "DELETE" }); await onSaved(); } catch (deleteError) { setError(deleteError instanceof Error ? deleteError.message : "Unable to delete invoice"); } finally { setBusy(false); } }
   function updateLine(index: number, key: keyof FormLine, value: string) { setLines(lines.map((line, lineIndex) => lineIndex === index ? { ...line, [key]: value } : line)); }
@@ -135,6 +138,7 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
     lines: lines.map((line) => ({ description: line.description, quantity: Number(line.quantity || 0), unitPrice: Number(line.unitPrice || 0) })),
     taxRate: Number(taxRate || 0),
     subtotal,
+    discount: discountAmount,
     tax,
     total,
     amountPaid: invoice ? invoice.amountPaid : undefined,
@@ -200,7 +204,7 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
                       {availableClaims.map((claim) => <option value={claim.id} key={claim.id}>{claim.claimNumber || "Unnumbered claim"}</option>)}
                     </select>
                   </label>
-                  <label>Tax rate (%)<input min="0" step="0.001" type="number" value={taxRate} onChange={(event) => setTaxRate(event.target.value)} /></label>
+                  <label>Tax rate (%)<input min="0" step="0.001" type="number" value={taxRate} onChange={(event) => setTaxRate(event.target.value)} /></label><label>Discount<select value={discountType} onChange={(event) => setDiscountType(event.target.value as "amount" | "percent")}><option value="amount">$ amount</option><option value="percent">% of subtotal</option></select></label><label>Discount value<input min="0" step="0.01" type="number" value={discountValue} onChange={(event) => setDiscountValue(event.target.value)} /></label>
                 </div>
                 {!customerId && <>
                   <div className="records-section-heading"><h4>Walk-in customer details</h4></div>
@@ -232,7 +236,7 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
                   </div>
                   <div className="invoice-totals">
                     <span>Subtotal <b>{money(subtotal)}</b></span>
-                    <span>Sales tax <b>{money(tax)}</b></span>
+                    {discountAmount > 0 && <span>Discount <b>-{money(discountAmount)}</b></span>}<span>Sales tax <b>{money(tax)}</b></span>
                     <strong><span>Total cost of repairs</span><b>{money(total)}</b></strong>
                   </div>
                 </div>
