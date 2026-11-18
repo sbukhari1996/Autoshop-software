@@ -67,7 +67,7 @@ function InvoiceModal({ invoice, mode, customers, jobs, claims, request, apiUrl,
   const [dueDate, setDueDate] = React.useState(invoice?.dueDate?.slice(0, 10) || today());
   const [discountType, setDiscountType] = React.useState<"amount" | "percent">(invoice?.discountType === "percent" ? "percent" : "amount");
   const [discountValue, setDiscountValue] = React.useState(String(invoice?.discountValue ?? 0));
-  const [taxRate, setTaxRate] = React.useState(invoice ? String(Number((invoice.tax * 100 / Math.max(invoice.subtotal, 0.01)).toFixed(3))) : "8.875");
+  const [taxRate, setTaxRate] = React.useState(invoice ? String(Number((invoice.tax * 100 / Math.max(invoice.subtotal - (invoice.discountAmount ?? 0), 0.01)).toFixed(3))) : "8.875");
   const [lines, setLines] = React.useState<FormLine[]>(invoice?.lineItems.map((line) => ({ description: line.description, quantity: String(line.quantity), unitPrice: String(line.unitPrice) })) || [freshLine()]);
   const [payment, setPayment] = React.useState({ method: "cash", amount: "", date: today(), notes: "" });
   const [busy, setBusy] = React.useState(false);

@@ -262,6 +262,9 @@ async function createInvoicePdf(invoice: {
   issueDate: Date;
   dueDate: Date | null;
   subtotal: number;
+  discountType: string | null;
+  discountValue: number;
+  discountAmount: number;
   tax: number;
   total: number;
   amountPaid: number;
